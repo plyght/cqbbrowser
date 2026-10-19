@@ -71,6 +71,31 @@ export function roundRect(cx: number, cy: number, w: number, h: number, r: numbe
 
 // ------------------------------------------------------------------ geometry builders
 
+/**
+ * Cheap curvature: an edge factor per vertex from how much its normal leans off the part's flat faces.
+ * `axis` = the extrusion axis (bevel faces tilt toward it); 'box' = second-largest normal component.
+ * Must run before the geometry is transformed. Stored as attribute `wear` (0 flat … 1 edge).
+ */
+export function setWear(g: BufferGeometry, axis: 'x' | 'z' | 'box') {
+  const n = g.attributes.normal as BufferAttribute;
+  const w = new Float32Array(n.count);
+  for (let i = 0; i < n.count; i++) {
+    const a = [Math.abs(n.getX(i)), Math.abs(n.getY(i)), Math.abs(n.getZ(i))];
+    let k: number;
+    if (axis === 'box') {
+      a.sort((p, q) => q - p);
+      k = a[1];
+    } else {
+      const along = axis === 'x' ? a[0] : a[2];
+      const across = axis === 'x' ? Math.hypot(a[1], a[2]) : Math.hypot(a[0], a[1]);
+      k = Math.min(along, across);
+    }
+    w[i] = Math.min(1, Math.max(0, (k - 0.18) * 2.4));
+  }
+  g.setAttribute('wear', new BufferAttribute(w, 1));
+  return g;
+}
+
 const rotSide = new Matrix4().makeRotationY(-Math.PI / 2);
 
 /**
@@ -84,17 +109,18 @@ export function profile(s: Shape, width: number, bevel = 0.001, x = 0, curveSegm
     bevelEnabled: b > 0,
     bevelThickness: b,
     bevelSize: b,
-    bevelSegments: b > 0.0015 ? 2 : 1,
+    bevelSegments: b > 0.004 ? 4 : b > 0.0015 ? 2 : 1,
     curveSegments,
   });
   g.translate(0, 0, -(width - 2 * b) / 2);
+  setWear(g, 'z');
   g.applyMatrix4(rotSide);
   if (x) g.translate(x, 0, 0);
   return g;
 }
 
 /** Cross-section extrusion: `s` drawn in the (x, y) plane, extruded along z from z0 (rear) to z1 (front). */
-export function sweep(s: Shape, z0: number, z1: number, bevel = 0, curveSegments = 5): BufferGeometry {
+export function sweep(s: Shape, z0: number, z1: number, bevel = 0.0005, curveSegments = 5): BufferGeometry {
   const len = Math.abs(z0 - z1);
   const b = Math.min(bevel, len * 0.3);
   const g = new ExtrudeGeometry(s, {
@@ -105,6 +131,7 @@ export function sweep(s: Shape, z0: number, z1: number, bevel = 0, curveSegments
     bevelSegments: 1,
     curveSegments,
   });
+  setWear(g, 'z');
   g.translate(0, 0, Math.min(z0, z1) + b);
   return g;
 }
@@ -151,6 +178,7 @@ export function rbox(
 ): BufferGeometry {
   const rr = Math.min(r, w / 2.2, h / 2.2, d / 2.2);
   const g = rr > 0.0002 ? new RoundedBoxGeometry(w, h, d, 1, rr) : new BoxGeometry(w, h, d);
+  setWear(g, 'box');
   g.translate(x, y, z);
   return g;
 }
@@ -267,6 +295,7 @@ export function mlokPlate(
     bevelSegments: 1,
     curveSegments: 3,
   });
+  setWear(g, 'z');
   // Local: x along length (→ -z), y across, z = thickness (inward → outward).
   const xAxis = new Vector3(0, 0, -1);
   const n = new Vector3(Math.sin(a), Math.cos(a), 0);
@@ -284,13 +313,22 @@ function prep(g: BufferGeometry): BufferGeometry {
   let out = g.index ? g.toNonIndexed() : g;
   if (out === g) out = g.clone();
   for (const name of Object.keys(out.attributes))
-    if (name !== 'position' && name !== 'normal') out.deleteAttribute(name);
+    if (name !== 'position' && name !== 'normal' && name !== 'wear') out.deleteAttribute(name);
   if (!out.attributes.normal) out.computeVertexNormals();
   const tint = (g.userData.tint as [number, number, number] | undefined) ?? [1, 1, 1];
   const n = out.attributes.position.count;
   const col = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) col.set(tint, i * 3);
   out.setAttribute('color', new BufferAttribute(col, 3));
+  const boost = (g.userData.boost as number | undefined) ?? 0;
+  const wear = out.attributes.wear as BufferAttribute | undefined;
+  const aux = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    aux[i * 2] = wear ? wear.getX(i) : 0;
+    aux[i * 2 + 1] = boost;
+  }
+  if (wear) out.deleteAttribute('wear');
+  out.setAttribute('aux', new BufferAttribute(aux, 2));
   return out;
 }
 
@@ -330,6 +368,7 @@ export class Collector {
     const alias = ALIASES.get(m);
     if (alias) {
       g.userData.tint = alias.tint;
+      if (alias.boost) g.userData.boost = alias.boost;
       m = alias.to;
     }
     let b = this.buckets.get(m);

@@ -41,19 +41,19 @@ Legacy keys `ar`, `pdw`, `ak`, `pistol` still work.
 Each part is a `Group` whose origin is the pivot; meshes inside are offset so that rotating or
 translating the group moves the part correctly. Rest pose = identity transform (position = pivot).
 
-| part             | platforms                | pivot / motion                                                                                                                                                                                                    |
-| ---------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mag`            | all                      | **at the model origin** (position 0,0,0) so the controller's `mag.position.y` offsets keep working; use `sockets.magwell` for the hand target. AK/KP-9 mags rock: rotate about the front lug in a child if needed |
-| `chargingHandle` | AR, KP-9 (AK: pivot)     | AR: slides +z from the rear of the upper. KP-9: on the cocking tube, slides +z. AK: same object as the bolt carrier knob                                                                                          |
-| `bolt`           | AK (AR/KP-9: pivot only) | AK carrier + handle, slides +z ≈ 0.09 m. AR/KP-9 bolts are internal (empty pivot)                                                                                                                                 |
-| `slide`          | P-17                     | at origin; slides +z ≈ 0.03 m. Carries the optic, sights, barrel crown and muzzle device; `sockets.optic`/`chargingHandle`/`ejectionPort` and the sight lines are children of it                                  |
-| `trigger`        | all                      | trigger pin; rotate about +x (pull = positive x rotation)                                                                                                                                                         |
-| `safety`         | AR, AK, KP-9             | selector axis (AR/KP-9 left side, rotate about x; AK right-side lever, rotate about x at the rear pivot)                                                                                                          |
-| `magRelease`     | all                      | button / paddle centre                                                                                                                                                                                            |
-| `boltCatch`      | AR, P-17                 | lever pivot (left side)                                                                                                                                                                                           |
-| `dustCover`      | AR                       | hinge rod                                                                                                                                                                                                         |
-| `stock`          | AK                       | fold hinge (vertical axis at the left rear of the receiver); `params.stockFolded` pre-folds it                                                                                                                    |
-| `magnifier`      | with `mag_3x`            | flip hinge on the left (rotate about z, ≈ +90° to flip aside)                                                                                                                                                     |
+| part             | platforms                 | pivot / motion                                                                                                                                                                                                    |
+| ---------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mag`            | all                       | **at the model origin** (position 0,0,0) so the controller's `mag.position.y` offsets keep working; use `sockets.magwell` for the hand target. AK/KP-9 mags rock: rotate about the front lug in a child if needed |
+| `chargingHandle` | AR, KP-9 (AK: pivot)      | AR: slides +z from the rear of the upper. KP-9: on the cocking tube, slides +z. AK: same object as the bolt carrier knob                                                                                          |
+| `bolt`           | AR, AK (KP-9: pivot only) | AR: carrier visible through the open ejection port (the dust cover hangs open), slides +z. AK: carrier + handle, slides +z ≈ 0.09 m                                                                               |
+| `slide`          | P-17                      | at origin; slides +z ≈ 0.03 m. Carries the optic, sights, barrel crown and muzzle device; `sockets.optic`/`chargingHandle`/`ejectionPort` and the sight lines are children of it                                  |
+| `trigger`        | all                       | trigger pin; rotate about +x (pull = positive x rotation)                                                                                                                                                         |
+| `safety`         | AR, AK, KP-9              | selector axis (AR/KP-9 left side, rotate about x; AK right-side lever, rotate about x at the rear pivot)                                                                                                          |
+| `magRelease`     | all                       | button / paddle centre                                                                                                                                                                                            |
+| `boltCatch`      | AR, P-17                  | lever pivot (left side)                                                                                                                                                                                           |
+| `dustCover`      | AR                        | hinge rod                                                                                                                                                                                                         |
+| `stock`          | AK                        | fold hinge (vertical axis at the left rear of the receiver); `params.stockFolded` pre-folds it                                                                                                                    |
+| `magnifier`      | with `mag_3x`             | flip hinge on the left (rotate about z, ≈ +90° to flip aside)                                                                                                                                                     |
 
 **Draw calls.** By default `trigger`, `safety`, `magRelease`, `boltCatch` and `dustCover` are
 _pivot-only_ (their geometry is merged into the static mesh) to keep each weapon at ~8–12 draw calls.
@@ -90,10 +90,17 @@ to use it) and `eyeRelief` (eye position = node + (0, 0, eyeRelief) in node spac
   phosphate & blued steel, bright steel, polymer (stipple normal), wood, bakelite, plum, rubber,
   suppressor finish, lens glass/coating, emissive reticle. Detail comes from generated canvas
   normal/roughness maps with box-projected UVs (constant texel density).
-- Minor materials (slot/bore "dark", rubber, can finish, clear glass) are vertex-colour tints of a base
-  material so they share its draw call.
+- Black anodize is modelled as a near-black satin dielectric (albedo ≈ 0.035, roughness ≈ 0.45);
+  cerakote is matte and desaturated.
+- **Edge wear / highlights:** every extrusion and beveled box gets a per-vertex edge factor from its
+  bevel normals at build time (`setWear` in `geom.ts`). It travels in the `aux` attribute (x = edge,
+  y = stipple boost), and a shared `onBeforeCompile` patch blends the finish toward bare aluminium/steel
+  on those edges. Stippled grip panels (`M.polymerGrip`) use the y channel to strengthen the normal map,
+  so they stay in the polymer draw call.
+- Minor materials (slot/bore "dark", rubber, can finish, clear glass, grip stipple) are vertex-colour
+  tints of a base material so they share its draw call.
 - Static geometry is merged per material; rail teeth and M-LOK plates are merged geometry, not
-  instances. Typical: 8–12 draw calls, 3–20k triangles per configured weapon.
+  instances. Typical: 6–13 draw calls, 4–21k triangles per configured weapon.
 - Metals read without a scene environment because the materials carry a generated studio
   equirect `envMap`; call `setWeaponEnvMap(pmremTexture)` to use the level's environment instead
   (or `null` to fall back to `scene.environment`).
