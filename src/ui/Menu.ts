@@ -5,6 +5,8 @@ import { settings } from '../settings/Settings';
 import { brand, currentPadType, h, hints, navButton, setPadType } from './dom';
 import { getDrills, type DrillInfo, type RunResult } from './drills';
 import { FocusNav, type Screen } from './FocusNav';
+import { LoadoutScreen } from './loadout/LoadoutScreen';
+import { loadouts } from '../loadout';
 import { PlayScreen } from './PlayScreen';
 import { ResultsScreen } from './ResultsScreen';
 import { orderBefore, registerSettings } from './settingsSchema';
@@ -80,7 +82,7 @@ export class Menu {
   readonly settings: SettingsScreen;
   readonly pause: Screen;
   readonly results: ResultsScreen;
-  readonly loadout: Screen;
+  readonly loadout: LoadoutScreen;
   readonly footage: Screen;
   readonly trackpadPrompt: Screen;
   private pauseTitle = h('div', { class: 'pause-drill' });
@@ -112,11 +114,24 @@ export class Menu {
         this.push(this.play);
       },
     });
-    this.loadout = this.placeholder(
-      'Loadout',
-      'Weapon bench',
-      'Rotate the gun, swap parts, see stat deltas, try it on the square range. Arrives with M4.',
-    );
+    this.loadout = new LoadoutScreen({
+      nav: this.nav,
+      back: () => this.pop(),
+      tryIt: () => this.startDrill(undefined),
+    });
+    // Play → loadout quick-pick (◂ ▸ cycles the active loadout, select opens the loadout screen).
+    this.play.loadout = {
+      name: () => loadouts().active().name,
+      cycle: (dir) => {
+        const list = loadouts().list();
+        const i = list.findIndex((l) => l.id === loadouts().activeId);
+        loadouts().setActive(list[(i + dir + list.length) % list.length].id);
+      },
+      open: () => {
+        this.loadout.selectedId = loadouts().activeId;
+        this.push(this.loadout);
+      },
+    };
     this.footage = this.placeholder(
       'Footage',
       'CAM04 archive',
