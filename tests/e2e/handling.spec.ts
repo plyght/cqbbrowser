@@ -139,3 +139,68 @@ test('handling: look down at carrier and legs, lean, pistol', async ({ page }) =
   await shot(page, 'pistol-ads');
   expect(errors).toEqual([]);
 });
+
+/** At full ADS: where the camera (sight eye through the reticle) and the bullet meet at distance `d`. */
+async function zeroError(page: Page) {
+  return page.evaluate(() => {
+    const g = (window as any).__sb;
+    const w = g.weapons;
+    const cam = g.ctx.camera;
+    const o = cam.position.clone();
+    const d = o.clone().set(0, 0, -1).applyQuaternion(cam.quaternion);
+    const r = w.shotRay();
+    const mo = r.origin.clone();
+    const md = r.dir.clone();
+    const sl = w.sightLine;
+    const out: Record<string, number | string> = {
+      mode: sl?.mode.id ?? 'none',
+      sightHeight: sl?.mode.sightHeight ?? 0,
+      blend: w.adsBlend,
+    };
+    for (const D of [10, 25]) {
+      const P = o.clone().addScaledVector(d, D);
+      const t = P.clone().sub(mo).dot(d) / md.dot(d);
+      const Q = mo.clone().addScaledVector(md, t);
+      out['err' + D] = P.distanceTo(Q);
+    }
+    return out;
+  });
+}
+
+test('handling: ADS sight pictures per optic, zeroed bore', async ({ page }) => {
+  const errors = await start(page);
+  const cases: [number, string][] = [
+    [0, 'sb16'],
+    [0, 'sb16_cqb'],
+    [0, 'sb16_lpvo'],
+    [1, 'p17_dot'],
+    [1, 'p17_std'],
+  ];
+  for (const [slot, preset] of cases) {
+    await page.evaluate(
+      ([slot, preset]) => {
+        const w = (window as any).__sb.weapons;
+        if (preset !== 'sb16') w.setPreset(slot, preset);
+        if (w.loadout[slot] !== w.equipped) w.equipNow(slot);
+      },
+      [slot, preset] as const,
+    );
+    const modes = await page.evaluate(
+      () => (window as any).__sb.weapons.equipped.model.sightLines.length as number,
+    );
+    for (let m = 0; m < modes; m++) {
+      await page.evaluate((m) => ((window as any).__sb.weapons.aimIndex = m), m);
+      await sim(page, 50, { down: ['aim'] });
+      const z = await zeroError(page);
+      console.log(preset, JSON.stringify(z));
+      await shot(page, `ads-${preset}-${z.mode}`);
+      expect(z.blend).toBeGreaterThan(0.999);
+      // Exactly on at the zero; up close the bullet hits the mechanical offset (sight height) below.
+      expect(z.err25 as number).toBeLessThan(0.02);
+      const expected10 = (z.sightHeight as number) * (1 - 10 / 25);
+      expect(Math.abs((z.err10 as number) - expected10)).toBeLessThan(0.02);
+      await sim(page, 30);
+    }
+  }
+  expect(errors).toEqual([]);
+});

@@ -31,9 +31,10 @@ import { HAND_POSES, blendPose, POSE_SIZE } from '../anim/handPoses';
 import { ease } from '../anim/tracks';
 import { BodyRig } from '../body/BodyRig';
 import { DroppedMags } from '../body/DroppedMags';
-import { WEAPONS, type FireMode, type WeaponDef } from './defs';
+import { applyBuild, PRESETS } from './attachments';
+import { BASE_WEAPONS, WEAPONS, type FireMode, type WeaponDef } from './defs';
 import { Magazines } from './Magazines';
-import { buildModel, type WeaponModel } from './models';
+import { buildModel, type SightLine, type WeaponModel } from './models';
 
 /** Kept for HUD/tests: what the hands are busy with. */
 export type ReloadState = { kind: 'idle' | 'reload' | 'check' | 'camFix' | 'switch' };
@@ -83,7 +84,7 @@ const CFG: Record<WeaponClass, ClassCfg> = {
   rifle: {
     holds: {
       high: { p: [0.03, -0.235, -0.31], r: [-0.02, 0, 0] },
-      ads: { p: [-0.01, -0.04, -0.35], r: [0, 0, 0] },
+      ads: { p: [0.03, 0.02, -0.28], r: [0, 0, 0] },
       low: { p: [0.03, -0.28, -0.28], r: [-0.55, 0.05, 0.06] },
       compressed: { p: [0.04, -0.2, -0.22], r: [-0.12, 0, 0] },
       sprint: { p: [0.02, -0.25, -0.25], r: [-0.75, 0.55, -0.5] },
@@ -116,7 +117,7 @@ const CFG: Record<WeaponClass, ClassCfg> = {
   pistol: {
     holds: {
       high: { p: [-0.055, -0.14, -0.55], r: [0, 0, 0] },
-      ads: { p: [-0.068, -0.07, -0.57], r: [0, 0, 0] },
+      ads: { p: [-0.07, -0.02, -0.55], r: [0, 0, 0] },
       low: { p: [-0.05, -0.25, -0.47], r: [-0.6, 0, 0] },
       compressed: { p: [-0.01, -0.17, -0.3], r: [-0.1, 0, 0] },
       sprint: { p: [0.06, -0.28, -0.3], r: [-1.0, 0.15, 0] },
@@ -215,6 +216,8 @@ interface Equipped {
   boltLocked: boolean;
   /** Muzzle tip in the weapon frame (bullets leave the barrel, not the screen centre). */
   muzzleLocal: Vector3;
+  /** Rear-of-sight point per aim mode, weapon frame. */
+  sightLocal: Vector3[];
   /** Recoil instability → how soon grip readjusts happen. */
   adjustAfter: number;
 }
@@ -362,6 +365,8 @@ export class WeaponController implements System {
     const magGrasp = new Vector3(0, -cfg.graspDepth, 0).applyQuaternion(magRestQ).add(sockets.magwell);
     if (mag) magGrasp.sub(mag.rest).applyQuaternion(magRestQ.clone().invert());
     const instability = clamp((def.recoil.up * 0.6 + def.recoil.side * 0.4) / (def.mass * 0.6), 0, 2);
+    // Sight lines at rest in the weapon frame (immune to slide travel on pistols).
+    const sightLocal = model.sightLines.map((l) => new Vector3().setFromMatrixPosition(l.node.matrixWorld).applyMatrix4(inv));
     const muzzle = model.sockets.muzzle;
     const muzzleLocal = muzzle
       ? new Vector3().setFromMatrixPosition(muzzle.matrixWorld).applyMatrix4(inv)
@@ -384,6 +389,7 @@ export class WeaponController implements System {
       supportQ: basisQuat(cfg.supportBasis),
       boltLocked: false,
       muzzleLocal,
+      sightLocal,
       adjustAfter: Math.max(1, Math.round(5 - instability * 2)),
     };
   }
@@ -399,6 +405,24 @@ export class WeaponController implements System {
     this.stopPlan();
     this.switching = { phase: 'out', t: 0, to: i };
     this.emitBeat(this.equipped.cls === 'pistol' ? 'holster' : 'sling', false);
+  }
+
+  /** Swap a loadout slot for a build preset (e.g. 'sb16_lpvo'); equips it if that slot is in hand. */
+  setPreset(slot: number, presetId: string) {
+    const build = PRESETS[presetId];
+    if (!build) return;
+    const next = this.make(applyBuild(BASE_WEAPONS[build.weapon], build));
+    const wasEquipped = this.loadout[slot] === this.equipped;
+    this.loadout[slot] = next;
+    this.rifle = this.loadout.find((x) => x.cls === 'rifle');
+    this.pistol = this.loadout.find((x) => x.cls === 'pistol');
+    if (wasEquipped) {
+      this.view.remove(this.equipped.model.root);
+      this.equipped = next;
+      this.view.add(next.model.root);
+      this.aimIndex = 0;
+      this.stopPlan();
+    }
   }
 
   /** Fresh mags for a new drill: cancels any hand plan so nothing is mid-swap. */
@@ -417,6 +441,7 @@ export class WeaponController implements System {
     this.view.remove(this.equipped.model.root);
     this.equipped = next;
     this.view.add(next.model.root);
+    this.aimIndex = 0;
     this.stopPlan();
   }
 
@@ -424,7 +449,7 @@ export class WeaponController implements System {
   private lagFreq(): number {
     const d = this.equipped.def;
     if (this.inertia < 0.05) return 60;
-    const adsBoost = 1 + this.ads * 0.35;
+    const adsBoost = 1 + this.adsBlend * 1.6;
     // Build handling (§6.3): half-life h of a critically damped follow → ω = 1.678 / h.
     const h = d.handling?.lagHalfLife;
     const base = h ? 1.678 / h / (2 * Math.PI) : clamp(13 - d.mass * 1.4 - d.length * 4.5, 4, 16);
@@ -462,7 +487,14 @@ export class WeaponController implements System {
     // Pose blends.
     const busy = this.busy || !!this.switching;
     const hd = d.handling ? d.handling.adsTime / 3.3 : 0.06 + d.mass * 0.012;
-    this.ads += ((p.aiming && !busy ? 1 : 0) - this.ads) * damp(hd, dt);
+    // Linear ramp over the build's ADS time; everything reads the eased `adsBlend`.
+    const adsTime = d.handling?.adsTime ?? 0.25 + d.mass * 0.04;
+    const adsWant = p.aiming && !busy ? 1 : 0;
+    this.ads = clamp(this.ads + Math.sign(adsWant - this.ads) * (dt / Math.max(0.08, adsTime)), 0, 1);
+    if (Math.abs(adsWant - this.ads) < 1e-3) this.ads = adsWant;
+    void hd;
+    if (f.pressed.has('aimMode')) this.cycleAimMode();
+    if (f.pressed.has('magnifier')) this.toggleMagnifier();
     this.wSprint += ((p.sprinting && !this.beats.active ? 1 : 0) - this.wSprint) * damp(0.1, dt);
     this.wLow += ((p.ready === 'low' ? 1 : 0) - this.wLow) * damp(0.09, dt);
     this.wComp += ((p.ready === 'compressed' ? 1 : 0) - this.wComp) * damp(0.08, dt);
@@ -486,6 +518,8 @@ export class WeaponController implements System {
 
     // World hold point → aim direction toward the aim target, through the lag springs.
     _v.copy(this.hold).applyMatrix4(p.torso.matrixWorld);
+    // At ADS the sight line (not the grip) is what converges on the aim point.
+    if (this.adsBlend > 0) _v.lerp(this.eyeWorld, this.adsBlend);
     _v2.copy(this.aimTarget).sub(_v);
     const wantYaw = Math.atan2(-_v2.x, -_v2.z);
     const wantPitch = Math.atan2(_v2.y, Math.hypot(_v2.x, _v2.z));
@@ -536,6 +570,7 @@ export class WeaponController implements System {
     this.updatePlan(dt);
     this.updateParts(dt);
     this.updateHands(dt);
+    this.updateAdsCamera();
     this.updateFire(dt, f.down.has('fire'));
     this.drops.update();
   }
@@ -555,7 +590,7 @@ export class WeaponController implements System {
     this.mixHold(this.wComp, H.compressed);
     this.mixHold(this.wLow, H.low);
     this.mixHold(this.wSprint, H.sprint);
-    this.mixHold(this.ads, H.ads);
+    this.mixHold(this.adsBlend, H.ads);
     // Crouched: slightly lower and tighter; drifting hold (never exactly the same place).
     h.y -= p.crouch * 0.015;
     h.z += p.crouch * 0.02;
@@ -590,6 +625,9 @@ export class WeaponController implements System {
     h.y += this.swayY.value;
     // Looking well down the arms don't follow the eyes all the way: the gun rides up in the frame,
     // uncovering the boots.
+    // Offset dot: cant the weapon so the 45° sight comes on top.
+    const sl = this.sightLine;
+    if (sl) r.z -= sl.mode.roll * this.adsBlend;
     const lift = Math.max(0, -p.pitch - 0.7) * 0.6;
     if (lift > 0) h.sub(CHEST_MOUNT).applyAxisAngle(X_AXIS, -lift).add(CHEST_MOUNT);
   }
@@ -607,6 +645,87 @@ export class WeaponController implements System {
     this.view.quaternion.multiply(_q.setFromEuler(_e));
     this.view.position.copy(this.hold).applyMatrix4(p.torso.matrixWorld);
     this.view.updateMatrixWorld(true);
+  }
+
+  /** Selected aim mode per weapon (index into `model.sightLines`). */
+  aimIndex = 0;
+  /** Zero distance (m): the bore converges on the sight line here. */
+  static ZERO = 25;
+  /** Sight eye point (world), refreshed every frame. */
+  readonly eyeWorld = new Vector3();
+  private baseFov = 0;
+  private lastFov = 0;
+
+  /** 0..1 eased ADS blend (camera chest → sight line). Read by HUD / post. */
+  get adsBlend(): number {
+    return ease('io', this.ads);
+  }
+
+  get sightLine(): SightLine | undefined {
+    const lines = this.equipped.model.sightLines;
+    return lines[Math.min(this.aimIndex, lines.length - 1)];
+  }
+
+  private cycleAimMode() {
+    const n = this.equipped.model.sightLines.length;
+    if (n > 1) this.aimIndex = (this.aimIndex + 1) % n;
+  }
+
+  private toggleMagnifier() {
+    const lines = this.equipped.model.sightLines;
+    const cur = this.sightLine;
+    const mag = lines.findIndex((l) => l.mode.id === 'magnified');
+    if (mag < 0) return;
+    this.aimIndex = cur?.mode.id === 'magnified' ? Math.max(0, lines.findIndex((l) => l.mode.id === 'primary')) : mag;
+  }
+
+  /** Eye distance behind the sight's rear: 6–9 cm on long guns, arm-ish length on pistols. */
+  private eyeDistance(sl: SightLine): number {
+    return this.equipped.cls === 'pistol' ? 0.3 : clamp(sl.mode.eyeRelief || 0.075, 0.06, 0.09);
+  }
+
+  /** Sight node world position/eye and the camera blend toward it (PRD §6.3.5, ref frame_06). */
+  private updateAdsCamera() {
+    const sl = this.sightLine;
+    const cam = this.ctx.camera;
+    if (!this.baseFov || Math.abs(cam.fov - this.lastFov) > 1e-3) this.baseFov = cam.fov;
+    if (!sl) return;
+    const i = Math.min(this.aimIndex, this.equipped.sightLocal.length - 1);
+    this.eyeWorld.copy(this.equipped.sightLocal[i]);
+    this.eyeWorld.z += this.eyeDistance(sl);
+    this.eyeWorld.applyMatrix4(this.view.matrixWorld);
+    const k = this.adsBlend;
+    let fov = this.baseFov;
+    if (k > 1e-4) {
+      cam.position.lerp(this.eyeWorld, k);
+      // The camera rides the weapon (it rolls with an offset-dot cant; recoil moves sight + view together).
+      cam.quaternion.slerp(this.view.quaternion, k);
+      cam.updateMatrixWorld();
+      const mag = Math.max(1, sl.mode.magnification[0]);
+      const adsFov = clamp((2 * Math.atan(Math.tan((75 * Math.PI) / 360) / mag) * 180) / Math.PI, 18, 75);
+      fov = this.baseFov + (Math.min(adsFov, this.baseFov) - this.baseFov) * k;
+    }
+    if (Math.abs(cam.fov - fov) > 1e-3) {
+      cam.fov = fov;
+      cam.updateProjectionMatrix();
+    }
+    this.lastFov = cam.fov;
+  }
+
+  /**
+   * Shot ray: from the muzzle, along the bore — which is zeroed so it crosses the current sight line at
+   * `ZERO` m (mechanical offset shows up close). Returns reused vectors.
+   */
+  shotRay(): { origin: Vector3; dir: Vector3 } {
+    const o = this.muzzleWorld();
+    const sl = this.sightLine;
+    if (!sl) return o;
+    _v3.copy(this.equipped.sightLocal[Math.min(this.aimIndex, this.equipped.sightLocal.length - 1)]);
+    _v3.applyMatrix4(this.view.matrixWorld);
+    _v2.set(0, 0, -1).applyQuaternion(this.view.quaternion);
+    _v3.addScaledVector(_v2, WeaponController.ZERO);
+    o.dir.copy(_v3).sub(o.origin).normalize();
+    return o;
   }
 
   private readonly muzzleOut = { origin: new Vector3(), dir: new Vector3() };
@@ -645,7 +764,7 @@ export class WeaponController implements System {
   private shoot() {
     const e = this.equipped;
     const d = e.def;
-    const m = this.muzzleWorld();
+    const m = this.shotRay();
     this.ctx.bus.emit('shot', {
       weaponId: d.id,
       origin: m.origin.clone(),
