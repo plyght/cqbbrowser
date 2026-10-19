@@ -226,7 +226,7 @@ export class Player implements System {
 
     const f = this.ctx.input.frame;
     this.yaw -= f.look.yaw;
-    this.pitch = clamp(this.pitch + f.look.pitch, -1.45, 1.45);
+    this.pitch = clamp(this.pitch + f.look.pitch + this.applyViewRecoil(dt), -1.45, 1.45);
 
     const leanTarget =
       clamp((f.down.has('leanRight') ? 1 : 0) - (f.down.has('leanLeft') ? 1 : 0) + f.leanAxis, -1, 1) *
@@ -397,6 +397,44 @@ export class Player implements System {
    * Recoil / impact impulse into the body-mounted camera: pitch (+ = up), yaw, roll (rad/s) and a rearward
    * chest shove (m/s). Recoil is normalised to the default camera-shake setting and never drops below 35%.
    */
+  /**
+   * Recoil that moves where you are *looking* (muzzle rise the shooter must pull back down), unlike `kick`,
+   * which only shakes the chest camera. Each shot's rise is fed in over ~45 ms; when the string ends, part of
+   * it (`recover`) drifts back on its own, like a shooter's natural return to the point of aim.
+   */
+  viewRecoil(pitch: number, yaw: number, recover = 0.55) {
+    this.vrPending.p += pitch;
+    this.vrPending.y += yaw;
+    this.vrDebt.p += pitch * recover;
+    this.vrDebt.y += yaw * recover;
+    this.vrSince = 0;
+  }
+
+  private vrPending = { p: 0, y: 0 };
+  private vrDebt = { p: 0, y: 0 };
+  private vrSince = 10;
+
+  /** Returns this frame's pitch delta from view recoil; also applies the yaw part directly. */
+  private applyViewRecoil(dt: number): number {
+    const k = damp(0.015, dt);
+    let dp = this.vrPending.p * k;
+    const dy = this.vrPending.y * k;
+    this.vrPending.p -= dp;
+    this.vrPending.y -= dy;
+    this.vrSince += dt;
+    let ry = 0;
+    if (this.vrSince > 0.12) {
+      const r = damp(0.12, dt);
+      const rp = this.vrDebt.p * r;
+      ry = this.vrDebt.y * r;
+      this.vrDebt.p -= rp;
+      this.vrDebt.y -= ry;
+      dp -= rp;
+    }
+    this.yaw -= dy - ry;
+    return dp;
+  }
+
   kick(pitch: number, yaw: number, roll: number, shove = 0) {
     const s = clamp(this.tuning.cameraShake / DEFAULT_TUNING.cameraShake, 0.35, 1.5);
     this.camPitchJolt.impulse(pitch * s);
