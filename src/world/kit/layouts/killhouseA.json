@@ -1,0 +1,50 @@
+{
+  "id": "khA",
+  "name": "Kill House A",
+  "wallHeight": 2.4,
+  "wallThickness": 0.115,
+  "rooms": [
+    { "id": "H1", "name": "Entry hall", "kind": "hall", "min": [7.4, 6], "max": [8.6, 12] },
+    { "id": "H2", "name": "Cross hall (T)", "kind": "hall", "min": [0, 4.8], "max": [16, 6] },
+    { "id": "R1", "name": "Room 1 (center-fed)", "min": [0, 6], "max": [7.4, 12] },
+    { "id": "R2", "name": "Room 2 (corner-fed)", "min": [8.6, 6], "max": [16, 12] },
+    { "id": "R3", "name": "Room 3 (closed door)", "min": [0, 0], "max": [9, 4.8] },
+    { "id": "R4", "name": "Room 4 (exit)", "min": [9, 0], "max": [16, 4.8] }
+  ],
+  "walls": [
+    { "a": [0, 0], "b": [16, 0], "exterior": true },
+    { "a": [0, 12], "b": [16, 12], "exterior": true },
+    { "a": [0, 0], "b": [0, 12], "exterior": true },
+    { "a": [16, 0], "b": [16, 12], "exterior": true },
+    { "a": [0, 4.8], "b": [16, 4.8] },
+    { "a": [0, 6], "b": [16, 6] },
+    { "a": [7.4, 6], "b": [7.4, 12] },
+    { "a": [8.6, 6], "b": [8.6, 12] },
+    { "a": [9, 0], "b": [9, 4.8] }
+  ],
+  "openings": [
+    { "id": "D0", "at": [8, 12], "kind": "door", "door": { "hinge": "min", "swing": "-", "open": 0 } },
+    { "id": "T1", "at": [8, 6], "kind": "opening", "width": 1.085 },
+    { "id": "D1", "at": [3.7, 6], "kind": "door", "door": { "hinge": "max", "swing": "+", "open": 1 } },
+    { "id": "D2", "at": [9.2, 6], "kind": "door", "door": { "hinge": "min", "swing": "+", "open": 0.35 } },
+    { "id": "D3", "at": [4.5, 4.8], "kind": "door", "door": { "hinge": "min", "swing": "-", "open": 0 } },
+    { "id": "O4", "at": [12.5, 4.8], "kind": "opening", "width": 0.9 },
+    { "id": "D5", "at": [16, 2.4], "kind": "door", "door": { "hinge": "min", "swing": "+", "open": 0 } }
+  ],
+  "targets": [
+    { "id": "t0", "at": [1.0, 10.9], "face": [3.7, 6] },
+    { "id": "t1", "at": [6.3, 11.2], "face": [3.7, 6] },
+    { "id": "t2", "at": [0.7, 6.8], "face": [3.7, 8] },
+    { "id": "t3", "at": [15.1, 11.0], "face": [9.2, 6] },
+    { "id": "t4", "at": [12.2, 11.3], "face": [9.2, 6] },
+    { "id": "t5", "at": [15.3, 6.8], "face": [9.2, 7] },
+    { "id": "t6", "at": [0.7, 5.4], "face": [8, 5.4] },
+    { "id": "t7", "at": [1.0, 0.8], "face": [4.5, 4.8] },
+    { "id": "t8", "at": [8.2, 0.8], "face": [4.5, 4.8] },
+    { "id": "t9", "at": [15.2, 0.8], "face": [12.5, 4.8] },
+    { "id": "t10", "at": [10.0, 1.2], "face": [12.5, 4.8] }
+  ],
+  "start": { "at": [8, 14.2], "yaw": 0 },
+  "finish": { "min": [16.3, 0.6], "max": [19.5, 4.2] },
+  "catwalk": { "a": [-1.5, 5.4], "b": [16, 5.4], "width": 1.3, "height": 2.44 }
+}

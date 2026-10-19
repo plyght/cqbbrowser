@@ -1,0 +1,284 @@
+import { Matrix4, Vector3 } from 'three';
+import { PaperTarget, type TargetEnv } from '../targets';
+import { groundGeo } from '../geo';
+import { Door } from './Door';
+import {
+  assignRoles,
+  deriveRoomGraph,
+  DOOR_H,
+  DOOR_W,
+  wallAxis,
+  wallOf,
+  wallPieces,
+  type Layout,
+  type RoomGraph,
+} from './layout';
+
+const STUD = { w: 0.038, d: 0.089 };
+const SPACING = 0.406; // 16" on centre
+const PLY = 0.012;
+
+/**
+ * Builds a plywood shoot house from a JSON layout: 2x4-framed walls (studs exposed on the outside of
+ * exterior walls), framed openings, physics doors, an instructor catwalk, paper threats/no-shoots,
+ * and the derived room/portal graph for audio.
+ */
+export class KillHouse {
+  readonly doors: Door[] = [];
+  readonly targets: PaperTarget[] = [];
+  readonly graph: RoomGraph;
+  readonly start: Vector3;
+  readonly startYaw: number;
+  readonly finish: { min: Vector3; max: Vector3 };
+
+  constructor(
+    env: TargetEnv,
+    readonly layout: Layout,
+    readonly origin: Vector3,
+  ) {
+    const { batch, mats, ctx } = env;
+    const o = origin;
+    const H = layout.wallHeight;
+    const t = layout.wallThickness;
+    const at = (x: number, z: number) => new Vector3(o.x + x, o.y, o.z + z);
+
+    // Bounds + floor slab.
+    const xs = layout.rooms.flatMap((r) => [r.min[0], r.max[0]]);
+    const zs = layout.rooms.flatMap((r) => [r.min[1], r.max[1]]);
+    const minX = Math.min(...xs),
+      maxX = Math.max(...xs),
+      minZ = Math.min(...zs),
+      maxZ = Math.max(...zs);
+    const pad = 1.2;
+    const fw = maxX - minX + pad * 2,
+      fd = maxZ - minZ + pad * 2;
+    const fc = at((minX + maxX) / 2, (minZ + maxZ) / 2);
+    batch.add(groundGeo(fw, fd), mats.concreteDusty, new Matrix4().makeTranslation(fc.x, 0.012, fc.z));
+    ctx.physics.box(
+      { x: fc.x, y: 0.006, z: fc.z },
+      { x: fw / 2, y: 0.006, z: fd / 2 },
+      { surface: 'concrete_dusty' },
+    );
+
+    // Walls.
+    const top = STUD.w; // double top plate reads as one 2x4 cap
+    for (const p of wallPieces(layout)) {
+      const c = at(p.x, p.z);
+      // Collider for the whole piece (plywood, rounds go through).
+      ctx.physics.box(
+        { x: c.x, y: p.y + p.h / 2, z: c.z },
+        { x: p.sx / 2, y: p.h / 2, z: p.sz / 2 },
+        { surface: 'plywood', penetrable: p.exterior ? PLY : PLY * 2 },
+      );
+      const len = p.axis === 'x' ? p.sx : p.sz;
+      const sizeAlong = (l: number, across: number): [number, number] =>
+        p.axis === 'x' ? [l, across] : [across, l];
+      const reachesTop = p.y + p.h >= H - 1e-3;
+      const plyH = reachesTop ? p.h - top : p.h;
+      if (p.exterior) {
+        // Sheathing on the inside face only; studs + plates on the outside.
+        const inOff = -p.outSign * (t / 2 - PLY / 2);
+        const pc = p.axis === 'x' ? at(p.x, p.z + inOff) : at(p.x + inOff, p.z);
+        const [sx, sz] = sizeAlong(len, PLY);
+        batch.box(mats.plywood, pc.x, p.y, pc.z, sx, plyH, sz, { cast: true });
+        const studOff = p.outSign * (t / 2 - STUD.d / 2);
+        const n = Math.max(1, Math.round(len / SPACING));
+        for (let i = 0; i <= n; i++) {
+          const along = -len / 2 + STUD.w / 2 + (i / n) * (len - STUD.w);
+          const sx2 = p.axis === 'x' ? p.x + along : p.x + studOff;
+          const sz2 = p.axis === 'x' ? p.z + studOff : p.z + along;
+          const s = at(sx2, sz2);
+          const [w, d] = sizeAlong(STUD.w, STUD.d);
+          batch.box(mats.lumber, s.x, p.y, s.z, w, p.h - (reachesTop ? top : 0), d);
+        }
+        if (p.y === 0) {
+          const bp = p.axis === 'x' ? at(p.x, p.z + studOff) : at(p.x + studOff, p.z);
+          const [w, d] = sizeAlong(len, STUD.d);
+          batch.box(mats.lumber, bp.x, 0, bp.z, w, STUD.w, d);
+        }
+      } else {
+        const [sx, sz] = sizeAlong(len, t);
+        batch.box(mats.plywood, c.x, p.y, c.z, sx, plyH, sz, { cast: true });
+      }
+      if (reachesTop) {
+        const [sx, sz] = sizeAlong(len, t + 0.004);
+        batch.box(mats.lumber, c.x, H - top, c.z, sx, top, sz, { cast: true });
+      }
+    }
+
+    // Openings: jamb casings + doors.
+    for (const op of layout.openings) {
+      const w = wallOf(layout, op.at);
+      if (!w) continue;
+      const ax = wallAxis(w);
+      const width = op.width ?? DOOR_W;
+      const height = op.height ?? DOOR_H;
+      const c = at(op.at[0], op.at[1]);
+      const along = ax === 'x' ? new Vector3(1, 0, 0) : new Vector3(0, 0, 1);
+      const normal = ax === 'x' ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0);
+      const jd = t + 0.02;
+      for (const s of [-1, 1]) {
+        const j = c.clone().addScaledVector(along, s * (width / 2 - 0.0095));
+        const [sx, sz] = ax === 'x' ? [0.019, jd] : [jd, 0.019];
+        batch.box(mats.lumber, j.x, 0, j.z, sx, height, sz);
+      }
+      if (height < H - 0.01) {
+        const [sx, sz] = ax === 'x' ? [width, jd] : [jd, width];
+        batch.box(mats.lumber, c.x, height - 0.019, c.z, sx, 0.019, sz);
+      }
+      if (op.kind !== 'door' || !op.door) continue;
+      const d = op.door;
+      const hingeSign = d.hinge === 'min' ? -1 : 1;
+      const swingN = d.swing === '+' ? 1 : -1;
+      const hinge = c
+        .clone()
+        .addScaledVector(along, hingeSign * (width / 2 - 0.025))
+        .addScaledVector(normal, swingN * (t / 2 - 0.02));
+      // Local +x points from hinge to latch.
+      const dirX = along.clone().multiplyScalar(-hingeSign);
+      const yaw = Math.atan2(-dirX.z, dirX.x);
+      // Local +z in world for this yaw: (sin yaw, 0, cos yaw).
+      const localZ = new Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      const swing = (Math.sign(localZ.dot(normal) * swingN) || 1) as 1 | -1;
+      const door = new Door(ctx, mats, env.parent, {
+        id: op.id,
+        hinge,
+        yaw,
+        swing,
+        width: width - 0.05,
+        height,
+        open: d.open,
+      });
+      this.doors.push(door);
+    }
+
+    // Instructor catwalk on top of the walls + stairs at the open end.
+    if (layout.catwalk) {
+      const cw = layout.catwalk;
+      const a = at(cw.a[0], cw.a[1]),
+        b = at(cw.b[0], cw.b[1]);
+      const len = a.distanceTo(b);
+      const mid = a.clone().add(b).multiplyScalar(0.5);
+      const alongX = Math.abs(b.x - a.x) > Math.abs(b.z - a.z);
+      const [dx, dz] = alongX ? [len, cw.width] : [cw.width, len];
+      // Deck: 2x6 boards across the walkway with gaps (light falls through into the hall).
+      const boards = Math.floor(len / 0.17);
+      for (let i = 0; i < boards; i++) {
+        const k = -len / 2 + (i + 0.5) * (len / boards);
+        const bx = alongX ? mid.x + k : mid.x,
+          bz = alongX ? mid.z : mid.z + k;
+        batch.box(mats.lumber, bx, cw.height, bz, alongX ? 0.14 : cw.width, 0.038, alongX ? cw.width : 0.14, {
+          cast: true,
+        });
+      }
+      // Joists under the boards + walking collider.
+      for (const s of [-0.3, 0.3]) {
+        const jx = alongX ? mid.x : mid.x + s * cw.width,
+          jz = alongX ? mid.z + s * cw.width : mid.z;
+        batch.box(mats.lumber, jx, cw.height - 0.09, jz, alongX ? len : 0.05, 0.09, alongX ? 0.05 : len);
+      }
+      env.ctx.physics.box(
+        { x: mid.x, y: cw.height + 0.02, z: mid.z },
+        { x: dx / 2, y: 0.02, z: dz / 2 },
+        { surface: 'wood' },
+      );
+      // Stringers + rails (galvanised).
+      for (const s of [-1, 1]) {
+        const off = (cw.width / 2) * s;
+        const rx = alongX ? mid.x : mid.x + off,
+          rz = alongX ? mid.z + off : mid.z;
+        const [rsx, rsz] = alongX ? [len, 0.04] : [0.04, len];
+        batch.box(mats.galvanized, rx, cw.height + 1.0, rz, rsx, 0.04, rsz, { cast: true });
+        batch.box(mats.galvanized, rx, cw.height + 0.5, rz, rsx, 0.03, rsz);
+        batch.box(mats.galvanized, rx, cw.height - 0.1, rz, rsx, 0.1, rsz);
+        const n = Math.ceil(len / 1.8);
+        for (let i = 0; i <= n; i++) {
+          const k = -len / 2 + (i / n) * len;
+          const px = alongX ? mid.x + k : rx,
+            pz = alongX ? rz : mid.z + k;
+          batch.box(mats.galvanized, px, cw.height, pz, 0.045, 1.04, 0.045);
+        }
+      }
+      // Support posts where the deck overhangs the walls.
+      const startOut = alongX ? Math.min(a.x, b.x) : Math.min(a.z, b.z);
+      const houseMin = alongX ? o.x + minX : o.z + minZ;
+      if (startOut < houseMin - 0.2) {
+        for (const s of [-1, 1]) {
+          const px = alongX ? startOut + 0.1 : mid.x + s * (cw.width / 2 - 0.05);
+          const pz = alongX ? mid.z + s * (cw.width / 2 - 0.05) : startOut + 0.1;
+          batch.box(mats.galvanized, px, 0, pz, 0.08, cw.height, 0.08, { tag: { surface: 'metal' } });
+        }
+        // Stairs down and away from the house.
+        const run = cw.height * 1.25;
+        const steps = 13;
+        for (let i = 0; i < steps; i++) {
+          const k = (i + 0.5) / steps;
+          const y = cw.height * (1 - k) - 0.03;
+          const off = startOut - run * k;
+          const sx = alongX ? off : mid.x,
+            sz = alongX ? mid.z : off;
+          const [tx, tz] = alongX ? [run / steps + 0.03, 0.9] : [0.9, run / steps + 0.03];
+          batch.box(mats.lumber, sx, y, sz, tx, 0.038, tz);
+        }
+        // Ramp collider under the treads (smooth for the character controller).
+        const ang = Math.atan2(cw.height, run);
+        const rl = Math.hypot(cw.height, run);
+        const rc = alongX
+          ? new Vector3(startOut - run / 2, cw.height / 2 - 0.05, mid.z)
+          : new Vector3(mid.x, cw.height / 2 - 0.05, startOut - run / 2);
+        batch.box(mats.galvanized, rc.x, rc.y - 0.03, rc.z, alongX ? rl : 0.06, 0.06, alongX ? 0.06 : rl, {
+          roll: alongX ? ang : 0,
+          pitch: alongX ? 0 : -ang,
+          tag: { surface: 'metal' },
+        });
+      }
+    }
+
+    // Paper threats / no-shoots.
+    for (const lt of layout.targets) {
+      const p = at(lt.at[0], lt.at[1]);
+      const yaw = Math.atan2(lt.face[0] - lt.at[0], lt.face[1] - lt.at[1]);
+      this.targets.push(new PaperTarget(env, `kh.${lt.id}`, p, yaw, lt.role === 'noshoot', 1.32));
+    }
+
+    this.graph = deriveRoomGraph(layout, [o.x, o.z], layout.id);
+    for (const d of this.doors) d.portal = this.graph.portals.find((p) => p.id === `${layout.id}.${d.id}`);
+    this.start = at(layout.start.at[0], layout.start.at[1]);
+    this.startYaw = layout.start.yaw;
+    this.finish = {
+      min: at(layout.finish.min[0], layout.finish.min[1]),
+      max: at(layout.finish.max[0], layout.finish.max[1]).setY(3),
+    };
+  }
+
+  /** Randomise threat/no-shoot placement for a run. Returns the role map. */
+  reroll(seed: number) {
+    const roles = assignRoles(this.layout.targets, seed, {
+      noShootChance: 0.3,
+      minNoShoots: 2,
+      minThreats: 5,
+    });
+    for (const t of this.targets) t.setNoShoot(roles[t.id.slice(3)] === 'noshoot');
+    return roles;
+  }
+
+  resetDoors() {
+    for (const op of this.layout.openings) {
+      const d = this.doors.find((x) => x.id === op.id);
+      d?.setOpen(op.door?.open ?? 0);
+    }
+  }
+
+  inFinish(p: Vector3) {
+    const f = this.finish;
+    return p.x >= f.min.x && p.x <= f.max.x && p.z >= f.min.z && p.z <= f.max.z;
+  }
+
+  fixedUpdate(dt: number, playerPos: Vector3, playerVel: Vector3) {
+    for (const d of this.doors) d.fixedUpdate(dt, playerPos, playerVel);
+  }
+
+  update() {
+    for (const d of this.doors) d.sync();
+  }
+}

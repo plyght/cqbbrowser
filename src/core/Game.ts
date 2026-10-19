@@ -1,4 +1,4 @@
-import { Box3, Vector3, type Object3D } from 'three';
+import { Vector3 } from 'three';
 import { AudioEngine } from '../audio/AudioEngine';
 import { AimAssist } from '../input/AimAssist';
 import { mouseSettings } from '../input/config';
@@ -15,7 +15,8 @@ import { Hud } from '../ui/Hud';
 import { Menu } from '../ui/Menu';
 import { Ballistics } from '../weapons/Ballistics';
 import { WeaponController } from '../weapons/WeaponController';
-import { Range } from '../world/Range';
+import { Drills } from '../drills/Drills';
+import { World } from '../world/World';
 import { bus } from './bus';
 import type { Context, System } from './Context';
 
@@ -41,7 +42,8 @@ export class Game {
   renderer!: Renderer;
   player!: Player;
   weapons!: WeaponController;
-  range!: Range;
+  world!: World;
+  drills!: Drills;
   audio!: AudioEngine;
   hud!: Hud;
   menu!: Menu;
@@ -81,10 +83,11 @@ export class Game {
     };
     this.player = new Player(this.ctx);
     const ballistics = new Ballistics(this.ctx, () => this.player.rigidBody);
-    this.range = new Range(this.ctx, ballistics);
-    this.player.teleport(this.range.spawn.clone(), this.range.spawnYaw);
+    this.world = new World(this.ctx, ballistics, this.player);
+    this.player.teleport(this.world.spawn, this.world.spawnYaw);
     this.weapons = new WeaponController(this.ctx, this.player, ['sb16', 'p17']);
-    this.systems.push(this.player, this.weapons, this.range);
+    this.drills = new Drills(this.ctx, this.world, this.player, () => this.paused);
+    this.systems.push(this.player, this.weapons, this.world, this.drills);
     this.aimAssist.provider = this.aimAssistProvider();
     this.audio = new AudioEngine(bus, this.ctx.camera, { physics, exclude: () => this.player.rigidBody });
     this.hud = new Hud(ui);
@@ -116,23 +119,15 @@ export class Game {
     }
   }
 
-  /**
-   * Aim assist: angle from the weapon aim ray to the nearest standing shootable target.
-   * TODO(world): replace the duck-typed mesh lookup with a `Target.aimPoint()` (and `noShoot`) contract.
-   */
+  /** Aim assist: angle from the weapon aim ray to the nearest standing shootable target in the active facility. */
   private aimAssistProvider() {
-    const box = new Box3();
     const p = new Vector3();
     return () => {
       const { origin, dir } = this.weapons.muzzleWorld();
       let best = Infinity;
-      for (const t of this.range.targets) {
-        const tt = t as typeof t & { noShoot?: boolean; aimPoint?: () => Vector3; mesh?: Object3D };
-        if (t.down || tt.noShoot) continue;
-        if (tt.aimPoint) p.copy(tt.aimPoint());
-        else if (tt.mesh) box.setFromObject(tt.mesh).getCenter(p);
-        else continue;
-        p.sub(origin);
+      for (const t of this.world.list(this.world.active)) {
+        if (t.down || t.noShoot) continue;
+        p.copy(t.aimPoint()).sub(origin);
         if (p.lengthSq() < 0.09) continue;
         best = Math.min(best, dir.angleTo(p));
       }
@@ -152,9 +147,13 @@ export class Game {
     this.menu.show(true);
   }
 
+  /** @deprecated alias for `world` (the old single-range facility). */
+  get range() {
+    return this.world;
+  }
+
   resetDrill() {
-    this.range.reset();
-    this.player.teleport(this.range.spawn.clone(), this.range.spawnYaw);
+    this.drills.restart();
   }
 
   /** When true the rAF loop only renders; tests drive `step()` explicitly. */

@@ -1,13 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Page } from '@playwright/test';
 
-export async function boot(page: Page) {
+export async function boot(page: Page, path = '/') {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
-  await page.goto('/');
+  await page.goto(path);
   await page.waitForFunction(() => document.body.dataset.ready === '1', null, { timeout: 60_000 });
   return errors;
 }
