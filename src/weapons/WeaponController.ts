@@ -62,6 +62,8 @@ export type ReloadState = { kind: 'idle' | 'reload' | 'check' | 'camFix' | 'swit
 export const handlingSettings = settings.ns('gameplay.handling', {
   /** "Weapon inertia" master: 0 = arcade-locked gun, 1 = default, 1.5 = heavy. */
   weaponInertia: 1,
+  /** Recoil strength multiplier on every feel channel (kick, climb, camera, view). */
+  recoil: 1,
   /** Realism preset gate for reload fumbles (§6.7). */
   fumbles: 'rare' as FumbleMode,
 });
@@ -688,7 +690,18 @@ export class WeaponController implements System {
     this.fatigue = clamp(this.fatigue + 0.01 + Math.min(this.shotsInString, 20) * 0.0015, 0, 1);
     // Physical impulse packets (physics/ballistics) × feel gains into the rigid body; the hands and shoulder
     // recover it (§6.3.7). Fatigue and long strings loosen the hold a little.
-    const f = e.feel;
+    const R = Math.max(0, handlingSettings.get().recoil ?? 1);
+    const f0 = e.feel;
+    const f = {
+      ...f0,
+      back: f0.back * R,
+      lever: f0.lever * R,
+      climb: f0.climb * R,
+      camPitch: f0.camPitch * R,
+      camShove: f0.camShove * R,
+      camJitter: f0.camJitter * R,
+      view: f0.view * R,
+    };
     const fat = 1 + this.fatigue * 0.3;
     const ramp = 1 + Math.min(this.shotsInString, 8) * 0.04;
     const sgn = this.rand() - 0.5;
@@ -709,6 +722,12 @@ export class WeaponController implements System {
       f.camShove,
     );
     this.fovPunch.impulse(f.fov * (1 - this.adsBlend * 0.5));
+    // Muzzle rise that moves the view itself; stacks over a string (ramp), part returns on its own.
+    this.player.viewRecoil(
+      f.view * ramp * (0.85 + this.rand() * 0.3),
+      f.view * sgn * d.recoil.side * 0.9,
+      f.viewRecover,
+    );
   }
 
   /** A string of fire ended: maybe readjust the grip (less stable weapons readjust sooner). */

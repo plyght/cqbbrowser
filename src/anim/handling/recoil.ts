@@ -38,19 +38,24 @@ export interface RecoilFeel {
   /** Aim-point climb per shot (rad) and its recovery half-life (s). */
   climb: number;
   climbHalfLife: number;
+  /** View (look direction) rise per shot, rad, and the share that returns on its own after the string. */
+  view: number;
+  viewRecover: number;
   /** Free-recoil velocity of the gun (m/s): the "how hard" number everything scales from. */
   velocity: number;
 }
 
 /** Global feel gains (see header). */
 export const FEEL = {
-  back: 1.6,
-  lever: 0.15,
-  side: 0.016,
-  cam: 0.42,
-  shove: 0.11,
-  fovDegPerV: 1.4,
-  climb: 0.005,
+  back: 2.6,
+  lever: 0.3,
+  side: 0.03,
+  cam: 1.35,
+  shove: 0.22,
+  fovDegPerV: 1.6,
+  climb: 0.009,
+  /** View climb per shot (rad) for an SB-16-class carbine: moves where you look; you pull it back down. */
+  view: 0.014,
 };
 
 const cache = new WeakMap<WeaponDef, { profile: RecoilProfile; feel: RecoilFeel }>();
@@ -74,6 +79,8 @@ export function recoilFor(def: WeaponDef): { profile: RecoilProfile; feel: Recoi
     fov: (FEEL.fovDegPerV * Math.min(V, 2.2) * (pistol ? 0.6 : 1)) / 0.016,
     climb: FEEL.climb * up * Math.min(1.6, V / 1.36),
     climbHalfLife: pistol ? 0.12 : 0.16,
+    view: FEEL.view * up * Math.min(1.8, V / 1.36) * (pistol ? 0.8 : 1),
+    viewRecover: pistol ? 0.75 : 0.55,
     velocity: V,
   };
   r = { profile, feel };
