@@ -63,6 +63,8 @@ export interface HandKey {
   at: string;
   off: V3;
   w: number;
+  /** Extra hand rotation about the weapon's axes (XYZ euler, rad), weighted like the target. */
+  turn?: V3;
 }
 
 export interface Clip {

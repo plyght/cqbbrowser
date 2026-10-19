@@ -126,22 +126,22 @@ function rifle(o: {
     magCheck: {
       // Grip the mag, pull it a few cm and roll the gun toward the eye; hold; push back and seat.
       segs: [
-        { clip: 'ak.reloadTactical', t0: 0, t1: 0.66 },
+        { clip: 'ak.reloadTactical', t0: 0, t1: 0.62 },
         { hold: 0.9 },
-        { clip: 'ak.reloadTactical', t0: 0.66, t1: 0.3 },
+        { clip: 'ak.reloadTactical', t0: 0.62, t1: 0.3 },
         { blend: 0.3 },
         { clip: 'ak.idle', t0: 0, t1: 0 },
       ],
       speed: o.speed,
       keepEvents: false,
-      events: [ev('magRelease', 0.43), ev('magCheckOut', 0.66), ev('magCheckIn', 1.76), ev('magSeat', 1.8)],
+      events: [ev('magRelease', 0.43), ev('magCheckOut', 0.6), ev('magCheckIn', 1.7), ev('magSeat', 1.74)],
       tilt: [
         { t: 0.25, r: [0, 0, 0] },
-        { t: 0.75, r: [0.15, 0.25, 0.45] },
-        { t: 1.56, r: [0.15, 0.25, 0.45] },
-        { t: 1.9, r: [0, 0, 0] },
+        { t: 0.7, r: [0.2, 0, -0.3] },
+        { t: 1.5, r: [0.2, 0, -0.3] },
+        { t: 1.85, r: [0, 0, 0] },
       ],
-      hold: [0.8, 1.5],
+      hold: [0.75, 1.45],
       magStyle: o.magStyle,
     },
     inspect: { segs: [{ clip: 'ak.inspect' }], speed: o.speed },
@@ -160,11 +160,11 @@ const akEmpty = (speed: number): Recipe => ({
 /** AR empty reload: straight insert, then the support palm slaps the bolt catch (no rack). */
 const arEmpty = (speed: number): Recipe => {
   const slap: HandKey[] = [
-    { t: 1.68, at: 'boltCatch', off: [-0.07, -0.05, 0.1], w: 0 },
-    { t: 1.86, at: 'boltCatch', off: [-0.075, -0.045, 0.085], w: 1 },
-    { t: 1.94, at: 'boltCatch', off: [-0.055, -0.04, 0.08], w: 1 },
-    { t: 2.04, at: 'boltCatch', off: [-0.08, -0.05, 0.09], w: 1 },
-    { t: 2.25, at: 'boltCatch', off: [-0.08, -0.06, 0.1], w: 0 },
+    { t: 1.68, at: 'boltCatch', off: [-0.08, -0.1, 0.1], w: 0 },
+    { t: 1.86, at: 'boltCatch', off: [-0.085, -0.095, 0.085], w: 1 },
+    { t: 1.94, at: 'boltCatch', off: [-0.06, -0.09, 0.08], w: 1 },
+    { t: 2.04, at: 'boltCatch', off: [-0.09, -0.1, 0.09], w: 1 },
+    { t: 2.25, at: 'boltCatch', off: [-0.09, -0.11, 0.1], w: 0 },
   ];
   return {
     segs: [
@@ -219,11 +219,11 @@ const hkEmpty = (speed: number): Recipe => ({
     { t: 0.48, at: 'chargingHandle', off: [-0.07, -0.05, 0.14], w: 1 },
     { t: 0.62, at: 'chargingHandle', off: [-0.08, -0.08, 0.14], w: 0 },
     // Slap: palm comes down hard on the locked handle.
-    { t: 2.08, at: 'chargingHandle', off: [-0.06, 0.02, 0.15], w: 0 },
-    { t: 2.24, at: 'chargingHandle', off: [-0.06, 0.04, 0.14], w: 1 },
-    { t: 2.33, at: 'chargingHandle', off: [-0.055, -0.0, 0.13], w: 1 },
-    { t: 2.44, at: 'chargingHandle', off: [-0.065, -0.02, 0.12], w: 1 },
-    { t: 2.62, at: 'chargingHandle', off: [-0.07, -0.04, 0.1], w: 0 },
+    { t: 2.08, at: 'chargingHandle', off: [-0.1, 0.03, 0.17], w: 0, turn: [0, 0, 0] },
+    { t: 2.24, at: 'chargingHandle', off: [-0.1, 0.05, 0.16], w: 1, turn: [0, 0, -1.3] },
+    { t: 2.33, at: 'chargingHandle', off: [-0.09, 0.0, 0.15], w: 1, turn: [0, 0, -1.3] },
+    { t: 2.44, at: 'chargingHandle', off: [-0.1, -0.02, 0.15], w: 1, turn: [0, 0, -1.1] },
+    { t: 2.62, at: 'chargingHandle', off: [-0.1, -0.06, 0.12], w: 0, turn: [0, 0, 0] },
   ],
   gunW: [
     { t: 1.9, v: 1 },
@@ -279,8 +279,8 @@ function pistol(): Record<ArmsAction, Recipe> {
       ],
       tilt: [
         { t: 0, r: [0, 0, 0] },
-        { t: 0.4, r: [0.1, -0.3, -0.5] },
-        { t: 1.3, r: [0.1, -0.3, -0.5] },
+        { t: 0.4, r: [0.15, -0.15, -0.25] },
+        { t: 1.3, r: [0.15, -0.15, -0.25] },
         { t: 1.6, r: [0, 0, 0] },
       ],
       handL: [

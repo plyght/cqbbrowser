@@ -543,6 +543,7 @@ export class ArmsRig {
     if (wsum > 1) delta.divideScalar(wsum);
     target.add(delta.applyQuaternion(this.gunQ));
     // Authored overrides.
+    let turn: Quaternion | undefined;
     if (keys?.length) {
       const t = this.layer!.t;
       if (t >= keys[0].t && t <= keys[keys.length - 1].t) {
@@ -559,12 +560,25 @@ export class ArmsRig {
           );
           const goal = base.clone().add(off).applyMatrix4(this.gunWorld);
           target.lerp(goal, kw);
+          if (keys.some((k) => k.turn)) {
+            const e = new Euler(
+              keyAt(keys, t, (k) => k.turn?.[0] ?? 0),
+              keyAt(keys, t, (k) => k.turn?.[1] ?? 0),
+              keyAt(keys, t, (k) => k.turn?.[2] ?? 0),
+            );
+            // Rotation about weapon axes, applied on top of the animated hand orientation.
+            turn = this.gunQ
+              .clone()
+              .multiply(new Quaternion().setFromEuler(e))
+              .multiply(this.gunQ.clone().invert());
+          }
         }
       }
     }
-    if (target.distanceToSquared(wrist) < 1e-8) return;
+    if (target.distanceToSquared(wrist) < 1e-8 && !turn) return;
     // Two-bone solve keeping the hand's world rotation and the current bend plane.
     const handQ = hand.getWorldQuaternion(new Quaternion());
+    if (turn) handQ.premultiply(turn);
     const sh = arm.getWorldPosition(new Vector3());
     const el = fore.getWorldPosition(new Vector3());
     const pole = el.clone().add(el.clone().sub(sh.clone().lerp(wrist, 0.5)));
