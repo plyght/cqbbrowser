@@ -224,7 +224,7 @@ test('hud: mag-anchored ammo check, corner toasts, world prompt', async ({ page 
   await steps(page, 1, { look: { yaw: -0.6, pitch: 0.2 } });
   await steps(page, 2, { down: ['switchWeapon'] });
   await steps(page, 2, { down: ['crouch'] });
-  await steps(page, 12);
+  await steps(page, 45); // the arms rig swaps the visible weapon at swapMid (after swapOut)
   await page.waitForTimeout(200);
   await expect(page.locator('.toast-r.show')).toHaveCount(1);
   await page.screenshot({ path: `${dir}/ui-hud-toasts.png` });

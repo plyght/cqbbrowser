@@ -28,6 +28,9 @@ async function start(page: Page, path = '/') {
   const errors = await boot(page, path);
   await page.evaluate(() => ((window as any).__sb.renderer.dynres.enabled = false));
   await play(page);
+  await page
+    .waitForFunction(() => !!(window as any).__sb.weapons.rig, null, { timeout: 60_000 })
+    .catch(() => {});
   await sim(page, 150);
   return errors;
 }

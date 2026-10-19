@@ -57,6 +57,22 @@ import { recoilFor, type RecoilFeel, type RecoilProfile } from '../anim/handling
 import { FOV_SPRING } from '../anim/handling/characterise';
 import { WeaponRigidBody, gainsFor } from '../anim/handling/sim';
 import { ArmsRig } from '../anim/rig/ArmsRig';
+import { solveTwoBone } from '../anim/ik';
+
+const _aq = new Quaternion();
+const _aq2 = new Quaternion();
+const _ao = new Vector3();
+const _aa = new Vector3();
+const _ab = new Vector3();
+/** Rotate `bone` (world) so its child at `childNow` swings to `childGoal`. */
+function aimBone(bone: Object3D, childNow: Vector3, childGoal: Vector3) {
+  bone.getWorldPosition(_ao);
+  _aa.subVectors(childNow, _ao).normalize();
+  _ab.subVectors(childGoal, _ao).normalize();
+  _aq.setFromUnitVectors(_aa, _ab).multiply(bone.getWorldQuaternion(_aq2));
+  bone.parent!.getWorldQuaternion(_aq2).invert();
+  bone.quaternion.copy(_aq2.multiply(_aq));
+}
 
 /** Kept for HUD/tests: what the hands are busy with. */
 export type ReloadState = { kind: 'idle' | 'reload' | 'check' | 'camFix' | 'switch' };
@@ -116,6 +132,10 @@ const X_AXIS = new Vector3(1, 0, 0);
 const CAM_GRIP = new Vector3(-0.07, 0.015, 0.012);
 /** Minimum arm centre-line distance from the chest-cam lens the elbow swivel aims for (m). */
 const ARM_CLEAR = 0.2;
+/** Rig camera fix: wrist target relative to the chest-cam mount (torso frame): just left of and below the lens. */
+const CAM_REACH = new Vector3(-0.05, -0.06, -0.09);
+/** Pistol mag check (rig): support wrist under and behind the dropped mag's base (weapon frame). */
+const MAG_CUP = new Vector3(-0.015, -0.16, 0.07);
 
 // Scratch (no per-frame allocation).
 const _v = new Vector3();
@@ -217,10 +237,18 @@ export class WeaponController implements System {
     ctx.scene.add(this.view, ...this.body.objects);
     // Authored arms rig (src/anim/rig); the procedural arms + beat graph stay as the fallback until it loads
     // (and with `?procarms`).
-    if (typeof location !== 'undefined' && !location.search.includes('procarms'))
+    if (typeof location !== 'undefined' && !location.search.includes('procarms')) {
+      // Keep the viewmodel hidden while the rig loads (no flash of the procedural arms); fall back on failure.
+      this.rigPending = true;
+      this.setProceduralVisible(false);
       ArmsRig.load()
         .then((rig) => this.useRig(rig))
-        .catch((err) => console.warn('ArmsRig unavailable, procedural arms', err));
+        .catch((err) => {
+          console.warn('ArmsRig unavailable, procedural arms', err);
+          this.rigPending = false;
+          this.setProceduralVisible(true);
+        });
+    }
     this.drops = new DroppedMags(ctx);
     this.scope = new ScopeOverlay(ctx.scene);
     if (GripOverlay.enabled()) this.gripOverlay = new GripOverlay(ctx.scene);
@@ -298,8 +326,18 @@ export class WeaponController implements System {
   /** The authored arms rig once loaded (null = procedural fallback). */
   rig: ArmsRig | null = null;
 
+  /** True while ArmsRig.load() is in flight (viewmodel hidden). */
+  rigPending = false;
+
+  private setProceduralVisible(v: boolean) {
+    this.body.left.mesh.visible = this.body.right.mesh.visible = v;
+    this.view.visible = v;
+  }
+
   private useRig(rig: ArmsRig) {
     this.rig = rig;
+    this.rigPending = false;
+    this.view.visible = true;
     this.stopPlan();
     this.switching = null;
     this.ctx.scene.add(rig.root);
@@ -411,6 +449,80 @@ export class WeaponController implements System {
     this.emitBeat(next.cls === 'pistol' ? 'draw' : 'unsling', false);
   }
 
+  private readonly rs = {
+    sh: new Vector3(),
+    el: new Vector3(),
+    wr: new Vector3(),
+    tg: new Vector3(),
+    pole: new Vector3(),
+    e2: new Vector3(),
+    w2: new Vector3(),
+  };
+
+  /** 0..1 pistol mag-check lift (rig). */
+  private checkLift = 0;
+  /** Rig camera-fix timeline (s) and whether the mount was straightened this time. */
+  private camFixT = 0;
+  private camFixed = false;
+  /** 0..1 eased weight of the rig camera-fix reach (also dips the weapon). */
+  private camFixW = 0;
+
+  private updateRigCamFix(dt: number) {
+    if (this.planKind !== 'camFix') {
+      this.camFixW = 0;
+      return;
+    }
+    const T = (this.camFixT += dt);
+    // Reach 0.3 s → hold/adjust 0.4 s (fix at 0.45) → let go 0.3 s.
+    this.camFixW = T < 0.3 ? ease('io', T / 0.3) : T < 0.7 ? 1 : 1 - ease('io', (T - 0.7) / 0.3);
+    if (T >= 0.28 && T < 0.7) this.setCamHand(true);
+    if (T >= 0.45 && !this.camFixed) {
+      this.camFixed = true;
+      this.emitBeat('camFix', false);
+      this.player.fixMount();
+    }
+    if (T >= 0.7) this.setCamHand(false);
+    if (T >= 1) {
+      this.planKind = null;
+      this.camFixW = 0;
+    }
+  }
+
+  /**
+   * Support-arm IK layer on the rig (after the mixer): flinch shield (hand to the face), throw (up beside the
+   * head), camera fix (hand on the mount). A two-bone solve swings upper arm + forearm toward the blended wrist
+   * target; the gun is untouched. Gaps: hand orientation follows the forearm.
+   */
+  private rigArmLayer(rig: ArmsRig) {
+    const f = ease('out', this.flinch);
+    const t = ease('io', this.throwDip) * 0.85;
+    const c = this.camFixW;
+    // Pistol mag check: the support hand comes up under the dropped mag (the clip leaves it at the hip).
+    const m = this.equipped.cls === 'pistol' ? ease('io', this.checkLift) : 0;
+    const k = Math.max(f, t, c, m);
+    if (k < 1e-3) return;
+    const { armL, foreArmL, handL } = rig.bones;
+    const r = this.rs;
+    armL.getWorldPosition(r.sh);
+    foreArmL.getWorldPosition(r.el);
+    handL.getWorldPosition(r.wr);
+    const l1 = r.sh.distanceTo(r.el),
+      l2 = r.el.distanceTo(r.wr);
+    const tw = this.player.torso.matrixWorld;
+    if (m >= f && m >= t && m >= c) r.tg.copy(MAG_CUP).applyMatrix4(this.equipped.model.root.matrixWorld);
+    else if (c >= f && c >= t) r.tg.copy(this.player.camLocal).add(CAM_REACH).applyMatrix4(tw);
+    else if (f >= t) r.tg.set(-0.05, 0.2, -0.26).applyMatrix4(tw);
+    else r.tg.set(-0.22, 0.2, -0.1).applyMatrix4(tw);
+    r.tg.lerpVectors(r.wr, r.tg, k);
+    r.pole.set(-0.6, -0.8, 0.1).transformDirection(tw).add(r.sh);
+    solveTwoBone(r.sh, r.tg, r.pole, l1, l2, r.e2, r.w2);
+    aimBone(armL, r.el, r.e2);
+    armL.updateMatrixWorld(true);
+    handL.getWorldPosition(r.wr);
+    aimBone(foreArmL, r.wr, r.w2);
+    foreArmL.updateMatrixWorld(true);
+  }
+
   /** Root = handling pose × inverse idle gun frame; then the rig samples, places the gun and IKs the hands. */
   private updateRig(dt: number) {
     const rig = this.rig!;
@@ -422,6 +534,11 @@ export class WeaponController implements System {
     }
     rig.root.updateMatrixWorld(true);
     rig.update(dt);
+    this.updateRigCamFix(dt);
+    this.rigArmLayer(rig);
+    // Empty reloads: the rig's falling clone of the old mag is replaced by our physical floor mag.
+    const spare = e.model.root.getObjectByName('spareMag');
+    if (spare && this.planKind === 'reload') spare.visible = false;
     // Plans finish when the rig goes back to idle.
     if ((this.planKind === 'reload' || this.planKind === 'check') && !rig.busy) {
       if (this.planKind === 'reload') {
@@ -697,8 +814,17 @@ export class WeaponController implements System {
       h.lerp(_v3.fromArray(e.cfg.away.p), w);
       r.lerp(_v3.fromArray(e.cfg.away.r), w);
     }
+    // Pistol mag check on the rig: lift and tip the gun so the support hand working the mag is in frame.
+    const checkWant = this.rig && this.planKind === 'check' && e.cls === 'pistol' ? 1 : 0;
+    this.checkLift += (checkWant - this.checkLift) * damp(0.08, dt);
+    if (this.checkLift > 1e-3) {
+      const w = ease('io', this.checkLift);
+      h.y += 0.04 * w;
+      h.z += 0.02 * w;
+      r.x += 0.2 * w;
+    }
     // Throw dip / flinch: the gun drops and cants away while the support hand is busy.
-    const dip = Math.max(ease('io', this.throwDip), ease('out', this.flinch));
+    const dip = Math.max(ease('io', this.throwDip), ease('out', this.flinch), this.camFixW * 0.35);
     if (dip > 1e-3) {
       h.y -= 0.09 * dip;
       h.x += 0.03 * dip;
@@ -1154,9 +1280,13 @@ export class WeaponController implements System {
     if (this.beats.active || this.switching) return;
     const auto = p.knock > 0.035 && this.idleTime > 1.2 && !p.aiming && p.speed < 2.5 && this.sinceShot > 1.5;
     if (!(manual || auto)) return;
-    // Rig: no camera-fix clip yet → straighten the mount without the reach.
-    if (this.rig) this.player.fixMount();
-    else this.startPlan('camFix', CAM_FIX_NAMES);
+    if (this.rig) {
+      // Rig: the support hand reaches the mount through the IK layer (rigArmLayer), straightens it, lets go.
+      if (this.planKind) return;
+      this.planKind = 'camFix';
+      this.camFixT = 0;
+      this.camFixed = false;
+    } else this.startPlan('camFix', CAM_FIX_NAMES);
   }
 
   private sink: BeatSink = {
@@ -1255,7 +1385,9 @@ export class WeaponController implements System {
   private spawnDrop() {
     const e = this.equipped;
     if (!e.mag) return;
-    const o = e.mag.obj;
+    // On the rig the old mag may be its clone (empty reloads): drop whichever is showing the old one.
+    const spare = this.rig ? e.model.root.getObjectByName('spareMag') : undefined;
+    const o = spare?.visible ? spare : e.mag.obj;
     o.updateMatrixWorld(true);
     const p = this.player;
     // Falls out of the well: weapon-down plus the body's own motion, a little tumble.
