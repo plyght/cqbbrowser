@@ -15,7 +15,6 @@ import { Hud } from '../ui/Hud';
 import { Menu } from '../ui/Menu';
 import { setDrillSource, type RunResult } from '../ui/drills';
 import { toDrillInfo, toRunResult } from '../ui/drillAdapter';
-import { Magazines } from '../weapons/Magazines';
 import { Ballistics } from '../weapons/Ballistics';
 import { WeaponController } from '../weapons/WeaponController';
 import { Drills } from '../drills/Drills';
@@ -126,7 +125,7 @@ export class Game {
     // Fresh mags at every drill standby.
     bus.on('drillState', (e) => {
       if (e.state !== 'standby') return;
-      for (const w of this.weapons.loadout) w.mags = new Magazines(w.def.magCapacity, w.def.spareMags);
+      this.weapons.resupply();
     });
     this.menu.onRestart = () => {
       this.resetDrill();

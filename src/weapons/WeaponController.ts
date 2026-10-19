@@ -401,6 +401,15 @@ export class WeaponController implements System {
     this.emitBeat(this.equipped.cls === 'pistol' ? 'holster' : 'sling', false);
   }
 
+  /** Fresh mags for a new drill: cancels any hand plan so nothing is mid-swap. */
+  resupply() {
+    this.stopPlan();
+    for (const w of this.loadout) {
+      w.mags = new Magazines(w.def.magCapacity, w.def.spareMags);
+      w.boltLocked = false;
+    }
+  }
+
   /** Immediate equip without animation (tests/tools). */
   equipNow(i: number) {
     const next = this.loadout[i];

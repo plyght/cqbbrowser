@@ -12,15 +12,10 @@ async function sim(page: Page, n: number, input?: Record<string, unknown>) {
   await page.evaluate(
     ([n, input]) => {
       const g = (window as any).__sb;
-      const r = g.renderer;
-      const render = r.render;
-      r.render = () => {};
       for (let i = 0; i < (n as number); i++) {
         if (input) g.test.next = structuredClone(input);
-        if (i === (n as number) - 1) r.render = render;
-        g.step(1 / 60);
+        g.step(1 / 60, i === (n as number) - 1);
       }
-      r.render = render;
       g.test.next = {};
     },
     [n, input ?? null] as const,
@@ -72,6 +67,22 @@ test('handling: tactical reload, mag check, speed reload drops a mag', async ({ 
   await sim(page, 55, { down: ['reload'] });
   expect(await kind(page)).toBe('check');
   await shot(page, 'mag-check');
+  // The mag is pulled into the chest cam's view: lower centre, ~0.35–0.5 m out (the HUD tag anchors to it).
+  const mag = await page.evaluate(() => {
+    const g = (window as any).__sb;
+    const cam = g.ctx.camera;
+    // The HUD tag anchors to the magwell socket (the pulled mag sits just under it).
+    const m = g.weapons.equipped.model.sockets.magwell;
+    const p = cam.position.clone().setFromMatrixPosition(m.matrixWorld);
+    const dist = p.distanceTo(cam.position);
+    p.project(cam);
+    return { dist, x: p.x, y: p.y };
+  });
+  console.log('mag in view', JSON.stringify(mag));
+  expect(mag.dist).toBeGreaterThan(0.3);
+  expect(mag.dist).toBeLessThan(0.55);
+  expect(Math.abs(mag.x)).toBeLessThan(0.45);
+  expect(mag.y).toBeLessThan(0.1);
   await sim(page, 60);
   expect(await kind(page)).toBe('idle');
 
