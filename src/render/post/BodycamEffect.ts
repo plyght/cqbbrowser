@@ -222,13 +222,15 @@ export class BodycamEffect extends Effect {
       lens.set(k1, k2, fitScale(k1, k2, this.aspect, circle) / margin, circle);
       Object.assign(this.lens, { k1, k2, scale: lens.z, circle });
     }
-    (u.get('uLens2')!.value as Vector4).set(0.07, caK, 0.5 * I, 0.42 * p.vignette * I);
+    (u.get('uLens2')!.value as Vector4).set(0.07, caK, 0.22 * I, 0.42 * p.vignette * I);
 
     // Camera motion → shutter blur rotation, rolling shutter, codec starvation.
     const w = this.omega;
     const speed = w.length();
-    const shutter = 1 / 45;
-    const ang = Math.min(speed * shutter, 0.25) * clamp(p.motionBlur, 0, 2) * lerp(0.35, 1, I);
+    // Shutter ~1/100 s; slow aim corrections (< ~1.2 rad/s) stay sharp, only real whips smear.
+    const shutter = 1 / 100;
+    const whip = Math.max(0, speed - 1.2);
+    const ang = Math.min(whip * shutter, 0.06) * clamp(p.motionBlur, 0, 2) * lerp(0.35, 1, I);
     if (ang > 1e-5) this.axis.copy(w).divideScalar(speed);
     else this.axis.set(0, 1, 0);
     this.q.setFromAxisAngle(this.axis, ang);
@@ -279,10 +281,12 @@ export class BodycamEffect extends Effect {
     );
     (u.get('uGrade')!.value as Vector4).set(1, 0.55 * I, 0.018 * I, 0.15 * I);
     (u.get('uBlur')!.value as Vector4).set(1, EV_REF, 2.4, 0);
+    // Only things practically touching the lens defocus (a hand on the camera, a wall at the chest);
+    // the gun at 0.3–0.7 m stays readable.
     (u.get('uNear')!.value as Vector4).set(
-      0.6,
-      0.22,
-      clamp(p.nearBlur * I * (1 - 0.9 * this.ads), 0, 1),
+      0.16,
+      0.05,
+      clamp(0.5 * p.nearBlur * I * (1 - 0.9 * this.ads), 0, 1),
       0.012,
     );
     // Grain re-seeds at the camera's ~30 fps cadence.
