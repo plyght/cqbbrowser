@@ -72,10 +72,7 @@ body thumps, tinnitus, beeps, scuffs and fallbacks.
 | [Single Pistol Gunshot 3.wav](https://freesound.org/people/morganpurkis/sounds/385811/)                                                                              | morganpurkis  | CC0 1.0 | rep-p9-0                                                                                  |
 | [Single Pistol Gunshot 4.2.wav](https://freesound.org/people/morganpurkis/sounds/391846/)                                                                            | morganpurkis  | CC0 1.0 | rep-p9-1                                                                                  |
 | [Single Pistol Gunshot 2.wav](https://freesound.org/people/morganpurkis/sounds/371440/)                                                                              | morganpurkis  | CC0 1.0 | rep-p9-2                                                                                  |
-| [Silenced Gunshot.wav](https://freesound.org/people/morganpurkis/sounds/369781/)                                                                                     | morganpurkis  | CC0 1.0 | rep-sup-0                                                                                 |
-| [Silenced Gunshot 2.wav](https://freesound.org/people/morganpurkis/sounds/380185/)                                                                                   | morganpurkis  | CC0 1.0 | rep-sup-1                                                                                 |
-| [Silenced Gunshot 3.wav](https://freesound.org/people/morganpurkis/sounds/381569/)                                                                                   | morganpurkis  | CC0 1.0 | rep-sup-2                                                                                 |
-| [Silenced Gunshot 4.wav](https://freesound.org/people/morganpurkis/sounds/396015/)                                                                                   | morganpurkis  | CC0 1.0 | rep-sup-3                                                                                 |
+| [Gunshots machine gun with silencer in a shooting range](https://freesound.org/people/YannSauvin/sounds/779237/)                                                     | YannSauvin    | CC0 1.0 | rep-sup-0 … rep-sup-6                                                                     |
 | [Brass bullet shell casing drop onto concrete, multiple takes](https://freesound.org/people/GrayJoy/sounds/210102/)                                                  | GrayJoy       | CC0 1.0 | brass-conc-0 … brass-conc-5                                                               |
 | [AR15 M4 Gun Hardware Magazine Movement Sounds](https://freesound.org/people/jackthemurray/sounds/393732/)                                                           | jackthemurray | CC0 1.0 | rl-r-release-0/1, rl-r-out-0/1, rl-r-in-0/1, rl-r-seat-0/1, rl-r-check-0/1, rl-r-bolt-0/1 |
 | [Assault Rifle Reload](https://freesound.org/people/qubodup/sounds/815879/)                                                                                          | qubodup       | CC0 1.0 | rl-r-out-q-0, rl-r-in-q-0, rl-r-seat-q-0, rl-r-bolt-q-0                                   |
@@ -104,7 +101,8 @@ Freesound CC0 recordings above stand in. Swapping in that library later is a `so
 Audit (`bun tools/audio/audit.ts`, title/tag check per source): the first open set's reload foley (serøutōnin
 M16 and Glock sequences) was dropped because its scrape-heavy slices read as watery/splashy; so were Kenney
 `footstep_snow` (was standing in for dirt) and `impactSoft` (was standing in for a mag on soft ground). Those
-categories now use the clean sources above or procedural fallbacks.
+categories now use the clean sources above or procedural fallbacks. The morganpurkis "Silenced Gunshot" set
+(a movie-style "pew", tagged as such) was replaced by a real suppressed range recording (YannSauvin).
 
 ## Textures (`public/assets/textures/`)
 

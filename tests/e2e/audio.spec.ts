@@ -67,11 +67,12 @@ function shotStats(wav: Buffer, from: number, rate = 48000) {
 }
 
 test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(480_000); // ~25 offline renders (×4 for the measured ones)
   mkdirSync(dir, { recursive: true });
   const errors = await boot(page);
   const names = [
     'rifle-outdoor',
+    'pistol-outdoor',
     'rifle-box',
     'rifle-room',
     'rifle-hall',
@@ -83,6 +84,10 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
     'pistol-reload-room-v2',
     'rifle-indoor-v2',
     'suppressed-outdoor',
+    'sup-hb300-outdoor',
+    'sup-hb300-indoor',
+    'sup-sb16-outdoor',
+    'sup-first-round',
     'auto-room',
     'rifle-room-earpro',
     'rifle-room-noprotect',
@@ -131,12 +136,20 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
       metrics[name] = r.metrics;
       console.log(
         `  metrics ${name}: crest=${r.metrics.crestDb.toFixed(1)}dB rt60=${r.metrics.rt60.toFixed(2)}s ` +
-          `wet/dry=${r.metrics.wetDryDb.toFixed(1)}dB`,
+          `wet/dry=${r.metrics.wetDryDb.toFixed(1)}dB ` +
+          `shotPeaks=${r.metrics.shotPeaksDb.map((v: number) => v.toFixed(1)).join('/')}dB`,
       );
     }
     expect(r.nan).toBe(0);
     expect(r.peak).toBeLessThanOrEqual(1);
-    expect(r.peak).toBeGreaterThan(0.2);
+    // Foley-only / hit-only renders are quiet by design; anything with a shot reaches the mic's ceiling region.
+    expect(r.peak).toBeGreaterThan(
+      name === 'pistol-reload-room-v2' || name.endsWith('-solo')
+        ? 0.03
+        : name.startsWith('sup') || name.startsWith('suppressed')
+          ? 0.06
+          : 0.2,
+    );
     // Hit feedback is subtle: clearly there, well under the shots.
     if (name === 'paper-hits-solo') expect(r.peak).toBeLessThan(0.5);
     expect(r.debug.loaded.open).toBeGreaterThan(50);
@@ -154,6 +167,15 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
     expect(m[n].rt60).toBeLessThan(0.75);
   }
   expect(m['rifle-hall'].rt60).toBeGreaterThan(m['rifle-box'].rt60);
+  // Suppressed fire: clearly quieter than an unsuppressed shot at the mic, but not a whisper (owner: ~12–18 dB).
+  for (const n of ['sup-hb300-outdoor', 'sup-sb16-outdoor', 'sup-hb300-indoor']) {
+    const drop = shots['rifle-outdoor'].peakDb - shots[n].peakDb;
+    expect(drop).toBeGreaterThan(7);
+    expect(drop).toBeLessThan(20);
+  }
+  // First-round pop: the cold can is louder than the follow-ups.
+  const fr = (m['sup-first-round'] as unknown as { shotPeaksDb: number[] }).shotPeaksDb;
+  expect(fr[0]).toBeGreaterThan(Math.max(fr[1], fr[2]) + 2);
   // Shots hit hard: near the −1 dBFS ceiling, dense (RMS within ~12 dB of peak), with real low end —
   // more of it indoors than outdoors.
   for (const n of ['rifle-outdoor', 'rifle-box', 'rifle-indoor-v2']) {

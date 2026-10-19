@@ -59,6 +59,11 @@ export interface AudioDeps {
 
 registerSettings(AUDIO_SETTING_ENTRIES);
 
+/** Suppressed-fire stack level relative to the unsuppressed one (tuned on offline renders). */
+const SUP_LEVEL = 0.1;
+/** Foley/footsteps/brass/mags sit well under gunfire (a mag click is far quieter than a suppressed shot). */
+const FOLEY = 0.5;
+
 /** Rays cast per frame — 24 rays complete in 6 frames (100 ms at 60 fps). */
 const RAYS_PER_FRAME = 4;
 const PROBE_INTERVAL = 0.1;
@@ -93,6 +98,10 @@ export class AudioEngine {
   private gust = 0;
   private dose = 0;
   private brassSeen = false;
+  /** Last shot time per weapon (first-round pop on a suppressor after a pause). */
+  private lastShot = new Map<string, number>();
+  /** While a subsonic load is being fired, bullet impacts downrange are the loudest thing after the action. */
+  private subsonicUntil = -1;
   private nextNeighbour = 8;
   private ambOutdoor?: { gain: GainNode; lp: BiquadFilterNode };
   private hvac?: GainNode;
@@ -144,7 +153,13 @@ export class AudioEngine {
       reg(`mech.${m}`, () => n(4, () => synth.mechanical(m, r, rng)));
     reg('pressure', () => [synth.pressurePulse(r)]);
     reg('crack', () => n(4, () => synth.crack(r, rng)));
+    reg('sup.report', () => n(4, () => synth.suppressedReport(r, rng)));
+    reg('sup.pop', () => n(2, () => synth.suppressedReport(r, rng, true)));
+    reg('sup.spring', () => n(3, () => synth.bufferSpring(r, rng)));
+    reg('sup.gas', () => n(3, () => synth.gasHiss(r, rng)));
+    reg('sup.ping', () => n(3, () => synth.casePing(r, rng)));
     reg('blast.body', () => n(4, () => synth.blastBody(r, rng)));
+    reg('blast.roll', () => n(3, () => synth.blastRoll(r, rng)));
     reg('hit.paper', () => n(4, () => synth.paperHit(r, rng)));
     reg('hit.noshoot', () => n(3, () => synth.noShootHit(r, rng)));
     reg('ui.tick', () => [synth.uiTick(r)]);
@@ -482,6 +497,14 @@ export class AudioEngine {
     const sup = prof.suppressed;
     const j = jitter(this.rng);
     const rate = prof.pitch * j.rate;
+    const last = this.lastShot.get(e.weaponId) ?? -Infinity;
+    this.lastShot.set(e.weaponId, at);
+    if (e.subsonic) this.subsonicUntil = at + 2;
+    if (sup) {
+      this.suppressedShot(e, prof, at, at - last > 6);
+      if (!this.brassSeen && !this.deps.ctx) this.autoBrass(e.weaponId, e.caliber, at);
+      return;
+    }
 
     // Everything below rides the uncompressed wide-band shot path (bus 'shot'); only the bed pumps.
     // 1. Mechanical: close and dry; with a can on, it's a big part of what you hear.
@@ -511,7 +534,9 @@ export class AudioEngine {
         at,
         gain: (sup ? 0.6 : 1.9) * bc.gain * energy * j.gain,
         rate,
-        presenceDb: sup ? 0 : bc.presenceDb,
+        // Short-barrel harshness is a rifle thing; 9 mm reference shots are mid-centred, not bright.
+        presenceDb: prof.family === 'rifle' ? bc.presenceDb : 0,
+        lp: prof.family === 'pistol' ? 5000 : undefined,
         send: sup ? 0.3 : 0.55,
         bus: 'shot',
         prio: 5,
@@ -531,12 +556,24 @@ export class AudioEngine {
         prio: 4,
       });
 
+    // 2e. Mid roll: the warm 120 Hz–2 kHz decay a real recording keeps after the crack (ref: 9 mm pack).
+    const roll = this.pick('blast.roll');
+    if (roll)
+      this.mixer.play(roll, {
+        at: at + 0.01,
+        gain: 0.8 * energy * bc.gain,
+        rate: prof.pitch * (0.96 + this.rng() * 0.08),
+        send: 0.1,
+        bus: 'shot',
+        prio: 3,
+      });
+
     // 2d. Blast body: the 150–600 Hz "meat" between crack and thump.
     const body = this.pick('blast.body');
     if (body)
       this.mixer.play(body, {
         at,
-        gain: (sup ? 0.35 : 1.0) * energy * (1 + 0.4 * enc),
+        gain: (sup ? 0.35 : 1.4) * energy * (1 + 0.4 * enc),
         rate: prof.pitch * (0.97 + this.rng() * 0.06),
         send: 0.2,
         bus: 'shot',
@@ -561,7 +598,7 @@ export class AudioEngine {
       if (th)
         this.mixer.play(th, {
           at,
-          gain: 0.75 * prof.energy * bc.pressure * (1 + 2.4 * enc + 1.5 * a.bass),
+          gain: 0.45 * prof.energy * bc.pressure * (1 + 1.7 * enc + 1.2 * a.bass),
           rate: 0.97 + this.rng() * 0.06,
           bus: 'shot',
           prio: 5,
@@ -615,6 +652,102 @@ export class AudioEngine {
 
     // Brass fallback until a physics brass system emits `brass` events.
     if (!this.brassSeen && !this.deps.ctx) this.autoBrass(e.weaponId, e.caliber, at);
+  }
+
+  /**
+   * Suppressed fire (real, not Hollywood): the report is still ~130–135 dB at the shooter — a sharp,
+   * compressed "pfft-crack" with a short thump — but the action is now just as loud: bolt carrier, buffer
+   * spring, case ping, gas blowback at the port. First round after a pause pops (oxygen in the can).
+   * Supersonic ammo still cracks downrange; subsonic (HB-300 220 gr) doesn't, so hits on target carry.
+   */
+  private suppressedShot(
+    e: Pick<ShotEvent, 'weaponId' | 'subsonic'>,
+    prof: ReturnType<typeof weaponSound>,
+    at: number,
+    firstRound: boolean,
+  ) {
+    const a = this.acoustics;
+    const enc = a.enclosure;
+    const supersonic = !e.subsonic;
+    // An add-on can on a 5.56 carbine is noticeably louder than the integral-can subsonic PDW.
+    // SUP_LEVEL sets suppressed fire ~12–18 dB under an unsuppressed shot at the mic (which is driven well into
+    // the soft ceiling), instead of clipping just as hard.
+    const L = SUP_LEVEL * (supersonic ? 1 : 0.72) * Math.sqrt(prof.energy);
+    const pop = firstRound ? 1.5 : 1;
+    const isAr = prof.mech === 'ar';
+    const S = SUP_LEVEL;
+    const play = (key: string, o: Parameters<Mixer['play']>[1]) => {
+      const b = this.pick(key);
+      if (b) this.mixer.play(b, { bus: 'shot', ...o });
+      return b;
+    };
+    // Mechanical: louder and closer than unsuppressed — it's half of what you hear.
+    const mj = jitter(this.rng, 0.02, 1);
+    play(`mech.${prof.mech}`, {
+      at: at + 0.003,
+      gain: 0.85 * S * mj.gain,
+      rate: mj.rate,
+      hp: 250,
+      room: 0.03,
+      prio: 4,
+    });
+    if (isAr) {
+      play('sup.spring', {
+        at: at + 0.028,
+        gain: 0.45 * S,
+        rate: 0.98 + this.rng() * 0.04,
+        room: 0.02,
+        prio: 3,
+      });
+      // Gas blowback out of the ejection port, right side, a beat after the shot.
+      play('sup.gas', { at: at + 0.012, gain: 0.45 * S * pop, pan: 0.3, room: 0.02, prio: 3 });
+    }
+    play('sup.ping', {
+      at: at + 0.035,
+      gain: 0.2 * S,
+      pan: 0.45,
+      rate: 0.97 + this.rng() * 0.06,
+      room: 0.03,
+      prio: 2,
+    });
+
+    // Report: real suppressed recording + the synthetic pfft-crack/thump core (pop variant on round one).
+    const rj = jitter(this.rng);
+    play(KEYS.report('suppressed'), {
+      at,
+      gain: 0.85 * L * (firstRound ? 1.4 : 1) * rj.gain,
+      rate: prof.pitch * rj.rate,
+      send: 0.22,
+      prio: 5,
+    });
+    play(firstRound ? 'sup.pop' : 'sup.report', {
+      at,
+      gain: 1.5 * L * (firstRound ? 1.6 : 1),
+      rate: prof.pitch * (0.98 + this.rng() * 0.04),
+      send: 0.22,
+      prio: 5,
+    });
+    // Supersonic: the bullet's own crack, just ahead of the muzzle and going away downrange.
+    if (supersonic)
+      play('crack', {
+        at: at + 0.006,
+        gain: 0.7 * S,
+        rate: 0.95 + this.rng() * 0.08,
+        lp: 11000,
+        send: 0.12,
+        prio: 5,
+      });
+    // A little pressure — mostly indoors, more on the pop.
+    play('pressure', {
+      at,
+      gain: (0.03 + 0.55 * enc ** 1.5 * (1 + a.bass)) * L * pop,
+      rate: 1 / (1 + 0.5 * enc),
+      lp: 240,
+      peak: [a.roomMode, 3 + 8 * a.bass, 1.5 + 5 * a.bass],
+      room: 0.06,
+      prio: 3,
+    });
+    this.mixer.duck((0.45 + 0.2 * enc) * L * (firstRound ? 1.2 : 1), at);
   }
 
   /** Report pools to layer under the primary (a different recording of a similar gun). */
@@ -742,7 +875,7 @@ export class AudioEngine {
       if (b)
         this.mixer.play(b, {
           at: at0 + sp.d / SPEED_OF_SOUND,
-          gain: 0.5 * Math.max(0.3, AudioEngine.dist(sp.d, 5)),
+          gain: (at0 < this.subsonicUntil ? 0.8 : 0.5) * Math.max(0.3, AudioEngine.dist(sp.d, 5)),
           rate: 0.98 + this.rng() * 0.04,
           lp: sp.lp,
           pan: sp.pan,
@@ -759,21 +892,28 @@ export class AudioEngine {
   }
 
   /** Paper "thup" + berm dirt for non-steel impacts (only near the listener's line of fire matters). */
-  private impact(e: GameEvents['impact']) {
-    if (e.surface === 'steel_target') return;
+  /**
+   * Bullet impacts downrange (berm, walls…); paper has its own thwap (targetHit) and steel its ring. With a
+   * subsonic load there's no crack to mask them, so they come through clearly (and aren't AGC-ducked).
+   */
+  impact(e: Pick<GameEvents['impact'], 'point' | 'surface'> & { at?: number }) {
+    if (e.surface === 'steel_target' || e.surface === 'paper_target') return;
     const sp = this.spatial(e.point);
-    if (sp.d > 60) return;
+    if (sp.d > 80) return;
+    const at = (e.at ?? this.now()) + sp.d / SPEED_OF_SOUND;
+    const quiet = at < this.subsonicUntil;
     const cls = STEP_CLASS[e.surface];
     const b = this.pick(KEYS.mag(MAG_CLASS[cls]));
     if (b)
       this.mixer.play(b, {
-        at: this.now() + sp.d / SPEED_OF_SOUND,
-        gain: 0.3 * AudioEngine.dist(sp.d, 5),
+        at,
+        gain: (quiet ? 0.6 : 0.25) * Math.max(quiet ? 0.3 : 0, AudioEngine.dist(sp.d, 5)),
         rate: 0.7 + this.rng() * 0.2,
-        lp: Math.min(sp.lp, e.surface === 'paper_target' ? 2500 : 6000),
+        lp: Math.min(sp.lp, 6000),
         pan: sp.pan,
-        send: 0.4,
-        prio: 0,
+        send: 0.2,
+        bus: quiet ? 'shot' : 'dry',
+        prio: 1,
       });
   }
 
@@ -788,7 +928,7 @@ export class AudioEngine {
     if (step)
       this.mixer.play(step, {
         at,
-        gain: (0.12 + 0.05 * e.speed) * j.gain,
+        gain: FOLEY * (0.12 + 0.05 * e.speed) * j.gain,
         rate: j.rate,
         pan,
         room: 0.02,
@@ -796,7 +936,7 @@ export class AudioEngine {
       });
     if (e.scuff > 0.22) {
       const s = this.pick(`scuff.${cls}`);
-      if (s) this.mixer.play(s, { at: at + 0.02, gain: 0.2 * e.scuff, pan, room: 0.015, prio: 1 });
+      if (s) this.mixer.play(s, { at: at + 0.02, gain: FOLEY * 0.2 * e.scuff, pan, room: 0.015, prio: 1 });
     }
     // Heel strike through the chest rig → mic thump (harder when running).
     const t = this.pick('thump');
@@ -825,7 +965,7 @@ export class AudioEngine {
     const soft = surface === 'gravel' || surface === 'grass' || surface === 'dirt' || surface === 'berm';
     this.mixer.play(b, {
       at: at ?? this.now(),
-      gain: 0.3 * AudioEngine.dist(sp.d, 1.5) * (soft ? 0.6 : 1),
+      gain: FOLEY * 0.3 * AudioEngine.dist(sp.d, 1.5) * (soft ? 0.6 : 1),
       rate: (kind === 'pistol' ? 1.2 : 1) * (0.97 + this.rng() * 0.06),
       lp: soft ? 3500 : sp.lp,
       pan: sp.pan,
@@ -855,7 +995,7 @@ export class AudioEngine {
     if (b)
       this.mixer.play(b, {
         at: (e.at ?? this.now()) + 0.32, // falls from hip height
-        gain: 0.4,
+        gain: FOLEY * 0.4,
         rate: 0.99 + this.rng() * 0.02,
         lp: e.polymer ? 7000 : undefined,
         pan: (this.rng() - 0.5) * 0.3,
@@ -882,7 +1022,7 @@ export class AudioEngine {
     if (b)
       this.mixer.play(b, {
         at,
-        gain: 0.45 * (e.stressed ? 1.35 : 1) * j.gain,
+        gain: FOLEY * 0.45 * (e.stressed ? 1.35 : 1) * j.gain,
         rate: j.rate,
         pan: 0.08,
         room: 0.02,
@@ -890,13 +1030,14 @@ export class AudioEngine {
       });
     if (e.beat === 'magCheck') {
       const c = this.pick(KEYS.cloth);
-      if (c) this.mixer.play(c, { at: at + 0.05, gain: 0.15, room: 0.01, prio: 1 });
+      if (c) this.mixer.play(c, { at: at + 0.05, gain: FOLEY * 0.15, room: 0.01, prio: 1 });
     }
   }
 
   dryFire(_weaponId: string, at = this.now()) {
     const b = this.pickFirst([KEYS.foley('any', 'dryFire'), KEYS.click, 'click.synth']);
-    if (b) this.mixer.play(b, { at, gain: 0.45, rate: 0.995 + this.rng() * 0.01, room: 0.015, prio: 3 });
+    if (b)
+      this.mixer.play(b, { at, gain: FOLEY * 0.45, rate: 0.995 + this.rng() * 0.01, room: 0.015, prio: 3 });
   }
 
   camHand(active: boolean) {
