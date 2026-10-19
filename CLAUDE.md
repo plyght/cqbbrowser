@@ -13,3 +13,5 @@ Bodycam-inspired CQB training shooter in the browser. Read `docs/PRD.md` first.
 - Assets: only CC0 / generated files are committed while the repo is public. Log every external asset in
   `assets/ATTRIBUTION.md`. No Sonniss files until the repo is private.
 - Before pushing: `bunx tsc --noEmit && bunx eslint . && bun test src && bunx prettier --check .`
+- Blender: `tools/setup-blender.sh` installs Blender 4.2 LTS headless (`blender -b --python …`). Asset pipelines live in `tools/blender/**` and export GLB + WebP into `public/assets/models/**` (credit sources in `assets/ATTRIBUTION.md`).
+- Hosted test build: `tools/package-artifact.sh <dir>` stages `dist/` for the artifact host (no .glb/.m4a there).
