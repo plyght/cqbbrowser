@@ -33,10 +33,11 @@ Mono.
 
 ## Textures, models, HDRIs
 
-| Path                            | Source                                                                                                                                                                                                                      | License | Set  |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---- |
-| `public/assets/models/hands/*`  | Godot XR Tools hand models by DigitalN8m4r3 (Miodrag Sejic), made with MakeHuman CE — https://github.com/GodotVR/godot-xr-tools/tree/master/addons/godot-xr-tools/hands (glTF → GLB via gltf-transform, textures → 1K WebP) | CC0-1.0 | open |
-| `public/assets/textures/*.webp` | https://polyhaven.com (per-texture sources in "Textures" detail section below)                                                                                                                                              | CC0-1.0 | open |
+| Path                            | Source                                                                                                                                                                                                                                                                    | License   | Set  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---- |
+| `public/assets/models/ak74u/*`  | "AK74U \| FREE ANIMATION." by BURNER — https://sketchfab.com/3d-models/ak74u-free-animation-2ab66220c48b465e9501067667965569 (FBX → GLB via FBX2glTF + meshopt; textures → 2K WebP, glossiness inverted to roughness). Arms are a Mixamo character embedded in the model. | CC-BY-4.0 | open |
+| `public/assets/models/hands/*`  | Godot XR Tools hand models by DigitalN8m4r3 (Miodrag Sejic), made with MakeHuman CE — https://github.com/GodotVR/godot-xr-tools/tree/master/addons/godot-xr-tools/hands (glTF → GLB via gltf-transform, textures → 1K WebP)                                               | CC0-1.0   | open |
+| `public/assets/textures/*.webp` | https://polyhaven.com (per-texture sources in "Textures" detail section below)                                                                                                                                                                                            | CC0-1.0   | open |
 
 ## Audio (open set)
 
@@ -121,3 +122,7 @@ Grass and plywood diffuse maps were brightened (ImageMagick `-modulate`).
 
 Everything else in the world (steel paint, paper targets, signage, plywood sheet seams) is generated in
 code at runtime.
+
+## CC-BY credits
+
+- **AK74U | FREE ANIMATION.** by **BURNER** (Sketchfab), licensed CC BY 4.0 — https://sketchfab.com/3d-models/ak74u-free-animation-2ab66220c48b465e9501067667965569. Modified: format conversion, texture resize/re-encode, retargeted/blended animation in game.
