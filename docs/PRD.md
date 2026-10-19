@@ -3,10 +3,11 @@
 **Title:** SHORTBARREL (branding: **CAM04**, the in-world camera unit and footage watermark)
 **Platform:** Desktop web browser (Chromium, Firefox, Safari 17+), Three.js / WebGL2
 **Input:** Mouse + keyboard, **trackpad**, and **controller**, all first-class and on by default
-**Status:** Draft v0.2, 2026-10-19
+**Status:** Draft v0.3, 2026-10-19 (implementation started)
 **Scope of this PRD:** Single-player training content (ranges, steel courses, shoot houses). Core-feel first: no AI or multiplayer until the base gameplay is great.
 
 ### Changelog
+- **v0.3:** Owner decisions: lean is **Q/E** (LB/RB on pad); no trackpad-swipe lean. Roster centred on **SBRs** incl. **HB-300** (Honey Badger–style integrally suppressed .300 BLK PDW), short AK, Glock-pattern pistol; maximum customization. Fictional PMC is **UMBRA CO.** (nod to CoD's Shadow Company + old-school subdued patches). Controller aim slowdown = Light on Standard. Hosting-after-private deferred. Tooling: **bun**.
 - **v0.2:** Name chosen. Deep Bodycam teardown from Reissad's *Locked and Loaded* devlogs (§2). View-leads/weapon-follows aim model (§6.3). Ready or Not–style ammo check HUD (§6.6). Trackpad and controller input designed in depth (§7). Private-contractor framing. Helmet cam for replays and recording. Sonniss audio allowed (licensing plan in §10.3). Normal menus, no tablet UI. CI/CD plan (§12.3).
 - **v0.1:** Initial draft.
 
@@ -213,7 +214,7 @@ Replays can be re-rendered from either mount, since the sim is deterministic and
 8. **Rolling shutter** skew on fast yaw (subtle)
 9. **Optional cadence lock**: present the camera at a fake 30 fps "recording" cadence *for the replay export only*. Gameplay renders at full refresh.
 10. **Lens dirt, smudge, and vignette.** Dirt lights up from bright sources.
-11. **Overlay** (diegetic, the CAM04 watermark): `CAM04 · AXIS-7 SECURITY · UNIT 0412 · 2026-10-19 14:32:07` (fictional company), a REC dot, and a battery icon. Toggleable. Always on in exports unless disabled.
+11. **Overlay** (diegetic, the CAM04 watermark): `CAM04 · UMBRA CO. · UNIT 0412 · 2026-10-19 14:32:07` (fictional PMC), a REC dot, and a battery icon. Toggleable. Always on in exports unless disabled.
 
 One **"Footage intensity"** slider (0–100%) plus per-effect overrides in Advanced settings.
 
@@ -257,7 +258,8 @@ One **"Footage intensity"** slider (0–100%) plus per-effect overrides in Advan
 ### 6.2 Weapons (v1, generic names)
 | Slot | Weapon | Notes |
 |---|---|---|
-| Primary | **SB-16** (M4-pattern 5.56, 10.3″/11.5″/14.5″ barrels) | The flagship. Barrel length is the "SHORTBARREL" choice |
+| Primary | **SB-16** (AR-15 SBR 5.56, 10.3″/11.5″/12.5″/14.5″ barrels) | The flagship. Barrel length is the "SHORTBARREL" choice |
+| Primary | **HB-300** (Honey Badger–style .300 BLK PDW, integral suppressor; unsuppressed short variant) | Owner favourite. Quiet, compact, subsonic |
 | Primary | **KP-9** (MP5-pattern 9 mm SMG) | Low recoil, beginner-friendly, roller-delayed sound character |
 | Primary | **K-47S** (AK-pattern short, 7.62×39) | Needs a rail for optics (dependency example from §2.5) |
 | Primary | **PM-12** (pump 12 ga) | Single-shell, interruptible inserts; pellets vs. steel; slugs |
@@ -349,7 +351,6 @@ No browser game handles trackpads well. Our approach:
 | Click / tap-to-click | **Fire** | |
 | Two-finger click / tap (right-click) | **ADS toggle** | Toggle by default on trackpad (holding a two-finger click while gliding is awkward) |
 | **Two-finger vertical scroll** | Ready position up/down (or LPVO zoom while ADS on a variable optic) | Wheel events still fire under pointer lock. Thresholded and debounced so inertial scrolling doesn't spam |
-| **Two-finger horizontal scroll** | **Lean** (analog, springs back to center when fingers lift). Optional; off by default | Feels surprisingly natural; needs playtesting |
 | **Pinch** (`wheel` + `ctrlKey`) | Magnifier flip / cycle aim mode | `preventDefault` with `{ passive: false }` to block page zoom. Safari also supports `gesturechange` |
 | **Force Click** (Safari, `webkitmouseforcechanged`) | Optional: deep press = ADS hold | Safari-only bonus |
 | Keyboard (left hand) | Movement and everything else | Same as KBM |
@@ -408,7 +409,7 @@ Every milestone is tested on: mouse (Windows Chrome, macOS Safari), MacBook trac
 
 Poppers use **momentum thresholds**: a 9 mm round may only ring a heavy popper, so caliber choice and barrel length matter.
 
-### 8.2 Facilities (Axis-7 Security Training Center, fictional)
+### 8.2 Facilities (UMBRA CO. Training Facility, fictional)
 1. **Square range** (outdoor, 3–50 m): bays, adjustable distances, and a drill menu: Bill Drill, El Presidente, Mozambique, failure drill, reload drills, a Dot Torture-lite, and a Draw (holster) drill. Range neighbors shoot occasionally in other bays (ambient life and audio propagation showcase).
 2. **Steel park:** 5 stages (plate rack, 5-to-go, Texas star, popper fields, 100 m gong with an LPVO)
 3. **Plywood kill house "A":** no roof, catwalk overhead (great replay angles). Hallways, a T-intersection, center-fed and corner-fed rooms, closed doors, hard corners. Randomized threat and no-shoot placement.
@@ -581,7 +582,7 @@ Works on public repos now, and **also on private repos** (the GitHub Free plan i
 ### 12.4 Replay system
 - Deterministic fixed-step sim. Logs per-tick actions plus a seed. Physics determinism comes from Rapier's deterministic mode with fixed ordering.
 - Replays are small (KBs), stored in IndexedDB, and shareable as a file
-- Re-render: chest/helmet/free cam/split. **Export:** `canvas.captureStream()` + `MediaRecorder` (WebM VP9/Opus, or MP4 where supported) at a fake 30 fps "camera" cadence, with the CAM04 overlay burned in. Filename: `CAM04_AXIS7_0412_2026-10-19_143207.webm`.
+- Re-render: chest/helmet/free cam/split. **Export:** `canvas.captureStream()` + `MediaRecorder` (WebM VP9/Opus, or MP4 where supported) at a fake 30 fps "camera" cadence, with the CAM04 overlay burned in. Filename: `CAM04_UMBRA_0412_2026-10-19_143207.webm`.
 
 ---
 
@@ -614,14 +615,11 @@ Works on public repos now, and **also on private repos** (the GitHub Free plan i
 ---
 
 ## 15. Open questions
-1. **Hosting after going private:** GitHub Pages on a private repo needs **GitHub Pro** (paid). Free alternatives that deploy from a private repo through Actions (Cloudflare Pages, Netlify) need a one-time free account signup. Or keep a tiny separate **public "deploy" repo** that only receives built files (no Sonniss raw files; the audio is embedded in the build). That's a judgment call on the "embedded" clause. *Default proposal: a separate public deploy repo with Pages, built files only, pushed by CI.*
-2. **Trackpad horizontal-swipe lean:** on by default or off? *(Default: off until playtested.)*
-3. **Controller aim assist default** in Standard: "Light" (proposed) or off?
-4. **Realism default:** Standard (ammo check HUD on hold, rare fumbles). Is that right?
-5. **Weapon roster:** OK with SB-16 / KP-9 / K-47S / PM-12 / P-17 / R-357? Any must-haves (suppressed PCC, bolt gun earlier)?
-6. **Fictional company name** for the overlay: "Axis-7 Security" is a placeholder. Want something else?
-
----
+1. **Hosting after going private:** deferred by the owner. Options remain GitHub Pro, a free Cloudflare/Netlify account, or a separate public deploy repo with built files only.
+2. ~~Trackpad swipe lean~~: decided, lean is Q/E only.
+3. ~~Aim assist default~~: decided, Light slowdown on Standard.
+4. ~~Roster~~: decided, SBR-focused (SB-16, HB-300, K-47S, P-17; KP-9/R-357/PM-12 later).
+5. ~~Company~~: decided, UMBRA CO.
 
 ## 16. Sources
 - Reissad Studio, *Bodycam: Locked and Loaded* devlogs (animations/loadouts/UI/gadgets; sound design; final/systems), provided by the project owner
