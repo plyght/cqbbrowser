@@ -124,7 +124,7 @@ export class Hud {
     const w = innerWidth;
     const h = innerHeight;
     const lens = lensFrom(view.lens, w / h);
-    const [u, v] = unbarrel(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5, lens.k, lens.aspect);
+    const [u, v] = unbarrel(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5, lens);
     out.x = u * w;
     out.y = (1 - v) * h;
     return u > -0.05 && u < 1.05 && v > -0.05 && v < 1.05;

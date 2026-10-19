@@ -28,6 +28,44 @@ function windowDb(env: number[], a: number, b: number) {
   return 10 * Math.log10(mean) - env[pk];
 }
 
+/**
+ * Shot stats around the first shot in [from, from+0.4) s: sample peak (dBFS), 50 ms RMS after the peak (dBFS),
+ * crest (peak − RMS) and the absolute 40–120 Hz energy (dB) of the 150 ms after it.
+ */
+function shotStats(wav: Buffer, from: number, rate = 48000) {
+  const f = new Float32Array(wav.buffer.slice(wav.byteOffset + 44, wav.byteOffset + wav.byteLength));
+  const n = f.length / 2;
+  const mono = new Float32Array(n);
+  for (let i = 0; i < n; i++) mono[i] = (f[2 * i] + f[2 * i + 1]) / 2;
+  let pk = Math.floor(from * rate);
+  for (let i = pk; i < Math.min(n, (from + 0.4) * rate); i++)
+    if (Math.abs(mono[i]) > Math.abs(mono[pk])) pk = i;
+  // 50 ms RMS after the peak.
+  const w = Math.floor(0.05 * rate);
+  let all = 0;
+  for (let i = pk; i < Math.min(n, pk + w); i++) all += mono[i] ** 2;
+  // 40–120 Hz energy in the 150 ms after the shot (Hann-windowed DFT bins, Goertzel), absolute.
+  const len = Math.floor(0.15 * rate);
+  const start = Math.max(0, pk - Math.floor(0.01 * rate));
+  let low = 0;
+  for (let fq = 40; fq <= 120; fq += 1000 / 150) {
+    const k = (2 * Math.cos((2 * Math.PI * fq) / rate)) as number;
+    let s1 = 0,
+      s2 = 0;
+    for (let i = 0; i < len && start + i < n; i++) {
+      const win = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / len);
+      const s0 = mono[start + i] * win + k * s1 - s2;
+      s2 = s1;
+      s1 = s0;
+    }
+    low += s1 * s1 + s2 * s2 - k * s1 * s2;
+  }
+  const db = (x: number) => 10 * Math.log10(x + 1e-12);
+  const peakDb = 20 * Math.log10(Math.abs(mono[pk]) + 1e-12);
+  const rmsDb = db(all / w);
+  return { peakDb, rmsDb, crest: peakDb - rmsDb, lowDb: db(low / len) };
+}
+
 test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
   test.setTimeout(180_000);
   mkdirSync(dir, { recursive: true });
@@ -38,6 +76,8 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
     'rifle-room',
     'steel-25m',
     'pistol-reload-room',
+    'pistol-reload-room-v2',
+    'rifle-indoor-v2',
     'suppressed-outdoor',
     'auto-room',
     'rifle-room-earpro',
@@ -46,6 +86,7 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
   ];
   const early: Record<string, number> = {};
   const late: Record<string, number> = {};
+  const shots: Record<string, ReturnType<typeof shotStats>> = {};
   for (const name of names) {
     const r = await page.evaluate((n) => (window as any).__sb.audio.renderOffline(n), name);
     const wav = Buffer.from(r.wav, 'base64');
@@ -74,9 +115,12 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
     const env = envelope(wav);
     early[name] = windowDb(env, 0.05, 0.15);
     late[name] = windowDb(env, 0.9, 1.6);
+    const st = (shots[name] = shotStats(wav, name.endsWith('-v2') ? 0.25 : 0.35));
     console.log(
       `${name}: peak=${r.peak.toFixed(3)} rms=${r.rms.toFixed(4)} clipped=${(r.clipped * 100).toFixed(3)}% ` +
-        `early=${early[name].toFixed(1)}dB late=${late[name].toFixed(1)}dB reverb=${JSON.stringify(r.debug.reverb)} peakVoices=${r.debug.peakVoices} stolen=${r.debug.stolen}`,
+        `early=${early[name].toFixed(1)}dB late=${late[name].toFixed(1)}dB ` +
+        `shot peak=${st.peakDb.toFixed(1)} rms50=${st.rmsDb.toFixed(1)} crest=${st.crest.toFixed(1)} ` +
+        `low40-120=${st.lowDb.toFixed(1)}dB reverb=${JSON.stringify(r.debug.reverb)} peakVoices=${r.debug.peakVoices} stolen=${r.debug.stolen}`,
     );
     expect(r.nan).toBe(0);
     expect(r.peak).toBeLessThanOrEqual(1);
@@ -88,6 +132,16 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
   // and the ambience breathing back late.
   expect(early['rifle-box']).toBeGreaterThan(early['rifle-outdoor'] + 4);
   expect(late['rifle-box']).toBeLessThan(late['rifle-outdoor']);
+  // Shots hit hard: near the −1 dBFS ceiling, dense (RMS within ~12 dB of peak), with real low end —
+  // more of it indoors than outdoors.
+  for (const n of ['rifle-outdoor', 'rifle-box', 'rifle-indoor-v2']) {
+    expect(shots[n].peakDb).toBeGreaterThan(-3);
+    expect(shots[n].rmsDb).toBeGreaterThan(-16);
+  }
+  expect(shots['rifle-box'].lowDb).toBeGreaterThan(shots['rifle-outdoor'].lowDb + 3);
+  expect(shots['rifle-indoor-v2'].lowDb).toBeGreaterThan(shots['rifle-outdoor'].lowDb + 2);
+  // Unsuppressed shots carry a real 40–120 Hz punch; a can takes most of it away.
+  expect(shots['rifle-outdoor'].lowDb).toBeGreaterThan(shots['suppressed-outdoor'].lowDb + 10);
   expect(errors).toEqual([]);
 });
 

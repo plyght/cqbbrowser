@@ -43,12 +43,21 @@ const FS = {
   sil3: fs(381569, 'morganpurkis', 'Silenced Gunshot 3.wav'),
   sil4: fs(396015, 'morganpurkis', 'Silenced Gunshot 4.wav'),
   brass: fs(210102, 'GrayJoy', 'Brass bullet shell casing drop onto concrete, multiple takes'),
-  m16reload: fs(725397, 'serøutōnin--deprivəd', 'An M16 Rifle being reloaded while empty; full sequence'),
-  glockMag: fs(
-    854460,
-    'serøutōnin--deprivəd',
-    'A Glock handgun having its magazine removed and re-inserted // 3 takes',
-  ),
+  // Foley v2: isolated, close-mic'd clicks/clacks with short decays (the earlier M16/Glock sequences were
+  // smeared, scrape-heavy slices that read as "watery").
+  m4hw: fs(393732, 'jackthemurray', 'AR15 M4 Gun Hardware Magazine Movement Sounds'),
+  arReload: fs(815879, 'qubodup', 'Assault Rifle Reload'),
+  g17_01: fs(844184, 'qubodup', 'G17 Handling 01'),
+  g17_02: fs(844185, 'qubodup', 'G17 Handling 02'),
+  g17_03: fs(844186, 'qubodup', 'G17 Handling 03'),
+  g17_04: fs(844187, 'qubodup', 'G17 Handling 04'),
+  g17_06: fs(844189, 'qubodup', 'G17 Handling 06'),
+  g17_07: fs(844190, 'qubodup', 'G17 Handling 07'),
+  g17_08: fs(844191, 'qubodup', 'G17 Handling 08'),
+  taurusMag: fs(589845, 'NoonerBear', 'Taurus G2c Magazine Release'),
+  taurusSlide: fs(589849, 'NoonerBear', 'Taurus G2c Slide Racking'),
+  magHit: fs(444402, 'MootMcnoodles', 'Magazine Hitting Surface.wav'),
+  hammer: fs(151068, 'vabadus', 'Beretta M9 hammer click'),
   gravel: fs(521588, 'Fission9', 'Hiking Boot Footsteps on Gravel'),
   tile: fs(834027, 'IENBA', 'Footsteps On Tile'),
   birds: fs(844820, 'rubindaniel', 'Typical spring birdsong'),
@@ -67,6 +76,17 @@ const range = (n: number) => [...Array(n).keys()];
 const ks = (key: string, out: string, pack: 'impact-sounds' | 'rpg-audio', files: string[], level = -3) =>
   files.map((f, i) => ({ key, out: `${out}-${i}`, origin: kenney(pack, f), level, fadeOut: 0.03 }));
 const kseq = (prefix: string, n: number) => range(n).map((i) => `${prefix}_00${i}.ogg`);
+/** Tight foley slices: start just before each onset, short, quick fade so no smeared tails overlap. */
+const foley = (key: string, out: string, origin: Origin, starts: number[], dur = 0.26) =>
+  starts.map((st, i) => ({
+    key,
+    out: `${out}-${i}`,
+    origin,
+    start: Math.max(0, st - 0.015),
+    dur,
+    fadeOut: Math.min(0.08, dur * 0.4),
+    level: -3,
+  }));
 
 export const SOURCES: SourceEntry[] = [
   // --- Reports ---------------------------------------------------------------------------------------
@@ -106,34 +126,30 @@ export const SOURCES: SourceEntry[] = [
     fadeOut: 0.3,
     level: -3,
   })),
-  // --- Reload foley -----------------------------------------------------------------------------------
-  { key: 'foley.rifle.magRelease', out: 'rl-r-release-0', origin: FS.m16reload, start: 0.5, dur: 0.18 },
-  { key: 'foley.rifle.magOut', out: 'rl-r-out-0', origin: FS.m16reload, start: 0.98, dur: 0.4 },
-  { key: 'foley.rifle.magIn', out: 'rl-r-in-0', origin: FS.m16reload, start: 2.1, dur: 0.42 },
-  { key: 'foley.rifle.magSeat', out: 'rl-r-seat-0', origin: FS.m16reload, start: 3.08, dur: 0.38 },
-  { key: 'foley.rifle.magCheck', out: 'rl-r-check-0', origin: FS.m16reload, start: 4.1, dur: 0.5 },
-  { key: 'foley.rifle.boltRelease', out: 'rl-r-bolt-0', origin: FS.m16reload, start: 4.86, dur: 0.42 },
-  ...[0.24, 3.47, 6.36].map((s, i) => ({
-    key: 'foley.pistol.magOut',
-    out: `rl-p-out-${i}`,
-    origin: FS.glockMag,
-    start: s,
-    dur: 0.32,
-  })),
-  ...[1.7, 4.38, 7.47].map((s, i) => ({
-    key: 'foley.pistol.magIn',
-    out: `rl-p-in-${i}`,
-    origin: FS.glockMag,
-    start: s,
-    dur: 0.2,
-  })),
-  ...[1.9, 4.77, 8.0].map((s, i) => ({
-    key: 'foley.pistol.magSeat',
-    out: `rl-p-seat-${i}`,
-    origin: FS.glockMag,
-    start: s,
-    dur: 0.3,
-  })),
+  // --- Reload foley (tight slices: onset − 15 ms, ≤ 0.3 s, short fade) ---------------------------------
+  ...foley('foley.rifle.magRelease', 'rl-r-release', FS.m4hw, [3.05, 4.61]),
+  ...foley('foley.rifle.magOut', 'rl-r-out', FS.m4hw, [1.37, 9.17]),
+  ...foley('foley.rifle.magOut', 'rl-r-out-q', FS.arReload, [0.0], 0.4),
+  ...foley('foley.rifle.magIn', 'rl-r-in', FS.m4hw, [6.93, 13.98]),
+  ...foley('foley.rifle.magIn', 'rl-r-in-q', FS.arReload, [0.58], 0.36),
+  ...foley('foley.rifle.magSeat', 'rl-r-seat', FS.m4hw, [4.98, 16.63]),
+  ...foley('foley.rifle.magSeat', 'rl-r-seat-q', FS.arReload, [1.35], 0.2),
+  ...foley('foley.rifle.magCheck', 'rl-r-check', FS.m4hw, [11.06, 15.07]),
+  ...foley('foley.rifle.boltRelease', 'rl-r-bolt', FS.m4hw, [5.52, 18.09]),
+  ...foley('foley.rifle.boltRelease', 'rl-r-bolt-q', FS.arReload, [1.66], 0.21),
+  // Pistol: Taurus G2c release+drop clusters and slide drops, Glock 17 handling clicks.
+  ...foley('foley.pistol.magRelease', 'rl-p-release', FS.g17_02, [0], 0.12),
+  ...foley('foley.pistol.magRelease', 'rl-p-release-t', FS.taurusMag, [0.09, 2.81], 0.12),
+  ...foley('foley.pistol.magOut', 'rl-p-out', FS.taurusMag, [4.74, 6.43, 9.06], 0.3),
+  ...foley('foley.pistol.magOut', 'rl-p-out-g', FS.g17_07, [0.05], 0.2),
+  ...foley('foley.pistol.magIn', 'rl-p-in', FS.g17_08, [0], 0.09),
+  ...foley('foley.pistol.magIn', 'rl-p-in-g3', FS.g17_03, [0], 0.25),
+  ...foley('foley.pistol.magSeat', 'rl-p-seat', FS.g17_06, [0], 0.25),
+  ...foley('foley.pistol.magSeat', 'rl-p-seat-t', FS.taurusMag, [8.27, 11.88], 0.18),
+  ...foley('foley.pistol.boltRelease', 'rl-p-slide', FS.taurusSlide, [1.84, 4.65, 11.94, 16.92], 0.25),
+  ...foley('foley.pistol.boltRelease', 'rl-p-slide-g', FS.g17_01, [0], 0.3),
+  ...foley('foley.pistol.magCheck', 'rl-p-check', FS.g17_04, [0], 0.25),
+  ...foley('foley.any.dryFire', 'dry', FS.hammer, [0], 0.18),
   ...ks('foley.any.click', 'click', 'rpg-audio', ['metalClick.ogg', 'metalLatch.ogg']),
   ...ks('foley.cloth', 'cloth', 'rpg-audio', ['cloth1.ogg', 'cloth2.ogg', 'cloth3.ogg', 'cloth4.ogg'], -6),
   // --- Footsteps ----------------------------------------------------------------------------------------
@@ -141,7 +157,6 @@ export const SOURCES: SourceEntry[] = [
   ...ks('step.wood', 'step-wood', 'impact-sounds', kseq('footstep_wood', 5)),
   ...ks('step.carpet', 'step-carpet', 'impact-sounds', kseq('footstep_carpet', 5)),
   ...ks('step.grass', 'step-grass', 'impact-sounds', kseq('footstep_grass', 5)),
-  ...ks('step.dirt', 'step-dirt', 'impact-sounds', kseq('footstep_snow', 5)),
   ...[0.08, 0.84, 1.54, 2.21].map((s, i) => ({
     key: 'step.gravel',
     out: `step-gravel-${i}`,
@@ -162,9 +177,9 @@ export const SOURCES: SourceEntry[] = [
   })),
   // --- Mag drops / impacts --------------------------------------------------------------------------------
   ...ks('mag.hard', 'mag-hard', 'impact-sounds', kseq('impactGeneric_light', 5)),
+  { key: 'mag.hard', out: 'mag-hard-mag', origin: FS.magHit, start: 0, dur: 0.3, fadeOut: 0.08, level: -3 },
   ...ks('mag.metal', 'mag-metal', 'impact-sounds', kseq('impactMetal_light', 5)),
   ...ks('mag.wood', 'mag-wood', 'impact-sounds', kseq('impactPlank_medium', 5)),
-  ...ks('mag.soft', 'mag-soft', 'impact-sounds', kseq('impactSoft_medium', 5)),
   // --- Ambience -------------------------------------------------------------------------------------------
   {
     key: 'amb.outdoor',

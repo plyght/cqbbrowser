@@ -93,6 +93,36 @@ export const SCENARIOS: Record<string, Scenario> = {
         });
     },
   },
+  /** Foley check: pistol reload calm then stressed, isolated (no shots) so the clicks can be inspected. */
+  'pistol-reload-room-v2': {
+    seconds: 5,
+    scene: room(4, 3.5, 2.6, 'drywall'),
+    run: (e) => {
+      const beats = ['magRelease', 'magOut', 'magIn', 'magSeat', 'boltRelease'];
+      const at = [0.3, 0.45, 1.1, 1.35, 1.75];
+      beats.forEach((beat, i) => e.weaponBeat({ weaponId: 'p17', beat, stressed: false, at: at[i] }));
+      e.magDrop({ surface: 'concrete', polymer: true, at: 0.45 });
+      beats.forEach((beat, i) =>
+        e.weaponBeat({ weaponId: 'p17', beat, stressed: true, at: 2.6 + at[i] * 0.8 }),
+      );
+      e.dryFire('p17', 4.3);
+      e.weaponBeat({ weaponId: 'p17', beat: 'magCheck', stressed: false, at: 4.6 });
+    },
+  },
+  /** Rifle in a concrete room: two shots, then an empty reload. Indoors should be the thumpiest. */
+  'rifle-indoor-v2': {
+    seconds: 5,
+    scene: room(4, 4, 2.7),
+    run: (e) => {
+      shot(e, 'sb16', '5.56', 0.3);
+      shot(e, 'sb16', '5.56', 0.65);
+      const beats = ['magRelease', 'magOut', 'magIn', 'magSeat', 'boltRelease'];
+      const at = [2.0, 2.15, 2.9, 3.15, 3.6];
+      beats.forEach((beat, i) => e.weaponBeat({ weaponId: 'sb16', beat, stressed: false, at: at[i] }));
+      e.magDrop({ surface: 'concrete', polymer: true, at: 2.15 });
+      e.weaponBeat({ weaponId: 'sb16', beat: 'magCheck', stressed: false, at: 4.4 });
+    },
+  },
   'suppressed-outdoor': {
     seconds: 3,
     scene: outdoorRange(),
