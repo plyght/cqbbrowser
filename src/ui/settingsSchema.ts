@@ -481,6 +481,25 @@ registerSettings([
     default: G.hapticsStrength,
     format: pct,
   },
+  {
+    tab: 'controls',
+    group: 'Controller',
+    ns: 'input.haptics',
+    key: 'adaptiveTriggers',
+    label: 'DualSense adaptive triggers',
+    kind: 'toggle',
+    default: true,
+    hint: 'Trigger resistance per weapon. Needs the controller connected via "Connect gyro" (Chrome/Edge).',
+  },
+  {
+    tab: 'controls',
+    group: 'Controller',
+    ns: 'input.haptics',
+    key: 'footsteps',
+    label: 'Footstep vibration (sprint)',
+    kind: 'toggle',
+    default: true,
+  },
   // Controls · Gyro (WebHID, Chromium only; Menu.attachInput registers the Connect button)
   {
     tab: 'controls',
