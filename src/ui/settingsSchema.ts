@@ -83,6 +83,12 @@ export function registerSettings(defs: SettingDef[]) {
   }
 }
 
+/** An `order` value that sorts a new entry just before an existing one (e.g. a button at the top of a group). */
+export function orderBefore(ns: string, key: string): number {
+  const i = registry.findIndex((r) => r.ns === ns && r.key === key);
+  return i < 0 ? registry.length : (registry[i].order ?? i) - 0.5;
+}
+
 export function settingsFor(tab: SettingsTab): SettingDef[] {
   return registry
     .map((d, i) => ({ d, i }))

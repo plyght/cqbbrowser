@@ -89,6 +89,13 @@ export class Game {
     this.aimAssist.provider = this.aimAssistProvider();
     this.audio = new AudioEngine(bus, this.ctx.camera);
     this.hud = new Hud(ui);
+    this.hud.bind({
+      camera: this.ctx.camera,
+      lens: this.renderer.bodycam.uniforms,
+      posture: () => this.player,
+      device: () => this.ctx.input.frame.activeDevice,
+      padType: () => this.gamepad.padType,
+    });
     this.menu = new Menu(ui);
     this.menu.attachInput({
       trackpad: this.trackpad,

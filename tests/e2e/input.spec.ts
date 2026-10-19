@@ -79,14 +79,14 @@ test('gamepad: RS turns, LS moves, X hold shows ammo check', async ({ page }) =>
   await steps(page, 10);
   await setPad(page, [0, 0, 0, 0], { [X]: 1 });
   await steps(page, 20);
-  await expect(page.locator('.ammo.show')).toBeVisible();
+  await expect(page.locator('.mag-tag.show')).toBeVisible();
   await page.waitForTimeout(400); // HUD opacity transition
   await page.screenshot({ path: 'screenshots/input-gamepad-ammo.png' });
 
   // Release → readout hides again.
   await setPad(page, [0, 0, 0, 0]);
   await steps(page, 5);
-  await expect(page.locator('.ammo.show')).toHaveCount(0);
+  await expect(page.locator('.mag-tag.show')).toHaveCount(0);
 
   // LT (analog) aims down sights.
   await setPad(page, [0, 0, 0, 0], { 6: 1 });

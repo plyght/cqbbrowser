@@ -7,7 +7,7 @@ import { getDrills, type DrillInfo, type RunResult } from './drills';
 import { FocusNav, type Screen } from './FocusNav';
 import { PlayScreen } from './PlayScreen';
 import { ResultsScreen } from './ResultsScreen';
-import { registerSettings } from './settingsSchema';
+import { orderBefore, registerSettings } from './settingsSchema';
 import { SettingsScreen } from './SettingsScreen';
 
 const VERSION = '0.0.1';
@@ -169,7 +169,7 @@ export class Menu {
         status: () => (io.gyro.connected ? 'Connected' : 'Not connected'),
         run: () => io.gyro.connect(),
         visible: () => io.gyroSupported,
-        order: -1,
+        order: orderBefore('input.gyro', 'enabled'),
       },
       {
         tab: 'controls',
@@ -179,6 +179,7 @@ export class Menu {
         label: TYPING_TIP,
         kind: 'notice',
         visible: () => io.trackpad.typingSuppressionSuspected,
+        order: orderBefore('input.trackpad', 'mode'),
       },
     ]);
   }

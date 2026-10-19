@@ -62,48 +62,65 @@ body {
   display: none !important;
 }
 
-/* ---------------------------------------------------------------- HUD: CAM04 burn-in */
-.overlay-cam {
+/* ---------------------------------------------------------------- HUD (minimal, world-embedded; no boxes) */
+.hud {
+  --hud-fg: #f4f1e8;
+  /* Soft dark halo keeps tiny white text legible on bright gravel and dark berms alike. */
+  --hud-shadow: 0 0 1px rgba(0, 0, 0, 0.9), 0 0 3px rgba(0, 0, 0, 0.75), 0 1px 6px rgba(0, 0, 0, 0.45);
   position: absolute;
-  top: 18px;
-  left: 22px;
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  font-size: 13px;
-  line-height: 1.35;
-  letter-spacing: 0.08em;
-  color: #f2efe6;
-  text-shadow:
-    0 0 2px #000,
-    1px 1px 0 #000;
-  opacity: 0.82;
+  inset: 0;
+  font-family: var(--mono);
+  color: var(--hud-fg);
 }
-.overlay-cam.off {
+/* CAM04 burn-in: thin, small, slightly bloomed camera OSD text. */
+.osd {
+  position: absolute;
+  top: 16px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  letter-spacing: 0.14em;
+  color: rgba(246, 244, 236, 0.86);
+  text-shadow:
+    0 0 1px rgba(0, 0, 0, 0.85),
+    0 0 4px rgba(255, 255, 250, 0.35),
+    0 0 9px rgba(255, 255, 250, 0.12);
+  -webkit-font-smoothing: antialiased;
+}
+.osd.off {
   display: none;
 }
-.overlay-cam .cam-mark {
-  width: 30px;
-  height: 34px;
-  flex: none;
-  background: #f2efe6;
-  -webkit-mask: url('/brand/umbra-mark.svg') center / contain no-repeat;
-  mask: url('/brand/umbra-mark.svg') center / contain no-repeat;
-  filter: drop-shadow(1px 1px 0 #000);
-  opacity: 0.85;
+.osd-l {
+  left: 20px;
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
 }
-.overlay-cam .cam-lines {
+.osd-r {
+  right: 20px;
+  text-align: right;
+}
+.osd .cam-lines {
   display: flex;
   flex-direction: column;
-}
-.overlay-cam .cam-l2 {
-  opacity: 0.75;
-}
-.overlay-cam .cam-ts {
+  white-space: pre;
   font-variant-numeric: tabular-nums;
 }
-.overlay-cam .rec {
-  color: #e33;
+.osd .cam-l2 {
+  opacity: 0.7;
+}
+.osd .cam-mark {
+  width: 24px;
+  height: 28px;
+  flex: none;
+  margin-top: 1px;
+  background: rgba(246, 244, 236, 0.8);
+  -webkit-mask: url('/brand/umbra-mark.svg') center / contain no-repeat;
+  mask: url('/brand/umbra-mark.svg') center / contain no-repeat;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 250, 0.3));
+}
+.osd .rec {
+  color: #ff3b30;
+  text-shadow: 0 0 5px rgba(255, 40, 30, 0.6);
   animation: rec 1.6s steps(1) infinite;
 }
 @keyframes rec {
@@ -111,43 +128,126 @@ body {
     opacity: 0.25;
   }
 }
-.overlay-cam.right {
-  left: auto;
-  right: 22px;
-  display: block;
-  text-align: right;
-}
-.ammo {
+
+/* Ammo check: floats beside the magazine (positioned per frame via transform). */
+.mag-tag {
   position: absolute;
-  bottom: 40px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: var(--mono);
-  font-size: 13px;
-  padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(232, 228, 218, 0.15);
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -16px 0 0 18px;
+  text-shadow: var(--hud-shadow);
   opacity: 0;
-  transition: opacity 120ms;
-  text-shadow: 1px 1px 0 #000;
-  white-space: pre;
+  transition: opacity 120ms ease-out;
+  pointer-events: none;
+  will-change: transform, opacity;
 }
-.ammo.show {
-  opacity: 0.9;
+.mag-tag.show {
+  opacity: 0.94;
+}
+.mag-tag .count {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  line-height: 1;
+}
+.mag-tag .n {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+}
+.mag-tag .plus {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.mag-tag .pips {
+  display: flex;
+  gap: 4px;
+}
+.mag-tag .pips i {
+  width: 5px;
+  height: 9px;
+  border: 1px solid rgba(244, 241, 232, 0.92);
+  box-shadow:
+    0 0 2px rgba(0, 0, 0, 0.8),
+    inset 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.mag-tag .pips i.full {
+  background: var(--hud-fg);
+}
+.mag-tag .pips i.half {
+  background: linear-gradient(0deg, var(--hud-fg) 50%, transparent 50%);
+}
+/* Arcade: persistent tiny count near the mag. */
+.mag-tag.arcade .n {
+  font-size: 14px;
+}
+.mag-tag.arcade .pips {
+  display: none;
+}
+.mag-tag.arcade.show {
+  opacity: 0.75;
 }
 .dot {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 3px;
-  height: 3px;
-  margin: -1.5px;
+  width: 2px;
+  height: 2px;
+  margin: -1px;
   background: #fff;
-  border-radius: 50%;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.9);
   opacity: 0;
 }
 .dot.show {
-  opacity: 0.7;
+  opacity: 0.75;
+}
+/* Contextual corner info: fades in on change, then out. */
+.toast {
+  position: absolute;
+  bottom: 22px;
+  font-size: 11.5px;
+  letter-spacing: 0.16em;
+  text-shadow: var(--hud-shadow);
+  opacity: 0;
+  transition: opacity 400ms ease-in;
+}
+.toast.show {
+  opacity: 0.85;
+  transition: opacity 120ms ease-out;
+}
+.toast-r {
+  right: 24px;
+}
+.toast-l {
+  left: 24px;
+}
+/* World-space interaction prompt: tiny glyph + verb at the object. */
+.world-prompt {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: lowercase;
+  text-shadow: var(--hud-shadow);
+  transform-origin: 0 0;
+  opacity: 0;
+  transition: opacity 140ms;
+  white-space: nowrap;
+}
+.world-prompt b {
+  font-weight: 400;
+  font-size: 13px;
+  text-transform: none;
+  color: #fff;
+}
+.world-prompt.show {
+  opacity: 0.92;
 }
 
 /* ---------------------------------------------------------------- Menu shell */
@@ -261,7 +361,8 @@ body {
 }
 .screen-head h2,
 .res-summary h2,
-.pause h2 {
+.pause h2,
+.prompt h2 {
   margin: 2px 0 14px;
   font-family: var(--display);
   font-weight: 700;

@@ -161,7 +161,7 @@ test('input integration: trackpad prompt, typing tip, gyro button', async ({ pag
   await page.evaluate(() => (window as any).__sb.trackpad.onDetected());
   await expect(page.locator('.screen.prompt')).toBeVisible();
   await page.waitForTimeout(150);
-  await page.screenshot({ path: `${dir}/ui-trackpad-prompt.png` });
+  await page.screenshot({ path: `${dir}/ui-trackpad-prompt.png`, animations: 'disabled' });
   await page.keyboard.press('Enter');
   await expect(page.locator('.screen.prompt')).toBeHidden();
   const mode = await page.evaluate(
@@ -179,6 +179,65 @@ test('input integration: trackpad prompt, typing tip, gyro button', async ({ pag
   const hasHid = await page.evaluate(() => 'hid' in navigator);
   if (hasHid) await expect(page.locator('[data-key="input.gyro.connect"]')).toBeVisible();
   await page.mouse.move(5, 5);
-  await page.screenshot({ path: `${dir}/ui-settings-controls-tips.png` });
+  await page.locator('.settings .notice').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${dir}/ui-settings-controls-tips.png`, animations: 'disabled' });
+  expect(errors).toEqual([]);
+});
+
+test('hud: mag-anchored ammo check, corner toasts, world prompt', async ({ page }) => {
+  test.setTimeout(300_000); // SwiftShader under load: each step renders the full post stack.
+  const errors = await boot(page);
+  await play(page);
+  await steps(page, 30);
+  // Hold reload → ammo check: count + pips float beside the magazine.
+  await steps(page, 20, { down: ['reload'] });
+  await page.waitForTimeout(200);
+  await expect(page.locator('.mag-tag.show')).toHaveCount(1);
+  await page.screenshot({ path: `${dir}/ui-hud-magcheck-bright.png` });
+  await steps(page, 3);
+  await expect(page.locator('.mag-tag.show')).toHaveCount(0);
+
+  // Dark background: dim every light (an unlit indoor room stand-in) and check again.
+  await page.evaluate(() => {
+    const g = (window as any).__sb;
+    g.ctx.scene.traverse((o: any) => {
+      if (o.isLight) o.intensity *= 0.06;
+    });
+    (window as any).__bg = g.ctx.scene.background;
+    g.ctx.scene.background = null;
+  });
+  await steps(page, 1, { look: { yaw: 0.6, pitch: -0.2 } });
+  await steps(page, 20);
+  await steps(page, 20, { down: ['reload'] });
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: `${dir}/ui-hud-magcheck-dark.png` });
+  await steps(page, 3);
+
+  // Weapon switch → bottom-right toast; crouch → bottom-left posture toast.
+  await page.evaluate(() => {
+    const g = (window as any).__sb;
+    g.ctx.scene.traverse((o: any) => {
+      if (o.isLight) o.intensity /= 0.06;
+    });
+    g.ctx.scene.background = (window as any).__bg;
+  });
+  await steps(page, 1, { look: { yaw: -0.6, pitch: 0.2 } });
+  await steps(page, 2, { down: ['switchWeapon'] });
+  await steps(page, 2, { down: ['crouch'] });
+  await steps(page, 12);
+  await page.waitForTimeout(200);
+  await expect(page.locator('.toast-r.show')).toHaveCount(1);
+  await page.screenshot({ path: `${dir}/ui-hud-toasts.png` });
+
+  // World-space prompt (no doors on the square range yet: fake an anchor on the first target).
+  await page.evaluate(() => {
+    const g = (window as any).__sb;
+    const t = g.range.targets[0];
+    g.hud.setPrompt({ anchor: t.mesh ?? t.group, action: 'interact', verb: 'open' });
+  });
+  await steps(page, 20);
+  await page.waitForTimeout(400);
+  await expect(page.locator('.world-prompt.show')).toHaveCount(1);
+  await page.screenshot({ path: `${dir}/ui-hud-prompt.png` });
   expect(errors).toEqual([]);
 });
