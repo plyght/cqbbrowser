@@ -48,6 +48,9 @@ export class Hud {
   private dot = document.createElement('div');
   private toastW = document.createElement('div');
   private toastP = document.createElement('div');
+  /** Gear toast (NVG / IR / flashbang count), stacked above the weapon toast. */
+  private toastG = document.createElement('div');
+  private toastGUntil = 0;
   private promptEl = document.createElement('div');
   mode: 'arcade' | 'standard' | 'hardcore' = 'standard';
   overlay = true;
@@ -89,6 +92,8 @@ export class Hud {
     this.dot.className = 'dot';
     this.toastW.className = 'toast toast-r';
     this.toastP.className = 'toast toast-l';
+    this.toastG.className = 'toast toast-r';
+    this.toastG.style.bottom = '40px';
     this.promptEl.className = 'world-prompt';
     this.hit.className = 'hitmark';
     this.hit.innerHTML = '<i></i><i></i><i></i><i></i>';
@@ -100,6 +105,7 @@ export class Hud {
       this.hit,
       this.toastW,
       this.toastP,
+      this.toastG,
       this.promptEl,
     );
     // Hit confirmation: a brief, small four-tick marker at screen centre (off in Hardcore / via settings).
@@ -260,6 +266,7 @@ export class Hud {
     }
     this.toastW.classList.toggle('show', !hard && this.now < this.toastWUntil);
     this.toastP.classList.toggle('show', !hard && this.now < this.toastPUntil);
+    this.toastG.classList.toggle('show', !hard && this.now < this.toastGUntil);
 
     // World-space prompt.
     let pt: { x: number; y: number } | null = null;
@@ -279,6 +286,12 @@ export class Hud {
     if (pt) this.clampToView(pt);
     this.follow(this.promptPos, this.promptEl, pt, dt);
     this.promptEl.classList.toggle('show', !!pt);
+  }
+
+  /** Gear status toast (NVG ▼, IR, flashbangs left). */
+  toast(text: string) {
+    this.toastG.textContent = text;
+    this.toastGUntil = this.now + TOAST_S;
   }
 
   /** Force a corner toast now (e.g. drills announcing something). */

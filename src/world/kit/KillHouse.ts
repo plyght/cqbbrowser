@@ -1,18 +1,38 @@
-import { Matrix4, Vector3 } from 'three';
+import { Group, Matrix4, Vector3, type Mesh } from 'three';
+import type { RAPIER } from '../../physics/Physics';
+import { settings } from '../../settings/Settings';
 import { PaperTarget, type TargetEnv } from '../targets';
-import { groundGeo } from '../geo';
+import { groundGeo, StaticBatch } from '../geo';
 import { Door } from './Door';
+import { installInteriorLighting, InteriorLighting, type OccluderSeg } from './interiorLight';
 import {
   assignRoles,
+  ceilingOf,
   deriveRoomGraph,
-  DOOR_H,
+  mulberry32,
   DOOR_W,
+  openingSpan,
+  setGraphRoof,
   wallAxis,
   wallOf,
   wallPieces,
   type Layout,
   type RoomGraph,
 } from './layout';
+import { buildPracticals, updatePracticals, type Practical } from './practicals';
+import { buildRoof, buildSunShafts } from './roof';
+
+/** Kill-house options (Settings → Gameplay; `?roof=0` / `?roof=1` overrides for overview/catwalk runs). */
+export const killHouseSettings = settings.ns('world.killhouse', { roof: true });
+
+export function roofFromUrl(): boolean | null {
+  try {
+    const r = new URLSearchParams(location.search).get('roof');
+    return r === null ? null : r !== '0' && r !== 'false';
+  } catch {
+    return null;
+  }
+}
 
 const STUD = { w: 0.038, d: 0.089 };
 const SPACING = 0.406; // 16" on centre
@@ -30,13 +50,27 @@ export class KillHouse {
   readonly start: Vector3;
   readonly startYaw: number;
   readonly finish: { min: Vector3; max: Vector3 };
+  /** Roof (and the catwalk it replaces) live in their own groups so a drill can toggle them. */
+  readonly roofGroup = new Group();
+  readonly catwalkGroup = new Group();
+  readonly lighting: InteriorLighting | null = null;
+  readonly practicals: Practical[] = [];
+  private roofColliders: RAPIER.Collider[] = [];
+  private catwalkColliders: RAPIER.Collider[] = [];
+  private shafts: Mesh[] = [];
+  private doorLeaves: { door: Door; w: number; h: number }[] = [];
+  private leakDoors: { door: Door; index: number }[] = [];
+  private roofOn = false;
+  private rand = mulberry32(77);
 
   constructor(
     env: TargetEnv,
     readonly layout: Layout,
     readonly origin: Vector3,
+    opts: { roof?: boolean } = {},
   ) {
     const { batch, mats, ctx } = env;
+    if (layout.roof) installInteriorLighting();
     const o = origin;
     const H = layout.wallHeight;
     const t = layout.wallThickness;
@@ -126,7 +160,7 @@ export class KillHouse {
       if (!w) continue;
       const ax = wallAxis(w);
       const width = op.width ?? DOOR_W;
-      const height = op.height ?? DOOR_H;
+      const { bottom, top: height } = openingSpan(op);
       const c = at(op.at[0], op.at[1]);
       const along = ax === 'x' ? new Vector3(1, 0, 0) : new Vector3(0, 0, 1);
       const normal = ax === 'x' ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0);
@@ -134,7 +168,12 @@ export class KillHouse {
       for (const s of [-1, 1]) {
         const j = c.clone().addScaledVector(along, s * (width / 2 - 0.0095));
         const [sx, sz] = ax === 'x' ? [0.019, jd] : [jd, 0.019];
-        batch.box(mats.lumber, j.x, 0, j.z, sx, height, sz);
+        batch.box(mats.lumber, j.x, bottom, j.z, sx, height - bottom, sz);
+      }
+      if (bottom > 0) {
+        // Window stool: a 2x sill board proud of both faces.
+        const [sx, sz] = ax === 'x' ? [width + 0.04, jd + 0.03] : [jd + 0.03, width + 0.04];
+        batch.box(mats.lumber, c.x, bottom - 0.038, c.z, sx, 0.038, sz, { tag: { surface: 'wood' } });
       }
       if (height < H - 0.01) {
         const [sx, sz] = ax === 'x' ? [width, jd] : [jd, width];
@@ -164,10 +203,14 @@ export class KillHouse {
         open: d.open,
       });
       this.doors.push(door);
+      this.doorLeaves.push({ door, w: width - 0.05, h: height });
     }
 
-    // Instructor catwalk on top of the walls + stairs at the open end.
+    // Instructor catwalk on top of the walls + stairs at the open end (own group: the roof replaces it).
+    env.parent.add(this.roofGroup, this.catwalkGroup);
     if (layout.catwalk) {
+      const batch = new StaticBatch(ctx.physics);
+      const n0 = ctx.physics.tags.size;
       const cw = layout.catwalk;
       const a = at(cw.a[0], cw.a[1]),
         b = at(cw.b[0], cw.b[1]);
@@ -246,6 +289,24 @@ export class KillHouse {
           tag: { surface: 'metal' },
         });
       }
+      batch.build(this.catwalkGroup);
+      // Every collider created since n0 belongs to the catwalk.
+      const handles = [...ctx.physics.tags.keys()].slice(n0);
+      for (const h of handles) {
+        const col = ctx.physics.world.getCollider(h);
+        if (col) this.catwalkColliders.push(col);
+      }
+    }
+
+    // Roof, practical lights and the interior-lighting data.
+    const fp = { minX, maxX, minZ, maxZ };
+    if (layout.roof) {
+      const rb = new StaticBatch(ctx.physics);
+      this.roofColliders = buildRoof(rb, mats, layout, fp, at);
+      this.practicals = buildPracticals(rb, mats, this.roofGroup, layout, at);
+      rb.build(this.roofGroup);
+      this.shafts = buildSunShafts(this.roofGroup, layout, at);
+      this.lighting = this.buildLighting(fp, at);
     }
 
     // Paper threats / no-shoots.
@@ -255,14 +316,88 @@ export class KillHouse {
       this.targets.push(new PaperTarget(env, `kh.${lt.id}`, p, yaw, lt.role === 'noshoot', 1.32));
     }
 
-    this.graph = deriveRoomGraph(layout, [o.x, o.z], layout.id);
+    this.graph = deriveRoomGraph(layout, [o.x, o.z], layout.id, false);
     for (const d of this.doors) d.portal = this.graph.portals.find((p) => p.id === `${layout.id}.${d.id}`);
+    const forced = opts.roof ?? roofFromUrl();
+    this.setRoof(!!layout.roof && (forced ?? killHouseSettings.get().roof));
+    if (forced === null) killHouseSettings.onChange((v) => this.setRoof(v.roof));
     this.start = at(layout.start.at[0], layout.start.at[1]);
     this.startYaw = layout.start.yaw;
     this.finish = {
       min: at(layout.finish.min[0], layout.finish.min[1]),
       max: at(layout.finish.max[0], layout.finish.max[1]).setY(3),
     };
+  }
+
+  get roofed() {
+    return this.roofOn;
+  }
+
+  /**
+   * Roof on: roof + practical lights + dark interior; the catwalk comes down. Roof off: open-top daylight house
+   * with the instructor catwalk (overview/replay runs). Colliders, the audio room graph and lighting follow.
+   */
+  setRoof(on: boolean) {
+    on = on && !!this.layout.roof;
+    this.roofOn = on;
+    this.roofGroup.visible = on;
+    this.catwalkGroup.visible = !on;
+    for (const c of this.roofColliders) c.setEnabled(on);
+    for (const c of this.catwalkColliders) c.setEnabled(!on);
+    this.lighting?.setRoof(on);
+    setGraphRoof(this.graph, this.layout, on);
+  }
+
+  private buildLighting(
+    fp: { minX: number; maxX: number; minZ: number; maxZ: number },
+    at: (x: number, z: number) => Vector3,
+  ) {
+    const L = this.layout;
+    const a = at(fp.minX, fp.minZ),
+      b = at(fp.maxX, fp.maxZ);
+    const lighting = new InteriorLighting({
+      minX: a.x,
+      minZ: a.z,
+      maxX: b.x,
+      maxZ: b.z,
+      top: ceilingOf(L) + 0.002,
+    });
+    const segs: OccluderSeg[] = [];
+    const ext = 0.02;
+    for (const p of wallPieces(L)) {
+      const c = at(p.x, p.z);
+      const half = (p.axis === 'x' ? p.sx : p.sz) / 2 + ext;
+      const s: OccluderSeg =
+        p.axis === 'x'
+          ? { a: [c.x - half, c.z], b: [c.x + half, c.z], y0: p.y, y1: p.y + p.h }
+          : { a: [c.x, c.z - half], b: [c.x, c.z + half], y0: p.y, y1: p.y + p.h };
+      segs.push(s);
+    }
+    lighting.setStatic(segs);
+    // Exterior doors and windows let daylight in.
+    const xs = L.rooms.flatMap((r) => [r.min[0], r.max[0]]);
+    const zs = L.rooms.flatMap((r) => [r.min[1], r.max[1]]);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2,
+      cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+    for (const o of L.openings) {
+      const w = wallOf(L, o.at);
+      if (!w?.exterior) continue;
+      const ax = wallAxis(w);
+      const n: [number, number] =
+        ax === 'x' ? [0, Math.sign(o.at[1] - cz) || 1] : [Math.sign(o.at[0] - cx) || 1, 0];
+      const { bottom, top } = openingSpan(o);
+      const door = this.doors.find((d) => d.id === o.id);
+      if (door) this.leakDoors.push({ door, index: lighting.leaks.length });
+      lighting.addLeak({
+        center: at(o.at[0], o.at[1]).setY((bottom + top) / 2),
+        normal: n,
+        halfW: (o.width ?? DOOR_W) / 2,
+        halfH: (top - bottom) / 2,
+        open: door ? door.openAmount() : 1,
+      });
+    }
+    lighting.setEnabled(true);
+    return lighting;
   }
 
   /** Randomise threat/no-shoot placement for a run. Returns the role map. */
@@ -292,7 +427,32 @@ export class KillHouse {
     for (const d of this.doors) d.fixedUpdate(dt, playerPos, playerVel);
   }
 
-  update() {
+  private tmpA = new Vector3();
+  private tmpB = new Vector3();
+
+  update(dt = 1 / 60) {
     for (const d of this.doors) d.sync();
+    updatePracticals(this.practicals, dt, this.roofOn, this.rand);
+    const lt = this.lighting;
+    if (!lt) return;
+    // Door leaves block light too; open exterior doors let daylight in.
+    const segs: OccluderSeg[] = [];
+    for (const { door, w, h } of this.doorLeaves) {
+      door.mesh.updateMatrixWorld();
+      const a = this.tmpA.set(0.006, 0, 0).applyMatrix4(door.mesh.matrixWorld);
+      const b = this.tmpB.set(w, 0, 0).applyMatrix4(door.mesh.matrixWorld);
+      segs.push({ a: [a.x, a.z], b: [b.x, b.z], y0: 0.02, y1: h - 0.01 });
+    }
+    lt.setDynamic(segs);
+    let dirty = false;
+    for (const { door, index } of this.leakDoors) {
+      const o = door.openAmount();
+      if (Math.abs(lt.leaks[index].open - o) > 0.005) {
+        lt.leaks[index].open = o;
+        dirty = true;
+      }
+    }
+    if (dirty) lt.flushLeaks();
+    for (const m of this.shafts) m.visible = this.roofOn;
   }
 }

@@ -12,6 +12,7 @@ import { DynamicResolution } from './DynamicResolution';
 import { PerfOverlay } from './PerfOverlay';
 import { BodycamEffect } from './post/BodycamEffect';
 import type { LensParams } from './post/lens';
+import { NvgEffect } from './post/nvg/NvgEffect';
 import { QUALITY, toTier, videoSettings, type QualityPreset, type QualityTier } from './quality';
 
 /**
@@ -27,6 +28,9 @@ export class Renderer {
   baseFov = 92;
   readonly composer: EffectComposer;
   readonly bodycam: BodycamEffect;
+  /** NVG view + flashbang white-out (src/gear drives it); its pass only runs while active. */
+  readonly nvg = new NvgEffect();
+  private nvgPass: EffectPass;
   readonly dynres = new DynamicResolution();
   quality: QualityPreset;
   tier: QualityTier;
@@ -68,6 +72,9 @@ export class Renderer {
     this.bodycam.uniforms.get('uGamma')!.value = 1 / Math.max(0.5, v.gamma);
     this.composer = new EffectComposer(this.renderer, { frameBufferType: HalfFloatType });
     this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.nvgPass = new EffectPass(this.camera, this.nvg);
+    this.nvgPass.enabled = false;
+    this.composer.addPass(this.nvgPass);
     this.composer.addPass(new EffectPass(this.camera, this.bodycam));
     videoSettings.onChange((s) => {
       this.bodycam.uniforms.get('uGamma')!.value = 1 / Math.max(0.5, s.gamma);
@@ -191,6 +198,7 @@ export class Renderer {
     this.measureCameraMotion(dt);
     if (this.frameNo % this.quality.shadowEvery === 0) this.renderer.shadowMap.needsUpdate = true;
     this.renderer.info.reset();
+    this.nvgPass.enabled = this.nvg.active;
     this.composer.render(dt);
     this.perf?.update(dt, this.renderer, this.effectiveScale, this.tier);
   }

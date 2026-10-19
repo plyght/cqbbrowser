@@ -590,3 +590,116 @@ export function windBed(sec: number, rate: number, rng: Rng) {
   }
   return normalisePeak(out.subarray(0, out.length - xf).slice(), 0.5);
 }
+
+// --- Gear (src/gear): flashbang, pin/spoon, grenade body, NVG -----------------------------------------------------
+
+/**
+ * Flashbang report (M84-class, ~170 dB at 1.5 m): a near-instant broadband crack — far sharper and denser than
+ * a gunshot, the flash powder deflagrates in < 1 ms — riding a deep pressure punch, with the steel body ringing
+ * briefly. Mono; the room, distance and the mic stage come from the engine.
+ */
+export function flashbangBlast(rate: number, rng: Rng) {
+  const out = alloc(0.9, rate);
+  // Front: ~0.25 ms rise N-wave, then a 3 ms spray of white noise (clipped flat in any real recording).
+  const nw = Math.max(2, Math.floor(0.0005 * rate));
+  for (let i = 0; i < nw * 2; i++) out[i] += i < nw ? 1.4 * (1 - i / nw) : -1.1 * (1 - (i - nw) / nw);
+  burst(out, rate, rng, { dur: 0.004, gain: 1.6, hp: 600, attack: 0.00003 });
+  burst(out, rate, rng, { dur: 0.05, gain: 0.7, hp: 300, lp: 9000 });
+  burst(out, rate, rng, { at: 0.004, dur: 0.18, gain: 0.35, lp: 2500 });
+  // Pressure punch: 70 → 30 Hz half-cycles, decaying over ~0.25 s.
+  let ph = 0;
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate;
+    const f = 30 + 45 * Math.exp(-t / 0.04);
+    ph += (TAU * f) / rate;
+    out[i] += 1.1 * Math.sin(ph) * Math.min(1, t / 0.001) * Math.exp(-t / 0.11);
+  }
+  // Body ring (perforated steel can) and the fuse cap clatter.
+  modal(
+    out,
+    rate,
+    [
+      [2350, 0.05, 0.12],
+      [5100, 0.035, 0.08],
+      [7900, 0.02, 0.05],
+    ],
+    0.002,
+    rng,
+  );
+  return normalisePeak(out, 0.98);
+}
+
+/** Pin pull: the ring's scrape out of the fuse and a small ping as the pin clears. */
+export function pinPull(rate: number, rng: Rng) {
+  const out = alloc(0.32, rate);
+  burst(out, rate, rng, { dur: 0.12, gain: 0.35, hp: 2500, lp: 9000, attack: 0.02 });
+  modal(
+    out,
+    rate,
+    [
+      [3900, 0.35, 0.09],
+      [6100, 0.25, 0.06],
+    ],
+    0.13,
+    rng,
+  );
+  burst(out, rate, rng, { at: 0.13, dur: 0.004, gain: 0.5, hp: 3000 });
+  return normalisePeak(out, 0.7);
+}
+
+/** Spoon (safety lever) flying off: a sprung "tink" with a flutter. */
+export function spoonFlick(rate: number, rng: Rng) {
+  const out = alloc(0.4, rate);
+  modal(
+    out,
+    rate,
+    [
+      [2150 + rng() * 200, 0.5, 0.18],
+      [4700 + rng() * 300, 0.35, 0.12],
+      [7300, 0.18, 0.07],
+    ],
+    0,
+    rng,
+  );
+  burst(out, rate, rng, { dur: 0.003, gain: 0.6, hp: 2500 });
+  return normalisePeak(out, 0.7);
+}
+
+/** Steel grenade body bouncing on a hard floor: hollow clunk + short can ring. */
+export function grenadeBounce(rate: number, rng: Rng) {
+  const out = alloc(0.25, rate);
+  burst(out, rate, rng, { dur: 0.015, gain: 1, lp: 2500, hp: 120 });
+  modal(
+    out,
+    rate,
+    [
+      [1180 * (0.95 + rng() * 0.1), 0.35, 0.05],
+      [2900 * (0.95 + rng() * 0.1), 0.25, 0.04],
+      [5300, 0.12, 0.03],
+    ],
+    0.001,
+    rng,
+  );
+  return normalisePeak(out, 0.8);
+}
+
+/** NVG mount detent: two quick plastic/metal clicks (lever + lock). */
+export function nvgDetent(rate: number, rng: Rng) {
+  const out = alloc(0.12, rate);
+  burst(out, rate, rng, { dur: 0.003, gain: 0.9, hp: 1500, lp: 9000 });
+  modal(out, rate, [[2600, 0.3, 0.02]], 0, rng);
+  burst(out, rate, rng, { at: 0.045, dur: 0.003, gain: 0.6, hp: 1800, lp: 8000 });
+  modal(out, rate, [[3400, 0.2, 0.015]], 0.045, rng);
+  return normalisePeak(out, 0.7);
+}
+
+/** Image-intensifier power-supply whine: a faint ~10 kHz tone with a slight 120 Hz ripple, 1 s loop. */
+export function nvgWhine(rate: number) {
+  const out = alloc(1, rate);
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate;
+    out[i] =
+      Math.sin(TAU * 10200 * t) * (0.85 + 0.15 * Math.sin(TAU * 120 * t)) + 0.2 * Math.sin(TAU * 5100 * t);
+  }
+  return normalisePeak(out, 0.5);
+}

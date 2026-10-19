@@ -21,7 +21,11 @@ export type ButtonAction =
   | 'fixCam'
   | 'slowWalk'
   | 'restart'
-  | 'pause';
+  | 'pause'
+  // Gear (src/gear): helmet NVG flip, throwable (hold = wind up/cook, quick tap = underhand roll), IR laser.
+  | 'nvg'
+  | 'throw'
+  | 'ir';
 
 export type DeviceKind = 'keyboardMouse' | 'trackpad' | 'gamepad';
 

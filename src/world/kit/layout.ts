@@ -26,9 +26,13 @@ export interface LayoutWall {
 export interface LayoutOpening {
   id: string;
   at: V2;
-  kind: 'door' | 'opening';
+  /** `window`: an unglazed opening with a sill (wall below it) — daylight comes in, you can shoot through. */
+  kind: 'door' | 'opening' | 'window';
   width?: number;
+  /** Top of the opening (header underside), metres above the floor. */
   height?: number;
+  /** Windows: sill height (default 1.0). */
+  sill?: number;
   door?: {
     /** Which end of the opening (along the wall axis) the hinge is on. */
     hinge: 'min' | 'max';
@@ -58,7 +62,39 @@ export interface Layout {
   targets: LayoutTarget[];
   start: { at: V2; yaw: number };
   finish: { min: V2; max: V2 };
+  /** Instructor catwalk over the walls; only built when the house has no roof. */
   catwalk?: { a: V2; b: V2; width: number; height: number };
+  /** Flat roof: plywood sheathing on joists bearing on the wall top plates. */
+  roof?: LayoutRoof;
+  /** Practical lights (bare bulbs, work lights) for the roofed house. Rooms without one stay dark. */
+  lights?: LayoutLight[];
+}
+
+export interface LayoutRoof {
+  /** Axis the joists span along. */
+  span: 'x' | 'z';
+  /** Joist depth (2x6 = 0.14) and on-centre spacing. */
+  joistDepth: number;
+  spacing: number;
+  /** Eave overhang past the exterior wall faces. */
+  overhang: number;
+  /** Sheathing thickness (penetrable by rounds). */
+  sheathing: number;
+}
+
+export interface LayoutLight {
+  id: string;
+  kind: 'bulb' | 'work';
+  at: V2;
+  /** Height of the lamp (bulbs hang from the joists by default). */
+  y?: number;
+  /** Work lights: the point (x, z) the head is aimed at. */
+  aim?: V2;
+  on?: boolean;
+  /** Bad socket: random dropouts. */
+  flicker?: boolean;
+  /** Luminous intensity (candela) override. */
+  intensity?: number;
 }
 
 export interface RoomNode {
@@ -171,7 +207,8 @@ export function wallPieces(layout: Layout): WallPiece[] {
       .map((o) => {
         const half = (o.width ?? DOOR_W) / 2;
         const c = o.at[i];
-        return { lo: c - half, hi: c + half, h: o.height ?? DOOR_H };
+        const { bottom, top } = openingSpan(o);
+        return { lo: c - half, hi: c + half, h: top, sill: bottom };
       })
       .sort((a, b) => a.lo - b.lo);
     const outSign = w.exterior ? Math.sign(fixed - (ax === 'x' ? cz : cx)) || 1 : 0;
@@ -193,6 +230,7 @@ export function wallPieces(layout: Layout): WallPiece[] {
     let cur = lo;
     for (const o of ops) {
       piece(cur, o.lo, 0, H);
+      piece(o.lo, o.hi, 0, o.sill);
       piece(o.lo, o.hi, o.h, H - o.h);
       cur = o.hi;
     }
@@ -202,12 +240,17 @@ export function wallPieces(layout: Layout): WallPiece[] {
 }
 
 /** Derive the audio room/portal graph from a layout placed at `origin` (world x, z). */
-export function deriveRoomGraph(layout: Layout, origin: V2 = [0, 0], prefix = layout.id): RoomGraph {
-  const H = layout.wallHeight;
+export function deriveRoomGraph(
+  layout: Layout,
+  origin: V2 = [0, 0],
+  prefix = layout.id,
+  roofed = !!layout.roof,
+): RoomGraph {
+  const H = roofed ? ceilingOf(layout) : layout.wallHeight;
   const [ox, oz] = origin;
   const rid = (id: string) => (id === OUTSIDE ? OUTSIDE : `${prefix}.${id}`);
   const rooms: RoomNode[] = layout.rooms.map((r) => {
-    const h = r.height ?? H;
+    const h = roofed ? H : (r.height ?? H);
     const sx = r.max[0] - r.min[0],
       sz = r.max[1] - r.min[1];
     return {
@@ -217,7 +260,7 @@ export function deriveRoomGraph(layout: Layout, origin: V2 = [0, 0], prefix = la
       min: [r.min[0] + ox, 0, r.min[1] + oz],
       max: [r.max[0] + ox, h, r.max[1] + oz],
       ceilingHeight: h,
-      openTop: true,
+      openTop: !roofed,
       floor: r.floor ?? 'concrete_dusty',
       walls: 'plywood',
       volume: sx * sz * h,
@@ -233,19 +276,53 @@ export function deriveRoomGraph(layout: Layout, origin: V2 = [0, 0], prefix = la
     const a = roomAt(layout, probe(-1))?.id ?? OUTSIDE;
     const b = roomAt(layout, probe(1))?.id ?? OUTSIDE;
     const width = o.width ?? DOOR_W;
-    const height = o.height ?? DOOR_H;
+    const { bottom, top } = openingSpan(o);
     portals.push({
       id: `${prefix}.${o.id}`,
-      kind: o.kind,
+      kind: o.kind === 'door' ? 'door' : 'opening',
       rooms: [rid(a), rid(b)],
-      center: [o.at[0] + ox, height / 2, o.at[1] + oz],
+      center: [o.at[0] + ox, (bottom + top) / 2, o.at[1] + oz],
       normal: [n[0], 0, n[1]],
       width,
-      height,
+      height: top - bottom,
       open: o.kind === 'door' ? (o.door?.open ?? 0) : 1,
     });
   }
-  // Every room is open to the sky (no roof).
+  // Without a roof every room is open to the sky.
+  if (!roofed) skyPortals(rooms, portals);
+  return { rooms, portals };
+}
+
+/** Ceiling (sheathing underside) height of a roofed house: joists bear on the wall top plates. */
+export function ceilingOf(layout: Layout) {
+  return layout.wallHeight + (layout.roof?.joistDepth ?? 0);
+}
+
+/** Vertical extent of an opening: doors/openings from the floor, windows from the sill. */
+export function openingSpan(o: LayoutOpening): { bottom: number; top: number } {
+  if (o.kind === 'window') return { bottom: o.sill ?? 1.0, top: o.height ?? 2.0 };
+  return { bottom: 0, top: o.height ?? DOOR_H };
+}
+
+/**
+ * Switch a live room graph between roofed and open-top in place (rooms keep identity; door portals stay
+ * linked): ceiling heights, AABBs, volumes and the sky portals follow.
+ */
+export function setGraphRoof(g: RoomGraph, layout: Layout, roofed: boolean) {
+  const h = roofed ? ceilingOf(layout) : layout.wallHeight;
+  for (const r of g.rooms) {
+    const lr = layout.rooms.find((x) => r.id.endsWith(`.${x.id}`));
+    const rh = roofed ? h : (lr?.height ?? h);
+    r.ceilingHeight = rh;
+    r.max[1] = rh;
+    r.openTop = !roofed;
+    r.volume = (r.max[0] - r.min[0]) * (r.max[2] - r.min[2]) * rh;
+  }
+  for (let i = g.portals.length - 1; i >= 0; i--) if (g.portals[i].kind === 'sky') g.portals.splice(i, 1);
+  if (!roofed) skyPortals(g.rooms, g.portals);
+}
+
+function skyPortals(rooms: RoomNode[], portals: Portal[]) {
   for (const r of rooms) {
     portals.push({
       id: `${r.id}.sky`,
@@ -258,7 +335,6 @@ export function deriveRoomGraph(layout: Layout, origin: V2 = [0, 0], prefix = la
       open: 1,
     });
   }
-  return { rooms, portals };
 }
 
 /** Deterministic PRNG (mulberry32). */

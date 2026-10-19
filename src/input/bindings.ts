@@ -34,6 +34,10 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   slowWalk: ['AltLeft'],
   restart: ['Backspace'],
   pause: ['Escape'],
+  // Gear: G flips the helmet NVG, 4 / mouse side button throws (hold to wind up, tap to roll), Y = IR laser.
+  nvg: ['KeyG'],
+  throw: ['Digit4', 'Mouse3'],
+  ir: ['KeyY'],
   // Snap turns (trackpad helper, §7.3) — only active when enabled; they take precedence over other uses of the key.
   snapLeft: ['KeyZ'],
   snapRight: ['KeyX'],
@@ -97,7 +101,8 @@ export const PAD = {
 /**
  * Controller "logical buttons". Most map 1:1 to ButtonActions; a few are gestures interpreted by Gamepad.ts:
  * dpadUp (tap = aimMode, hold = magnifier), dpadDown (tap = ready cycle, hold = fixCam),
- * sprint (LS click latches sprint), restart (hold View).
+ * light (D-pad left: tap = weapon light, hold = flip NVG), fireMode (D-pad right: tap = fire mode, hold = IR
+ * laser), sprint (LS click latches sprint), restart (hold View). throw = RS click (hold to wind up / cook).
  */
 export type PadAction =
   | 'interact'
@@ -114,7 +119,8 @@ export type PadAction =
   | 'fixCamOrReady'
   | 'aimModeOrMagnifier'
   | 'light'
-  | 'fireMode';
+  | 'fireMode'
+  | 'throw';
 
 export type PadBindings = Record<PadAction, number>;
 
@@ -134,6 +140,7 @@ export const DEFAULT_PAD_BINDINGS: PadBindings = {
   fixCamOrReady: PAD.Down,
   light: PAD.Left,
   fireMode: PAD.Right,
+  throw: PAD.RS,
 };
 
 export type PadType = 'xbox' | 'playstation' | 'switch' | 'generic';
@@ -215,6 +222,9 @@ const ACTION_TO_PAD: Partial<Record<ButtonAction, PadAction>> = {
   magnifier: 'aimModeOrMagnifier',
   light: 'light',
   fireMode: 'fireMode',
+  nvg: 'light',
+  ir: 'fireMode',
+  throw: 'throw',
 };
 
 const KEY_NAMES: Record<string, string> = {

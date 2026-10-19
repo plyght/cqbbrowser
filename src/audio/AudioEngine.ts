@@ -167,6 +167,13 @@ export class AudioEngine {
     }
     for (const cls of ['hard', 'metal', 'wood', 'soft'] as const)
       reg(KEYS.mag(cls), () => n(3, () => synth.impact(r, rng, cls !== 'soft', true)));
+    // Gear (src/gear).
+    reg('gear.flashbang', () => n(2, () => synth.flashbangBlast(r, rng)));
+    reg('gear.pin', () => n(2, () => synth.pinPull(r, rng)));
+    reg('gear.spoon', () => n(3, () => synth.spoonFlick(r, rng)));
+    reg('gear.bounce', () => n(4, () => synth.grenadeBounce(r, rng)));
+    reg('gear.nvgDetent', () => n(2, () => synth.nvgDetent(r, rng)));
+    reg('gear.nvgWhine', () => [synth.nvgWhine(r)]);
   }
 
   /** Pick a variant; generate the procedural stand-in on first use if no set provides the key. */
@@ -289,6 +296,115 @@ export class AudioEngine {
     bus.on('timerBeep', (e) => this.beep(e.kind));
     bus.on('impact', (e) => this.impact(e));
     bus.on('targetHit', (e) => this.targetHit(e));
+    bus.on('flashbang', (e) => this.flashbang(e));
+    bus.on('gearSound', (e) => this.gearSound(e));
+    bus.on('nvg', (e) => this.nvgHum(e.on));
+  }
+
+  // --- Gear (src/gear) -----------------------------------------------------------------------------------
+
+  /**
+   * Flashbang: the loudest thing the mic ever hears. Delayed by distance, saturates the capsule, slams the
+   * room (pressure + tail, much worse indoors), and leaves the listener with tinnitus and dulled hearing for
+   * seconds (`hearing` from the gear exposure model; applies in every listening mode).
+   */
+  flashbang(e: Pick<GameEvents['flashbang'], 'point' | 'hearing' | 'indoor' | 'training'> & { at?: number }) {
+    const sp = this.spatial(e.point);
+    const at = (e.at ?? this.now()) + sp.d / SPEED_OF_SOUND;
+    const a = this.acoustics;
+    const enc = Math.max(a.enclosure, e.indoor ? 0.7 : 0);
+    const k = e.training ? 0.6 : 1;
+    const near = AudioEngine.dist(sp.d, 2.5);
+    const blast = this.pick('gear.flashbang');
+    if (blast)
+      this.mixer.play(blast, {
+        at,
+        gain: 3.2 * k * (0.35 + 0.65 * near) * (1 + 0.6 * enc),
+        pan: sp.pan * 0.6,
+        lp: sp.lp,
+        send: 1.2,
+        bus: 'shot',
+        prio: 6,
+      });
+    const cr = this.pick('crack');
+    if (cr)
+      this.mixer.play(cr, { at, gain: 1.6 * k * near, pan: sp.pan * 0.5, send: 0.4, bus: 'shot', prio: 6 });
+    const pressure = this.pick('pressure');
+    if (pressure)
+      this.mixer.play(pressure, {
+        at,
+        gain: (0.4 + 2.6 * enc ** 1.3) * k * (0.4 + 0.6 * near),
+        rate: 0.8,
+        lp: 220,
+        peak: [a.roomMode, 6 + 8 * a.bass, 2],
+        room: 0.4,
+        bus: 'shot',
+        prio: 5,
+      });
+    const th = this.pick('shot.thump');
+    if (th) this.mixer.play(th, { at, gain: 1.8 * k * near * (1 + enc), rate: 0.8, bus: 'shot', prio: 5 });
+    this.mixer.duck(1.6 * k * (0.5 + 0.5 * near), at);
+    // Ears: tinnitus + muffling scaled by exposure; recovery takes seconds (longer when it was bad).
+    const h = clamp(e.hearing, 0, 1);
+    if (h > 0.03) {
+      this.dose = clamp(this.dose + h, 0, 1.5);
+      this.mixer.exposure(Math.min(1, 0.25 + 0.85 * h), 2 + 7 * h, at + 0.02);
+    }
+  }
+
+  gearSound(e: GameEvents['gearSound'], at = this.now()) {
+    const sp = e.point ? this.spatial(e.point) : { d: 0.4, pan: 0, lp: 20000 };
+    const near = AudioEngine.dist(sp.d, 1);
+    const play = (key: string, gain: number, o: { rate?: number; room?: number; lp?: number } = {}) => {
+      const b = this.pick(key);
+      if (b)
+        this.mixer.play(b, {
+          at: at + sp.d / SPEED_OF_SOUND,
+          gain: gain * near,
+          pan: sp.pan,
+          rate: (o.rate ?? 1) * (0.96 + this.rng() * 0.08),
+          room: o.room ?? 0.15,
+          lp: Math.min(sp.lp, o.lp ?? 20000),
+          prio: 3,
+        });
+    };
+    switch (e.kind) {
+      case 'pin':
+        play('gear.pin', 0.5);
+        break;
+      case 'spoon':
+        play('gear.spoon', e.speed ? 0.25 : 0.45, { rate: e.speed ? 0.85 : 1 });
+        break;
+      case 'bounce': {
+        const v = clamp((e.speed ?? 2) / 6, 0.1, 1);
+        const soft = e.surface === 'carpet' || e.surface === 'grass' || e.surface === 'dirt';
+        play('gear.bounce', 0.9 * v, { lp: soft ? 1500 : 12000, rate: e.surface === 'plywood' ? 0.8 : 1 });
+        break;
+      }
+      case 'throw':
+        play(KEYS.cloth, 0.3, { rate: 1.3 });
+        break;
+      case 'nvgDown':
+      case 'nvgUp':
+        play('gear.nvgDetent', 0.35, { rate: e.kind === 'nvgUp' ? 1.12 : 1, room: 0.05 });
+        break;
+      case 'irClick':
+        play('click.synth', 0.18, { rate: 1.4, room: 0.04 });
+        break;
+    }
+  }
+
+  private whine?: GainNode;
+  /** Faint tube whine while the NVG is powered (it's on your face, so it's barely there and dry). */
+  nvgHum(on: boolean) {
+    if (!this.whine) {
+      const b = this.pick('gear.nvgWhine');
+      if (!b) return;
+      this.whine = this.mixer.play(b, { loop: true, gain: 0, room: 0, prio: 1 });
+    }
+    const t = this.now();
+    this.whine.gain.cancelScheduledValues(t);
+    this.whine.gain.setTargetAtTime(on ? 0.012 : 0, t, on ? 0.35 : 0.08);
   }
 
   applySettings(s: AudioSettings) {
