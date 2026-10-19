@@ -113,6 +113,12 @@ export class Renderer {
     return { ...this.bodycam.lens, aspect: this.camera.aspect };
   }
 
+  /** ADS blend (0..1): the weapon narrows FOV itself; the lens eases distortion and near defocus. */
+  setAds(k: number) {
+    this.bodycam.ads = k;
+    this.bodycam.setCamera(this.camera.fov, this.camera.aspect);
+  }
+
   /** CAM04 boot sequence (black → exposure hunt → WB settle, ~0.6 s). */
   camPowerOn() {
     this.bodycam.powerOn();

@@ -39,8 +39,8 @@ const THUMB = { x: -0.034, y: 0.022, z: 0.026, len: [0.04, 0.032, 0.026], r: 0.0
 
 /** Colours (sRGB hex). Glove: dark coyote synthetic back, darker suede palm, black TPR knuckles. */
 export const PALETTE = {
-  glove: 0x5b4c3a,
-  palm: 0x3f352b,
+  glove: 0x6e5c46,
+  palm: 0x4d4234,
   knuckle: 0x1c1b19,
   cuff: 0x2e2a24,
   velcro: 0x24221e,
@@ -289,9 +289,7 @@ function buildArm(s: 1 | -1, binds: Matrix4[]): BufferGeometry {
     },
     () => PALETTE.sleeve,
   );
-  const rigid =
-    (b: number) =>
-    (): Skin => [b, 1, 0, 0];
+  const rigid = (b: number) => (): Skin => [b, 1, 0, 0];
   const add = (g: BufferGeometry, b: number, paint: (p: Vector3, n: Vector3) => number) => {
     g.applyMatrix4(binds[b]);
     append(a, g, rigid(b), paint, gloveUV);
@@ -336,7 +334,11 @@ function buildArm(s: 1 | -1, binds: Matrix4[]): BufferGeometry {
     }
   });
   for (let j = 0; j < 3; j++)
-    add(phalanx(THUMB.r * (1 - j * 0.08), THUMB.len[j], 0.9), B_THUMB + j, flat(j === 0 ? PALETTE.palm : PALETTE.glove));
+    add(
+      phalanx(THUMB.r * (1 - j * 0.08), THUMB.len[j], 0.9),
+      B_THUMB + j,
+      flat(j === 0 ? PALETTE.palm : PALETTE.glove),
+    );
 
   const g = new BufferGeometry();
   g.setAttribute('position', new Float32BufferAttribute(a.pos, 3));

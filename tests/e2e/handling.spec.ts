@@ -14,7 +14,7 @@ async function sim(page: Page, n: number, input?: Record<string, unknown>) {
       const g = (window as any).__sb;
       for (let i = 0; i < (n as number); i++) {
         if (input) g.test.next = structuredClone(input);
-        g.step(1 / 60, i === (n as number) - 1);
+        g.step(1 / 60, i === (n as number) - 1 || i % 15 === 14); // sparse renders keep auto-exposure live
       }
       g.test.next = {};
     },
@@ -26,8 +26,9 @@ const kind = (page: Page) => page.evaluate(() => (window as any).__sb.weapons.re
 
 async function start(page: Page) {
   const errors = await boot(page);
+  await page.evaluate(() => ((window as any).__sb.renderer.dynres.enabled = false));
   await play(page);
-  await sim(page, 60);
+  await sim(page, 150);
   return errors;
 }
 

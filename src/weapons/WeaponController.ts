@@ -3,6 +3,7 @@ import type { Context, System } from '../core/Context';
 import { Spring, clamp, damp, noise1, rng, wrapAngle } from '../core/math';
 import { ReloadGesture } from '../input/ReloadGesture';
 import { CHEST_MOUNT, type Player } from '../player/Player';
+import { ScopeOverlay } from '../player/ScopeOverlay';
 import { settings } from '../settings/Settings';
 import {
   BeatPlayer,
@@ -172,6 +173,10 @@ const BASES: Partial<Record<Anchor, [V3, V3]>> = {
     [-1, 0, 0],
   ],
 };
+const VERTICAL_GRIP_BASIS: [V3, V3] = [
+  [0.12, -0.2, -0.97],
+  [-1, 0.05, 0],
+];
 const BODY_BASIS: [V3, V3] = [
   [0, -0.3, -1],
   [-1, 0, 0],
@@ -323,6 +328,7 @@ export class WeaponController implements System {
     this.view.add(this.equipped.model.root);
     ctx.scene.add(this.view, ...this.body.objects);
     this.drops = new DroppedMags(ctx);
+    this.scope = new ScopeOverlay(ctx.scene);
     this.aimYaw.reset(player.yaw);
     this.aimPitch.reset(player.pitch);
     this.prevTorsoYaw = player.yaw;
@@ -366,7 +372,9 @@ export class WeaponController implements System {
     if (mag) magGrasp.sub(mag.rest).applyQuaternion(magRestQ.clone().invert());
     const instability = clamp((def.recoil.up * 0.6 + def.recoil.side * 0.4) / (def.mass * 0.6), 0, 2);
     // Sight lines at rest in the weapon frame (immune to slide travel on pistols).
-    const sightLocal = model.sightLines.map((l) => new Vector3().setFromMatrixPosition(l.node.matrixWorld).applyMatrix4(inv));
+    const sightLocal = model.sightLines.map((l) =>
+      new Vector3().setFromMatrixPosition(l.node.matrixWorld).applyMatrix4(inv),
+    );
     const muzzle = model.sockets.muzzle;
     const muzzleLocal = muzzle
       ? new Vector3().setFromMatrixPosition(muzzle.matrixWorld).applyMatrix4(inv)
@@ -386,7 +394,12 @@ export class WeaponController implements System {
       magRestQ,
       magGrasp,
       gripQ: basisQuat(cfg.gripBasis),
-      supportQ: basisQuat(cfg.supportBasis),
+      // Vertical foregrip: the support hand wraps it like a pistol grip (thumb on top, palm facing right).
+      supportQ: basisQuat(
+        cls === 'rifle' && sockets.gripLeft.y < (model.boreY ?? 0.03) - 0.05
+          ? VERTICAL_GRIP_BASIS
+          : cfg.supportBasis,
+      ),
       boltLocked: false,
       muzzleLocal,
       sightLocal,
@@ -654,6 +667,9 @@ export class WeaponController implements System {
   /** Sight eye point (world), refreshed every frame. */
   readonly eyeWorld = new Vector3();
   private baseFov = 0;
+  private baseNear = 0;
+  private lastNear = 0;
+  private scope!: ScopeOverlay;
   private lastFov = 0;
 
   /** 0..1 eased ADS blend (camera chest → sight line). Read by HUD / post. */
@@ -676,7 +692,13 @@ export class WeaponController implements System {
     const cur = this.sightLine;
     const mag = lines.findIndex((l) => l.mode.id === 'magnified');
     if (mag < 0) return;
-    this.aimIndex = cur?.mode.id === 'magnified' ? Math.max(0, lines.findIndex((l) => l.mode.id === 'primary')) : mag;
+    this.aimIndex =
+      cur?.mode.id === 'magnified'
+        ? Math.max(
+            0,
+            lines.findIndex((l) => l.mode.id === 'primary'),
+          )
+        : mag;
   }
 
   /** Eye distance behind the sight's rear: 6–9 cm on long guns, arm-ish length on pistols. */
@@ -689,27 +711,42 @@ export class WeaponController implements System {
     const sl = this.sightLine;
     const cam = this.ctx.camera;
     if (!this.baseFov || Math.abs(cam.fov - this.lastFov) > 1e-3) this.baseFov = cam.fov;
-    if (!sl) return;
-    const i = Math.min(this.aimIndex, this.equipped.sightLocal.length - 1);
-    this.eyeWorld.copy(this.equipped.sightLocal[i]);
-    this.eyeWorld.z += this.eyeDistance(sl);
-    this.eyeWorld.applyMatrix4(this.view.matrixWorld);
+    if (!this.baseNear || Math.abs(cam.near - this.lastNear) > 1e-5) this.baseNear = cam.near;
     const k = this.adsBlend;
     let fov = this.baseFov;
-    if (k > 1e-4) {
-      cam.position.lerp(this.eyeWorld, k);
-      // The camera rides the weapon (it rolls with an offset-dot cant; recoil moves sight + view together).
-      cam.quaternion.slerp(this.view.quaternion, k);
-      cam.updateMatrixWorld();
-      const mag = Math.max(1, sl.mode.magnification[0]);
-      const adsFov = clamp((2 * Math.atan(Math.tan((75 * Math.PI) / 360) / mag) * 180) / Math.PI, 18, 75);
-      fov = this.baseFov + (Math.min(adsFov, this.baseFov) - this.baseFov) * k;
+    let near = this.baseNear;
+    let tube = 0;
+    if (sl) {
+      const i = Math.min(this.aimIndex, this.equipped.sightLocal.length - 1);
+      const eye = this.eyeDistance(sl);
+      this.eyeWorld.copy(this.equipped.sightLocal[i]);
+      this.eyeWorld.z += eye;
+      this.eyeWorld.applyMatrix4(this.view.matrixWorld);
+      if (k > 1e-4) {
+        cam.position.lerp(this.eyeWorld, k);
+        // The camera rides the weapon (it rolls with an offset-dot cant; recoil moves sight + view together).
+        cam.quaternion.slerp(this.view.quaternion, k);
+        cam.updateMatrixWorld();
+        const mag = Math.max(1, sl.mode.magnification[0]);
+        const adsFov = clamp((2 * Math.atan(Math.tan((75 * Math.PI) / 360) / mag) * 180) / Math.PI, 18, 75);
+        fov = this.baseFov + (Math.min(adsFov, this.baseFov) - this.baseFov) * k;
+        // Clip whatever sits between the eye and the sight (folded BUIS, the eyepiece itself); tube optics are
+        // solid models, so look past the tube and draw the eyepiece picture instead.
+        tube = sl.mode.optic === 'lpvo' ? 0.26 : sl.mode.optic === 'magnifier' ? 0.11 : 0;
+        // Through a scope the barrel and support hand ahead of it are out of the picture too.
+        const toMuzzle = this.equipped.sightLocal[i].z - this.equipped.muzzleLocal.z + eye + 0.03;
+        const clipTo = tube ? Math.max(eye + tube + 0.004, toMuzzle) : Math.min(eye - 0.008, 0.08);
+        near = this.baseNear + (Math.max(this.baseNear, clipTo) - this.baseNear) * k;
+      }
     }
-    if (Math.abs(cam.fov - fov) > 1e-3) {
+    if (Math.abs(cam.fov - fov) > 1e-3 || Math.abs(cam.near - near) > 1e-5) {
       cam.fov = fov;
+      cam.near = near;
       cam.updateProjectionMatrix();
     }
     this.lastFov = cam.fov;
+    this.lastNear = cam.near;
+    this.scope.update(cam, tube ? k : 0, 0.8, sl?.mode.optic === 'lpvo');
   }
 
   /**

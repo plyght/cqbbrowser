@@ -240,6 +240,7 @@ export class Game {
     for (const s of this.systems) s.update?.(dt, alpha);
     this.audio.update(dt);
     this.hud.update(this.weapons);
+    this.renderer.setAds(this.weapons.adsBlend);
     // Input turn rate drives CAM04 bitrate starvation alongside the measured camera rotation.
     this.renderer.setMotion(Math.hypot(f.look.yaw, f.look.pitch) / Math.max(dt, 1e-3));
     // Skipped frames still advance the camera's temporal state (AE, codec, boot) on the next draw.

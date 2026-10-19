@@ -23,12 +23,19 @@ function tnoise(x: number, y: number, p: number, s: number) {
     v = fy * fy * (3 - 2 * fy);
   const h = (i: number, j: number) => hash(((i % p) + p) % p, ((j % p) + p) % p, s);
   return (
-    h(xi, yi) * (1 - u) * (1 - v) + h(xi + 1, yi) * u * (1 - v) + h(xi, yi + 1) * (1 - u) * v + h(xi + 1, yi + 1) * u * v
+    h(xi, yi) * (1 - u) * (1 - v) +
+    h(xi + 1, yi) * u * (1 - v) +
+    h(xi, yi + 1) * (1 - u) * v +
+    h(xi + 1, yi + 1) * u * v
   );
 }
 
 function fbm(x: number, y: number, p: number, s: number) {
-  return tnoise(x, y, p, s) * 0.55 + tnoise(x * 2, y * 2, p * 2, s + 1) * 0.3 + tnoise(x * 4, y * 4, p * 4, s + 2) * 0.15;
+  return (
+    tnoise(x, y, p, s) * 0.55 +
+    tnoise(x * 2, y * 2, p * 2, s + 1) * 0.3 +
+    tnoise(x * 4, y * 4, p * 4, s + 2) * 0.15
+  );
 }
 
 const CAMO: [number, number, number][] = [

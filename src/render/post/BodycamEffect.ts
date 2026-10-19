@@ -106,6 +106,9 @@ export class BodycamEffect extends Effect {
     if (notify) this.setChanged();
   }
 
+  /** 0..1 ADS blend from the weapon: eases lens distortion and near-lens defocus so the sight stays crisp. */
+  ads = 0;
+
   /** Camera tan(half-FOV), needed to reproject rotation blur. */
   setCamera(fovYDeg: number, aspect: number) {
     const ty = Math.tan((fovYDeg * Math.PI) / 360);
@@ -198,8 +201,9 @@ export class BodycamEffect extends Effect {
     u.get('tExposure')!.value = this.exposure.texture;
 
     // Lens geometry (refit crop only when something changed).
-    const k1 = 0.11 * p.distortion * I,
-      k2 = 0.025 * p.distortion * I;
+    const adsLens = 1 - 0.45 * this.ads;
+    const k1 = 0.11 * p.distortion * I * adsLens,
+      k2 = 0.025 * p.distortion * I * adsLens;
     const circle = lerp(3.2, 1.78, smooth(0, 0.85, I * p.imageCircle));
     const lk = this.lensKey;
     const caK = 0.0065 * p.chromaticAberration * I;
@@ -274,7 +278,12 @@ export class BodycamEffect extends Effect {
     );
     (u.get('uGrade')!.value as Vector4).set(1, 0.55 * I, 0.018 * I, 0.15 * I);
     (u.get('uBlur')!.value as Vector4).set(1, EV_REF, 2.4, 0);
-    (u.get('uNear')!.value as Vector4).set(0.6, 0.22, clamp(p.nearBlur * I, 0, 1), 0.012);
+    (u.get('uNear')!.value as Vector4).set(
+      0.6,
+      0.22,
+      clamp(p.nearBlur * I * (1 - 0.9 * this.ads), 0, 1),
+      0.012,
+    );
     // Grain re-seeds at the camera's ~30 fps cadence.
     const seed = (Math.floor(this.time * 29.97) % 113) * 7.31;
     (u.get('uNoise')!.value as Vector4).set(0.022 * p.noise * I, 0.026 * p.noise * I, seed, EV_REF);

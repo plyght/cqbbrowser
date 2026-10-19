@@ -7,10 +7,10 @@ import { COMMON_BEATS, add, hk, pk } from './common';
  * Weapon keys are offsets from the hold pose: p torso-local metres, r = [pitch, yaw, roll].
  * Reload "work space": the rifle comes in toward the chest and cants so the well faces the support hand.
  */
-const WP: V3 = [-0.07, 0.2, -0.05];
-const WR: V3 = [0.36, 0.38, -0.72];
-const WP2: V3 = [-0.055, 0.185, -0.04];
-const WR2: V3 = [0.3, 0.3, -0.6];
+const WP: V3 = [-0.05, 0.13, -0.1];
+const WR: V3 = [0.36, 0.34, -0.7];
+const WP2: V3 = [-0.04, 0.12, -0.09];
+const WR2: V3 = [0.3, 0.28, -0.58];
 
 export const RIFLE_BEATS: BeatLibrary = {
   ...COMMON_BEATS,
