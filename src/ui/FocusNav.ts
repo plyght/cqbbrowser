@@ -1,3 +1,4 @@
+import { padTypeFromId, type PadType } from '../input/bindings';
 import { pickNext, Repeater, stickDir, type Box, type Dir } from './nav';
 
 /** A menu screen: a DOM root plus optional handlers for Back, tab switching (LB/RB, Q/E) and Start. */
@@ -27,7 +28,9 @@ const SEL = '[data-nav]:not([disabled])';
 export class FocusNav {
   screen: Screen | null = null;
   device: MenuDevice = 'kbm';
+  padType: PadType = 'xbox';
   onDevice: (d: MenuDevice) => void = () => {};
+  onPadType: (t: PadType) => void = () => {};
   private active = false;
   private held = new Set<string>();
   /** Keys whose keydown happened while the menu was active (a keyup alone, e.g. the Esc that paused, is ignored). */
@@ -198,7 +201,11 @@ export class FocusNav {
       const b = p.buttons.map((x) => x.pressed);
       const prev = this.prevPad.get(p.index) ?? [];
       const edge = (i: number) => b[i] && !prev[i];
-      if (b.some(Boolean) || Math.hypot(p.axes[0] ?? 0, p.axes[1] ?? 0) > 0.5) this.setDevice('gamepad');
+      if (b.some(Boolean) || Math.hypot(p.axes[0] ?? 0, p.axes[1] ?? 0) > 0.5) {
+        this.setDevice('gamepad');
+        const t = padTypeFromId(p.id ?? '');
+        if (t !== this.padType) this.onPadType((this.padType = t));
+      }
       if (b[12]) want.up = true;
       if (b[13]) want.down = true;
       if (b[14]) want.left = true;

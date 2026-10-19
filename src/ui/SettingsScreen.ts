@@ -1,4 +1,4 @@
-import { h, hints, navButton } from './dom';
+import { h, hints, navButton, padGlyph } from './dom';
 import type { Screen } from './FocusNav';
 import { stepValue } from './nav';
 import {
@@ -11,6 +11,7 @@ import {
   type SettingDef,
   type SettingsTab,
   type SliderDef,
+  type ValueDef,
 } from './settingsSchema';
 
 /** Settings: tabs Controls / Gameplay / Video / Audio / Accessibility, generic controls from the schema registry. */
@@ -36,8 +37,8 @@ export class SettingsScreen implements Screen {
       hints([
         { key: '↑↓', pad: '✚', label: 'Move' },
         { key: '←→', pad: '◀▶', label: 'Adjust' },
-        { key: 'Q/E', pad: 'LB/RB', label: 'Tab' },
-        { key: 'Esc', pad: 'B', label: 'Back' },
+        { key: 'Q/E', pad: [4, 5], label: 'Tab' },
+        { key: 'Esc', pad: [1], label: 'Back' },
       ]),
     );
     this.root.append(head, this.tabBar, this.body, this.hint, foot);
@@ -77,7 +78,9 @@ export class SettingsScreen implements Screen {
       if (seen.has(d.ns)) continue;
       seen.add(d.ns);
       const patch: Record<string, unknown> = {};
-      for (const e of settingsFor(this.tabId)) if (e.ns === d.ns) patch[e.key] = e.default;
+      for (const e of settingsFor(this.tabId))
+        if (e.ns === d.ns && e.default !== undefined) patch[e.key] = e.default;
+      if (!Object.keys(patch).length) continue;
       nsFor(d.ns).set(patch);
     }
     this.render();
@@ -86,7 +89,7 @@ export class SettingsScreen implements Screen {
 
   private render() {
     this.tabBar.replaceChildren(
-      h('span', { class: 'tab-glyph pad-only', text: 'LB' }),
+      padGlyph(4, 'tab-glyph pad-only'),
       ...TABS.map((t) => {
         const b = navButton(t.label, () => this.setTab(t.id), {
           class: `tab${t.id === this.tabId ? ' on' : ''}`,
@@ -94,7 +97,7 @@ export class SettingsScreen implements Screen {
         });
         return b;
       }),
-      h('span', { class: 'tab-glyph pad-only', text: 'RB' }),
+      padGlyph(5, 'tab-glyph pad-only'),
     );
     // Two columns, groups kept whole and balanced by row count (CSS columns would overflow sideways when scrolling).
     const cols = [h('div', { class: 'col' }), h('div', { class: 'col' })];
@@ -115,7 +118,37 @@ export class SettingsScreen implements Screen {
     this.hint.textContent = '';
   }
 
+  /** Re-render (visibility may depend on values) and keep focus on the same row. */
+  private rerender(key: string) {
+    this.render();
+    this.body.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus({ preventScroll: true });
+  }
+
   private row(d: SettingDef): HTMLElement {
+    const id = `${d.ns}.${d.key}`;
+    if (d.kind === 'notice') return h('div', { class: 'notice', 'data-key': id, text: d.label });
+    if (d.kind === 'action') {
+      const status = h('span', { class: 'vtext status', text: d.status?.() ?? '' });
+      const row = h(
+        'button',
+        { type: 'button', class: 'row action', 'data-nav': true, 'data-key': id },
+        h('span', { class: 'label', text: d.label }),
+        h('span', { class: 'value' }, status, h('span', { class: 'btn', text: d.button })),
+      );
+      row.addEventListener('focus', () => (this.hint.textContent = d.hint ?? ''));
+      row.addEventListener('click', () => {
+        status.textContent = '…';
+        Promise.resolve()
+          .then(() => d.run())
+          .catch(() => undefined)
+          .finally(() => this.rerender(id));
+      });
+      return row;
+    }
+    return this.valueRow(d);
+  }
+
+  private valueRow(d: ValueDef): HTMLElement {
     const value = h('span', { class: 'value' });
     const row = h(
       'button',
@@ -128,14 +161,14 @@ export class SettingsScreen implements Screen {
     if (d.kind === 'toggle') {
       row.addEventListener('click', () => {
         writeSetting(d, !readSetting(d));
-        refresh();
+        this.rerender(`${d.ns}.${d.key}`);
       });
     } else if (d.kind === 'select') {
       row.dataset.axis = 'x';
       const cycle = (dir: number) => {
         const i = d.options.findIndex((o) => o.value === readSetting(d));
         writeSetting(d, d.options[(i + dir + d.options.length) % d.options.length].value);
-        refresh();
+        this.rerender(`${d.ns}.${d.key}`);
       };
       row.addEventListener('nav-adjust', (e) => cycle((e as CustomEvent<number>).detail));
       row.addEventListener('click', (e) => {
@@ -176,7 +209,7 @@ export class SettingsScreen implements Screen {
     return row;
   }
 
-  private valueView(d: SettingDef): Node[] {
+  private valueView(d: ValueDef): Node[] {
     const v = readSetting(d);
     if (d.kind === 'toggle') {
       return [

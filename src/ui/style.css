@@ -781,7 +781,8 @@ kbd.pad {
 }
 
 /* ---------------------------------------------------------------- Pause */
-.screen.pause {
+.screen.pause,
+.screen.prompt {
   display: grid;
   place-items: center;
 }
@@ -1011,4 +1012,68 @@ kbd.pad {
 /* The CAM04 burn-in hides while a menu is up. */
 #ui:has(> .menu:not(.hidden)) .hud {
   display: none;
+}
+
+/* ---------------------------------------------------------------- Input integration: tips, actions, prompts */
+.menu[data-screen='prompt'] {
+  background: rgba(6, 7, 5, 0.62);
+  backdrop-filter: blur(2px) saturate(0.7);
+}
+.notice {
+  margin: 6px 0 8px;
+  padding: 10px 12px 10px 14px;
+  border-left: 3px solid var(--accent);
+  background: rgba(193, 170, 124, 0.1);
+  color: #ddd7c8;
+  font-size: 0.82em;
+  line-height: 1.5;
+}
+.row.action .btn {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  font-family: var(--display);
+  font-size: 0.85em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.menu button.row.action:focus .btn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #15160f;
+}
+.row.action .status {
+  min-width: 0;
+  color: var(--dim);
+  font-size: 0.85em;
+}
+.menu button.row.action {
+  grid-template-columns: 1fr auto;
+}
+.controls-ref {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 12px;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--faint);
+  font-size: 0.8em;
+  color: var(--dim);
+}
+.controls-ref dt {
+  text-align: right;
+}
+.controls-ref dd {
+  margin: 0;
+  align-self: center;
+}
+.prompt-body {
+  margin: 0 0 10px;
+  line-height: 1.55;
+  color: #d4cfc1;
+}
+.small {
+  font-size: 0.78em;
+}
+.pause-panel .eyebrow + h2 {
+  margin: 2px 0 6px;
 }

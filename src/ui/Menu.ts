@@ -1,12 +1,50 @@
+import type { DeviceKind } from '../input/actions';
+import { glyphFor, type KeyAction, type PadType } from '../input/bindings';
+import { trackpadSettings } from '../input/config';
 import { settings } from '../settings/Settings';
-import { brand, h, hints, navButton } from './dom';
+import { brand, currentPadType, h, hints, navButton, setPadType } from './dom';
 import { getDrills, type DrillInfo, type RunResult } from './drills';
 import { FocusNav, type Screen } from './FocusNav';
 import { PlayScreen } from './PlayScreen';
 import { ResultsScreen } from './ResultsScreen';
+import { registerSettings } from './settingsSchema';
 import { SettingsScreen } from './SettingsScreen';
 
 const VERSION = '0.0.1';
+
+/** What the menus need from the input layer (src/input). Game passes the live objects. */
+export interface MenuInput {
+  trackpad: {
+    readonly detected: boolean;
+    readonly typingSuppressionSuspected: boolean;
+    onDetected?: () => void;
+  };
+  gyro: { connect(): Promise<boolean>; readonly connected: boolean };
+  gyroSupported: boolean;
+  /** Device that produced gameplay input most recently (drives the pause-menu control glyphs). */
+  activeDevice: () => DeviceKind;
+  padType: () => PadType;
+}
+
+export const TYPING_TIP =
+  'Your touchpad seems to ignore movement while keys are held (Windows palm rejection). ' +
+  'Fix: Windows Settings → Bluetooth & devices → Touchpad → Taps → Touchpad sensitivity → "Most sensitive", ' +
+  'so you can aim while you move.';
+
+const prompts = settings.ns('ui.prompts', { trackpadAsked: false });
+
+/** Gameplay controls shown on the pause screen, with live glyphs for the active device. */
+const PAUSE_CONTROLS: [KeyAction, string][] = [
+  ['fire', 'Fire'],
+  ['aim', 'Aim'],
+  ['reload', 'Reload · hold: ammo check'],
+  ['leanLeft', 'Lean left'],
+  ['leanRight', 'Lean right'],
+  ['sprint', 'Sprint'],
+  ['crouch', 'Crouch'],
+  ['switchWeapon', 'Switch weapon'],
+  ['restart', 'Restart (hold)'],
+];
 
 /**
  * Plain, fast menus (no tablet): main menu, Play (facility → drill → GO), Settings, pause, results.
@@ -44,11 +82,17 @@ export class Menu {
   readonly results: ResultsScreen;
   readonly loadout: Screen;
   readonly footage: Screen;
+  readonly trackpadPrompt: Screen;
   private pauseTitle = h('div', { class: 'pause-drill' });
+  private pauseTip = h('div', { class: 'notice hidden', text: TYPING_TIP });
+  private pauseControls = h('dl', { class: 'controls-ref' });
+  private input: MenuInput | null = null;
+  private promptPending = false;
 
   constructor(parent: HTMLElement) {
     this.nav = new FocusNav(this.root);
     this.nav.onDevice = (d) => (document.body.dataset.input = d === 'gamepad' ? 'pad' : 'kbm');
+    this.nav.onPadType = (t) => setPadType(t);
     document.body.dataset.input = 'kbm';
     this.main = this.buildMain();
     this.play = new PlayScreen(
@@ -57,6 +101,7 @@ export class Menu {
     );
     this.settings = new SettingsScreen(() => this.pop());
     this.pause = this.buildPause();
+    this.trackpadPrompt = this.buildTrackpadPrompt();
     this.results = new ResultsScreen({
       retry: (r) => this.onRetry(r),
       footage: (r) => this.onFootage(r),
@@ -88,6 +133,7 @@ export class Menu {
       this.results,
       this.loadout,
       this.footage,
+      this.trackpadPrompt,
     ]) {
       s.root.classList.add('hidden');
       this.root.append(s.root);
@@ -99,6 +145,55 @@ export class Menu {
     parent.append(this.root);
     this.reset(this.main);
     this.nav.setActive(true);
+  }
+
+  /**
+   * Hook up the input layer: one-time trackpad-preset prompt, gyro connect button, Windows typing-suppression tip,
+   * device-correct glyphs.
+   */
+  attachInput(io: MenuInput) {
+    this.input = io;
+    setPadType(io.padType());
+    io.trackpad.onDetected = () => this.queueTrackpadPrompt();
+    if (io.trackpad.detected) this.queueTrackpadPrompt();
+    registerSettings([
+      {
+        tab: 'controls',
+        group: 'Gyro',
+        ns: 'input.gyro',
+        key: 'connect',
+        label: 'Gyro controller',
+        kind: 'action',
+        button: 'Connect DualSense / DS4',
+        hint: 'WebHID (Chromium). Pick the controller in the browser prompt; it reconnects automatically next time.',
+        status: () => (io.gyro.connected ? 'Connected' : 'Not connected'),
+        run: () => io.gyro.connect(),
+        visible: () => io.gyroSupported,
+        order: -1,
+      },
+      {
+        tab: 'controls',
+        group: 'Trackpad',
+        ns: 'input.trackpad',
+        key: 'typingTip',
+        label: TYPING_TIP,
+        kind: 'notice',
+        visible: () => io.trackpad.typingSuppressionSuspected,
+      },
+    ]);
+  }
+
+  /** Ask once (mode = auto only); during gameplay the question waits for the next time the menu opens. */
+  private queueTrackpadPrompt() {
+    if (prompts.get().trackpadAsked || trackpadSettings.get().mode !== 'auto') return;
+    if (this.visible && this.top() !== this.trackpadPrompt) this.push(this.trackpadPrompt);
+    else this.promptPending = true;
+  }
+
+  private flushPrompt() {
+    if (!this.promptPending) return;
+    this.promptPending = false;
+    this.queueTrackpadPrompt();
   }
 
   get visible() {
@@ -117,6 +212,7 @@ export class Menu {
     else if (this.top() === this.pause || this.top() === this.results || !this.stack.length)
       this.reset(this.main);
     else this.nav.setScreen(this.top()!);
+    this.flushPrompt();
   }
 
   showMain() {
@@ -131,6 +227,7 @@ export class Menu {
       ? `${this.current.facility} · ${this.current.name}`
       : 'Square Range · Free practice';
     this.reset(this.pause);
+    this.flushPrompt();
   }
 
   showSettings() {
@@ -173,6 +270,7 @@ export class Menu {
   }
 
   private activate(s: Screen) {
+    if (s === this.pause) this.refreshPause();
     s.enter?.();
     s.root.classList.remove('hidden');
     this.root.dataset.screen = s.root.dataset.id ?? '';
@@ -239,7 +337,7 @@ export class Menu {
         ),
         hints([
           { key: '↑↓', pad: '✚', label: 'Move' },
-          { key: 'Enter', pad: 'A', label: 'Select' },
+          { key: 'Enter', pad: [0], label: 'Select' },
         ]),
       ),
       h(
@@ -285,9 +383,11 @@ export class Menu {
           },
           { class: 'ghost', 'data-act': 'quit', 'data-wrap': true },
         ),
+        this.pauseTip,
+        this.pauseControls,
         hints([
-          { key: 'Esc', pad: 'B', label: 'Resume' },
-          { key: 'Enter', pad: 'A', label: 'Select' },
+          { key: 'Esc', pad: [1], label: 'Resume' },
+          { key: 'Enter', pad: [0], label: 'Select' },
         ]),
       ),
     );
@@ -296,6 +396,57 @@ export class Menu {
       back: () => this.toGame(() => this.onResume()),
       initialFocus: () => root.querySelector<HTMLElement>('[data-act="resume"]'),
     };
+  }
+
+  private refreshPause() {
+    const io = this.input;
+    this.pauseTip.classList.toggle('hidden', !io?.trackpad.typingSuppressionSuspected);
+    const dev = io?.activeDevice() ?? 'keyboardMouse';
+    const pad = io?.padType() ?? currentPadType();
+    this.pauseControls.replaceChildren(
+      ...PAUSE_CONTROLS.flatMap(([a, label]) => {
+        const g = glyphFor(a, dev, pad) || glyphFor(a, 'keyboardMouse', pad);
+        return [
+          h('dt', {}, h('kbd', { class: dev === 'gamepad' ? 'pad' : '', text: g })),
+          h('dd', { text: label }),
+        ];
+      }),
+    );
+  }
+
+  private buildTrackpadPrompt(): Screen {
+    const answer = (mode: 'on' | 'off' | 'auto') => {
+      prompts.set({ trackpadAsked: true });
+      if (mode !== 'auto') trackpadSettings.set({ mode });
+      this.pop();
+    };
+    const root = h(
+      'section',
+      { class: 'screen prompt', 'data-id': 'prompt' },
+      h(
+        'div',
+        { class: 'pause-panel' },
+        h('div', { class: 'eyebrow', text: 'Input' }),
+        h('h2', { text: 'Trackpad detected' }),
+        h('p', {
+          class: 'prompt-body',
+          text:
+            "Looks like you're on a trackpad. Use the trackpad preset? It keeps your OS acceleration, adds a " +
+            'precision curve, two-finger scroll for ready positions and pinch for aim mode.',
+        }),
+        navButton('Use trackpad preset', () => answer('on'), {
+          class: 'primary',
+          'data-act': 'tp-on',
+          'data-wrap': true,
+        }),
+        navButton('Keep mouse settings', () => answer('off'), { 'data-act': 'tp-off', 'data-wrap': true }),
+        h('p', {
+          class: 'dim small',
+          text: 'You can change this any time in Settings → Controls → Trackpad.',
+        }),
+      ),
+    );
+    return { root, back: () => answer('auto') };
   }
 
   private placeholder(eyebrow: string, title: string, body: string): Screen {
@@ -313,7 +464,7 @@ export class Menu {
         'footer',
         { class: 'screen-foot' },
         navButton('Back', () => this.pop(), { class: 'ghost' }),
-        hints([{ key: 'Esc', pad: 'B', label: 'Back' }]),
+        hints([{ key: 'Esc', pad: [1], label: 'Back' }]),
       ),
     );
     return { root, back: () => this.pop() };

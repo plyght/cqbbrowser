@@ -1,3 +1,5 @@
+import { padButtonLabel, type PadType } from '../input/bindings';
+
 /** Tiny DOM helpers for the menus (no framework). */
 type Child = Node | string | null | undefined | false;
 
@@ -28,8 +30,30 @@ export function navButton(
   return b;
 }
 
-/** Per-device input hints; CSS shows the row matching `body[data-input]`. */
-export function hints(pairs: { key: string; pad: string; label: string }[]) {
+// Controller glyphs follow the connected pad family (Xbox / PlayStation / Switch), via src/input/bindings.ts.
+let padType: PadType = 'xbox';
+const padText = (btns: number[]) => btns.map((i) => padButtonLabel(i, padType)).join('/');
+
+/** A pad button glyph that relabels itself when the pad family changes. */
+export function padGlyph(btn: number | number[], cls = '') {
+  const btns = [btn].flat();
+  return h('span', { class: cls, 'data-pad-btn': btns.join(','), text: padText(btns) });
+}
+
+/** Relabel every pad glyph in the document (call when a different controller family is used). */
+export function setPadType(t: PadType) {
+  if (t === padType) return;
+  padType = t;
+  for (const el of document.querySelectorAll<HTMLElement>('[data-pad-btn]'))
+    el.textContent = padText(el.dataset.padBtn!.split(',').map(Number));
+}
+export const currentPadType = () => padType;
+
+/**
+ * Per-device input hints; CSS shows the row matching `body[data-input]`. `pad` is standard-mapping button indices
+ * (labelled per pad family) or a literal glyph like '✚'.
+ */
+export function hints(pairs: { key: string; pad: number[] | string; label: string }[]) {
   const row = (dev: 'kbm' | 'pad') =>
     h(
       'div',
@@ -38,7 +62,11 @@ export function hints(pairs: { key: string; pad: string; label: string }[]) {
         h(
           'span',
           { class: 'hint' },
-          h('kbd', { class: dev === 'pad' ? 'pad' : '' }, dev === 'pad' ? p.pad : p.key),
+          dev === 'pad'
+            ? typeof p.pad === 'string'
+              ? h('kbd', { class: 'pad' }, p.pad)
+              : h('kbd', { class: 'pad' }, padGlyph(p.pad))
+            : h('kbd', {}, p.key),
           p.label,
         ),
       ),

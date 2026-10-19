@@ -90,6 +90,13 @@ export class Game {
     this.audio = new AudioEngine(bus, this.ctx.camera);
     this.hud = new Hud(ui);
     this.menu = new Menu(ui);
+    this.menu.attachInput({
+      trackpad: this.trackpad,
+      gyro: this.gyro,
+      gyroSupported: Gyro.supported,
+      activeDevice: () => this.ctx.input.frame.activeDevice,
+      padType: () => this.gamepad.padType,
+    });
     this.menu.onPlay = () => this.enter(canvas);
     this.menu.onRestart = () => {
       this.resetDrill();

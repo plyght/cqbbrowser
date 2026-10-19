@@ -7,6 +7,13 @@
  *                       min: 0, max: 1, step: 0.05, default: 0.8, format: pct }]);
  * Registering the same ns+key again replaces the earlier entry (so an owner can refine labels/ranges).
  */
+import {
+  aimAssistSettings,
+  gamepadSettings,
+  gyroSettings,
+  mouseSettings,
+  trackpadSettings,
+} from '../input/config';
 import { settings } from '../settings/Settings';
 
 export type SettingsTab = 'controls' | 'gameplay' | 'video' | 'audio' | 'accessibility';
@@ -22,13 +29,15 @@ interface Base {
   tab: SettingsTab;
   /** Sub-heading inside the tab (e.g. "Mouse", "Controller"). */
   group?: string;
-  /** Settings namespace + key the value lives under. */
+  /** Settings namespace + key the value lives under (for action/notice rows: just a unique id). */
   ns: string;
   key: string;
   label: string;
   hint?: string;
   /** Sort order inside the group (default: registration order). */
   order?: number;
+  /** Hide the row when this returns false (e.g. gyro rows without WebHID). Re-evaluated on every render. */
+  visible?: () => boolean;
 }
 export interface SliderDef extends Base {
   kind: 'slider';
@@ -47,7 +56,22 @@ export interface SelectDef extends Base {
   options: { value: string; label: string }[];
   default: string;
 }
-export type SettingDef = SliderDef | ToggleDef | SelectDef;
+/** A button row (e.g. "Connect gyro"). `run` is called from the click/A press, i.e. inside a user gesture. */
+export interface ActionDef extends Base {
+  kind: 'action';
+  button: string;
+  run: () => unknown;
+  /** Status text shown next to the button (e.g. "Connected"). */
+  status?: () => string;
+  default?: undefined;
+}
+/** A non-interactive tip/banner row (label is the text). */
+export interface NoticeDef extends Base {
+  kind: 'notice';
+  default?: undefined;
+}
+export type SettingDef = SliderDef | ToggleDef | SelectDef | ActionDef | NoticeDef;
+export type ValueDef = SliderDef | ToggleDef | SelectDef;
 
 const registry: SettingDef[] = [];
 
@@ -62,7 +86,7 @@ export function registerSettings(defs: SettingDef[]) {
 export function settingsFor(tab: SettingsTab): SettingDef[] {
   return registry
     .map((d, i) => ({ d, i }))
-    .filter(({ d }) => d.tab === tab)
+    .filter(({ d }) => d.tab === tab && (d.visible?.() ?? true))
     .sort((a, b) => (a.d.order ?? a.i) - (b.d.order ?? b.i))
     .map(({ d }) => d);
 }
@@ -82,16 +106,16 @@ export function groupDefs(defs: SettingDef[]): { group: string; defs: SettingDef
 /** Namespace handle seeded with the defaults of every registered key in it. */
 export function nsFor(ns: string) {
   const defaults: Record<string, unknown> = {};
-  for (const d of registry) if (d.ns === ns) defaults[d.key] = d.default;
+  for (const d of registry) if (d.ns === ns && d.default !== undefined) defaults[d.key] = d.default;
   return settings.ns(ns, defaults);
 }
 
-export function readSetting(d: SettingDef): number | boolean | string {
+export function readSetting(d: ValueDef): number | boolean | string {
   const v = nsFor(d.ns).get()[d.key];
   return (v ?? d.default) as number | boolean | string;
 }
 
-export function writeSetting(d: SettingDef, v: number | boolean | string) {
+export function writeSetting(d: ValueDef, v: number | boolean | string) {
   nsFor(d.ns).set({ [d.key]: v });
 }
 
@@ -101,10 +125,17 @@ const fixed =
   (v: number) =>
     `${v.toFixed(n)}${unit}`;
 const opts = (...pairs: [string, string][]) => pairs.map(([value, label]) => ({ value, label }));
+const HOLD = opts(['hold', 'Hold'], ['toggle', 'Toggle'], ['hybrid', 'Hybrid (tap / hold)']);
+const hid = () => typeof navigator !== 'undefined' && 'hid' in navigator;
+const M = mouseSettings.defaults;
+const T = trackpadSettings.defaults;
+const G = gamepadSettings.defaults;
+const A = aimAssistSettings.defaults;
+const Y = gyroSettings.defaults;
 
 // --- Built-in entries (PRD §11). Owners of each system may re-register with refined ranges. ---------------------
 registerSettings([
-  // Controls · Mouse
+  // Controls · Mouse (src/input/config.ts owns these namespaces and their defaults)
   {
     tab: 'controls',
     group: 'Mouse',
@@ -115,21 +146,34 @@ registerSettings([
     min: 10,
     max: 90,
     step: 0.5,
-    default: 34,
+    default: M.cm360,
     format: fixed(1, ' cm/360°'),
-    hint: 'Distance the mouse travels for a full turn (800 dpi). Higher is slower.',
+    hint: 'Mouse travel for a full turn at the DPI below. Higher is slower.',
   },
   {
     tab: 'controls',
     group: 'Mouse',
     ns: 'input.mouse',
-    key: 'adsScale',
+    key: 'dpi',
+    label: 'Mouse DPI',
+    kind: 'slider',
+    min: 200,
+    max: 3200,
+    step: 50,
+    default: M.dpi,
+    format: fixed(0, ' dpi'),
+  },
+  {
+    tab: 'controls',
+    group: 'Mouse',
+    ns: 'input.mouse',
+    key: 'adsMultiplier',
     label: 'ADS multiplier',
     kind: 'slider',
-    min: 0.3,
+    min: 0.2,
     max: 1.5,
     step: 0.05,
-    default: 1,
+    default: M.adsMultiplier,
     format: fixed(2, '×'),
   },
   {
@@ -139,31 +183,122 @@ registerSettings([
     key: 'invertY',
     label: 'Invert Y',
     kind: 'toggle',
-    default: false,
+    default: M.invertY,
   },
   {
     tab: 'controls',
     group: 'Mouse',
     ns: 'input.mouse',
-    key: 'raw',
+    key: 'rawInput',
     label: 'Raw input',
     kind: 'toggle',
-    default: true,
-    hint: 'Pointer Lock unadjustedMovement where supported.',
+    default: M.rawInput,
+    hint: 'Pointer Lock unadjustedMovement where supported (off while the trackpad preset is on).',
+  },
+  {
+    tab: 'controls',
+    group: 'Mouse',
+    ns: 'input.mouse',
+    key: 'aimMode',
+    label: 'Aim',
+    kind: 'select',
+    options: HOLD,
+    default: M.aimMode,
+  },
+  {
+    tab: 'controls',
+    group: 'Mouse',
+    ns: 'input.mouse',
+    key: 'sprintMode',
+    label: 'Sprint',
+    kind: 'select',
+    options: HOLD,
+    default: M.sprintMode,
+  },
+  {
+    tab: 'controls',
+    group: 'Mouse',
+    ns: 'input.mouse',
+    key: 'crouchMode',
+    label: 'Crouch',
+    kind: 'select',
+    options: HOLD,
+    default: M.crouchMode,
   },
   // Controls · Trackpad
   {
     tab: 'controls',
     group: 'Trackpad',
     ns: 'input.trackpad',
-    key: 'sens',
+    key: 'mode',
+    label: 'Trackpad preset',
+    kind: 'select',
+    options: opts(['auto', 'Auto-detect'], ['on', 'On'], ['off', 'Off']),
+    default: T.mode,
+    hint: 'Keeps OS acceleration; precision curve, two-finger scroll for ready positions, pinch for aim mode.',
+  },
+  {
+    tab: 'controls',
+    group: 'Trackpad',
+    ns: 'input.trackpad',
+    key: 'sensitivity',
     label: 'Sensitivity',
     kind: 'slider',
+    min: 0.0008,
+    max: 0.008,
+    step: 0.0001,
+    default: T.sensitivity,
+    format: (v) => `${(v / T.sensitivity).toFixed(2)}×`,
+  },
+  {
+    tab: 'controls',
+    group: 'Trackpad',
+    ns: 'input.trackpad',
+    key: 'adsMultiplier',
+    label: 'ADS multiplier',
+    kind: 'slider',
     min: 0.2,
-    max: 3,
+    max: 1.5,
     step: 0.05,
-    default: 1,
+    default: T.adsMultiplier,
     format: fixed(2, '×'),
+  },
+  {
+    tab: 'controls',
+    group: 'Trackpad',
+    ns: 'input.trackpad',
+    key: 'adsMode',
+    label: 'Aim',
+    kind: 'select',
+    options: HOLD,
+    default: T.adsMode,
+  },
+  {
+    tab: 'controls',
+    group: 'Trackpad',
+    ns: 'input.trackpad',
+    key: 'precisionCurve',
+    label: 'Precision curve',
+    kind: 'toggle',
+    default: T.precisionCurve,
+  },
+  {
+    tab: 'controls',
+    group: 'Trackpad',
+    ns: 'input.trackpad',
+    key: 'scrollReady',
+    label: 'Two-finger scroll: ready',
+    kind: 'toggle',
+    default: T.scrollReady,
+  },
+  {
+    tab: 'controls',
+    group: 'Trackpad',
+    ns: 'input.trackpad',
+    key: 'pinch',
+    label: 'Pinch: aim mode / zoom',
+    kind: 'toggle',
+    default: T.pinch,
   },
   {
     tab: 'controls',
@@ -172,42 +307,73 @@ registerSettings([
     key: 'edgeGlide',
     label: 'Edge-glide turning',
     kind: 'toggle',
-    default: true,
+    default: T.edgeGlide,
   },
   {
     tab: 'controls',
     group: 'Trackpad',
     ns: 'input.trackpad',
-    key: 'swipeLean',
-    label: 'Two-finger swipe lean',
+    key: 'snapTurns',
+    label: 'Snap turns',
     kind: 'toggle',
-    default: false,
+    default: T.snapTurns,
+  },
+  {
+    tab: 'controls',
+    group: 'Trackpad',
+    ns: 'input.trackpad',
+    key: 'aimAssist',
+    label: 'Aim slowdown',
+    kind: 'toggle',
+    default: T.aimAssist,
+  },
+  {
+    tab: 'controls',
+    group: 'Trackpad',
+    ns: 'input.trackpad',
+    key: 'invertY',
+    label: 'Invert Y',
+    kind: 'toggle',
+    default: T.invertY,
   },
   // Controls · Controller
   {
     tab: 'controls',
     group: 'Controller',
     ns: 'input.gamepad',
-    key: 'lookSpeed',
-    label: 'Look speed',
+    key: 'yawSpeed',
+    label: 'Look speed (yaw)',
     kind: 'slider',
     min: 90,
-    max: 540,
+    max: 720,
     step: 10,
-    default: 260,
+    default: G.yawSpeed,
     format: fixed(0, '°/s'),
   },
   {
     tab: 'controls',
     group: 'Controller',
     ns: 'input.gamepad',
-    key: 'deadzone',
+    key: 'pitchSpeed',
+    label: 'Look speed (pitch)',
+    kind: 'slider',
+    min: 60,
+    max: 540,
+    step: 10,
+    default: G.pitchSpeed,
+    format: fixed(0, '°/s'),
+  },
+  {
+    tab: 'controls',
+    group: 'Controller',
+    ns: 'input.gamepad',
+    key: 'innerDeadzone',
     label: 'Stick deadzone',
     kind: 'slider',
     min: 0,
     max: 0.3,
     step: 0.01,
-    default: 0.08,
+    default: G.innerDeadzone,
     format: pct,
   },
   {
@@ -217,18 +383,66 @@ registerSettings([
     key: 'curve',
     label: 'Response curve',
     kind: 'select',
-    options: opts(['linear', 'Linear'], ['classic', 'Classic'], ['precise', 'Precise']),
-    default: 'classic',
+    options: opts(['exponential', 'Exponential'], ['classic', 'Classic'], ['linear', 'Linear']),
+    default: G.curve,
   },
   {
     tab: 'controls',
     group: 'Controller',
     ns: 'input.gamepad',
-    key: 'aimAssist',
+    key: 'adsMultiplier',
+    label: 'ADS multiplier',
+    kind: 'slider',
+    min: 0.2,
+    max: 1.2,
+    step: 0.05,
+    default: G.adsMultiplier,
+    format: fixed(2, '×'),
+  },
+  {
+    tab: 'controls',
+    group: 'Controller',
+    ns: 'input.aimAssist',
+    key: 'level',
     label: 'Aim assist',
     kind: 'select',
-    options: opts(['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']),
-    default: 'light',
+    options: opts(['hardcore', 'Off'], ['standard', 'Light'], ['arcade', 'Strong'], ['custom', 'Custom']),
+    default: A.level,
+    hint: 'Friction only (no snapping), never on no-shoot targets.',
+  },
+  {
+    tab: 'controls',
+    group: 'Controller',
+    ns: 'input.aimAssist',
+    key: 'custom',
+    label: 'Assist strength',
+    kind: 'slider',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: A.custom,
+    format: pct,
+    visible: () => aimAssistSettings.get().level === 'custom',
+  },
+  {
+    tab: 'controls',
+    group: 'Controller',
+    ns: 'input.gamepad',
+    key: 'aimMode',
+    label: 'Aim',
+    kind: 'select',
+    options: HOLD,
+    default: G.aimMode,
+  },
+  {
+    tab: 'controls',
+    group: 'Controller',
+    ns: 'input.gamepad',
+    key: 'crouchMode',
+    label: 'Crouch',
+    kind: 'select',
+    options: HOLD,
+    default: G.crouchMode,
   },
   {
     tab: 'controls',
@@ -237,7 +451,7 @@ registerSettings([
     key: 'invertY',
     label: 'Invert Y',
     kind: 'toggle',
-    default: false,
+    default: G.invertY,
   },
   {
     tab: 'controls',
@@ -246,38 +460,76 @@ registerSettings([
     key: 'haptics',
     label: 'Vibration',
     kind: 'toggle',
-    default: true,
-  },
-  // Controls · Keyboard
-  {
-    tab: 'controls',
-    group: 'Keyboard',
-    ns: 'input.keyboard',
-    key: 'aimToggle',
-    label: 'Aim',
-    kind: 'select',
-    options: opts(['hold', 'Hold'], ['toggle', 'Toggle']),
-    default: 'hold',
+    default: G.haptics,
   },
   {
     tab: 'controls',
-    group: 'Keyboard',
-    ns: 'input.keyboard',
-    key: 'sprintToggle',
-    label: 'Sprint',
-    kind: 'select',
-    options: opts(['hold', 'Hold'], ['toggle', 'Toggle']),
-    default: 'hold',
+    group: 'Controller',
+    ns: 'input.gamepad',
+    key: 'hapticsStrength',
+    label: 'Vibration strength',
+    kind: 'slider',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    default: G.hapticsStrength,
+    format: pct,
+  },
+  // Controls · Gyro (WebHID, Chromium only; Menu.attachInput registers the Connect button)
+  {
+    tab: 'controls',
+    group: 'Gyro',
+    ns: 'input.gyro',
+    key: 'enabled',
+    label: 'Gyro aiming',
+    kind: 'toggle',
+    default: Y.enabled,
+    visible: hid,
   },
   {
     tab: 'controls',
-    group: 'Keyboard',
-    ns: 'input.keyboard',
-    key: 'crouchToggle',
-    label: 'Crouch',
+    group: 'Gyro',
+    ns: 'input.gyro',
+    key: 'mode',
+    label: 'Gyro active',
     kind: 'select',
-    options: opts(['hold', 'Hold'], ['toggle', 'Toggle']),
-    default: 'toggle',
+    options: opts(['ads', 'While aiming'], ['always', 'Always']),
+    default: Y.mode,
+    visible: hid,
+  },
+  {
+    tab: 'controls',
+    group: 'Gyro',
+    ns: 'input.gyro',
+    key: 'sensitivity',
+    label: 'Gyro sensitivity',
+    kind: 'slider',
+    min: 0.5,
+    max: 4,
+    step: 0.1,
+    default: Y.sensitivity,
+    format: fixed(1, '×'),
+    visible: hid,
+  },
+  {
+    tab: 'controls',
+    group: 'Gyro',
+    ns: 'input.gyro',
+    key: 'invertYaw',
+    label: 'Invert yaw',
+    kind: 'toggle',
+    default: Y.invertYaw,
+    visible: hid,
+  },
+  {
+    tab: 'controls',
+    group: 'Gyro',
+    ns: 'input.gyro',
+    key: 'invertPitch',
+    label: 'Invert pitch',
+    kind: 'toggle',
+    default: Y.invertPitch,
+    visible: hid,
   },
   // Gameplay
   {

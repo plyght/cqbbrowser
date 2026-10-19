@@ -1,4 +1,4 @@
-import { h, hints, navButton } from './dom';
+import { h, hints, navButton, padGlyph } from './dom';
 import { facilities, getDrills, type DrillInfo, type Medal } from './drills';
 import type { Screen } from './FocusNav';
 import { fmtTime } from './nav';
@@ -38,9 +38,9 @@ export class PlayScreen implements Screen {
         { class: 'screen-foot' },
         navButton('Back', () => this.back(), { class: 'ghost' }),
         hints([
-          { key: 'Enter', pad: 'A', label: 'GO' },
-          { key: 'Q/E', pad: 'LB/RB', label: 'Facility' },
-          { key: 'Esc', pad: 'B', label: 'Back' },
+          { key: 'Enter', pad: [0], label: 'GO' },
+          { key: 'Q/E', pad: [4, 5], label: 'Facility' },
+          { key: 'Esc', pad: [1], label: 'Back' },
         ]),
       ),
     );
@@ -79,7 +79,7 @@ export class PlayScreen implements Screen {
   private render() {
     const drills = getDrills();
     this.tabBar.replaceChildren(
-      h('span', { class: 'tab-glyph pad-only', text: 'LB' }),
+      padGlyph(4, 'tab-glyph pad-only'),
       ...facilities(drills).map((f) =>
         navButton(
           f,
@@ -90,7 +90,7 @@ export class PlayScreen implements Screen {
           { class: `tab${f === this.facility ? ' on' : ''}`, 'data-facility': f },
         ),
       ),
-      h('span', { class: 'tab-glyph pad-only', text: 'RB' }),
+      padGlyph(5, 'tab-glyph pad-only'),
     );
     const mine = drills.filter((d) => d.facility === this.facility);
     this.list.replaceChildren(

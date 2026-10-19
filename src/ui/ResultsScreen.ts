@@ -128,8 +128,8 @@ export class ResultsScreen implements Screen {
         { class: 'screen-foot' },
         actions,
         hints([
-          { key: 'Enter', pad: 'A', label: 'Select' },
-          { key: 'Backspace', pad: 'B', label: 'Drill list' },
+          { key: 'Enter', pad: [0], label: 'Select' },
+          { key: 'Backspace', pad: [1], label: 'Drill list' },
         ]),
       ),
     );

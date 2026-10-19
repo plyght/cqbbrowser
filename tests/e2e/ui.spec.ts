@@ -13,7 +13,7 @@ async function fakePad(page: Page) {
       [
         {
           index: 0,
-          id: 'fake',
+          id: 'DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)',
           connected: true,
           mapping: 'standard',
           axes: pad.axes,
@@ -109,6 +109,8 @@ test('play flow, pause menu, results (controller)', async ({ page }) => {
   expect(await focused(page)).toBe('sq-bill');
   await tapPad(page, 13);
   expect(await focused(page)).toBe('sq-elpres');
+  // PlayStation pad → PlayStation glyphs in the hints.
+  await expect(page.locator('.screen.play .hints-row.pad kbd').first()).toHaveText('✕');
   await page.waitForTimeout(100);
   await page.screenshot({ path: `${dir}/ui-play.png` });
   await tapPad(page, 5);
@@ -148,5 +150,35 @@ test('play flow, pause menu, results (controller)', async ({ page }) => {
   await page.waitForTimeout(200);
   await page.screenshot({ path: `${dir}/ui-results.png` });
   expect(await focused(page)).toBe('Retry');
+  expect(errors).toEqual([]);
+});
+
+test('input integration: trackpad prompt, typing tip, gyro button', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => ((window as any).__sb.manual = true));
+  await steps(page, 5);
+  // The trackpad heuristic fires once → one-time prompt on top of the menu.
+  await page.evaluate(() => (window as any).__sb.trackpad.onDetected());
+  await expect(page.locator('.screen.prompt')).toBeVisible();
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: `${dir}/ui-trackpad-prompt.png` });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.screen.prompt')).toBeHidden();
+  const mode = await page.evaluate(
+    () => JSON.parse(localStorage.getItem('shortbarrel.settings.v1')!)['input.trackpad'].mode,
+  );
+  expect(mode).toBe('on');
+  // Asked once: a second detection does not prompt again.
+  await page.evaluate(() => (window as any).__sb.trackpad.onDetected());
+  await expect(page.locator('.screen.prompt')).toBeHidden();
+
+  // Windows typing-suppression tip shows in Controls once suspected.
+  await page.evaluate(() => ((window as any).__sb.trackpad.typing.suspected = true));
+  await page.click('[data-act="settings"]');
+  await expect(page.locator('.settings .notice')).toBeVisible();
+  const hasHid = await page.evaluate(() => 'hid' in navigator);
+  if (hasHid) await expect(page.locator('[data-key="input.gyro.connect"]')).toBeVisible();
+  await page.mouse.move(5, 5);
+  await page.screenshot({ path: `${dir}/ui-settings-controls-tips.png` });
   expect(errors).toEqual([]);
 });
