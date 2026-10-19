@@ -182,6 +182,9 @@ export class Knockdown implements Target {
     this.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
     this.body.setTranslation({ x: this.home.x, y: this.home.y, z: this.home.z }, true);
     this.body.setRotation({ x: this.homeQ.x, y: this.homeQ.y, z: this.homeQ.z, w: this.homeQ.w }, true);
+    // Snap the visual now so hit-height maths on the very next shot uses the reset pose.
+    syncMesh(this.mesh, this.body);
+    this.mesh.updateMatrixWorld();
   }
 }
 

@@ -23,6 +23,8 @@ export class Renderer {
   readonly renderer: WebGLRenderer;
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
+  /** Hip FOV from settings; ADS code narrows relative to this and restores it. */
+  baseFov = 92;
   readonly composer: EffectComposer;
   readonly bodycam: BodycamEffect;
   readonly dynres = new DynamicResolution();
@@ -53,8 +55,9 @@ export class Renderer {
     this.renderer.shadowMap.needsUpdate = true;
     this.renderer.info.autoReset = false;
     // Chest cams are wide; the CAM04 lens pass then warps and crops it into the fisheye image circle.
-    this.camera = new PerspectiveCamera(92, 16 / 9, 0.03, 600);
     const v = videoSettings.get();
+    this.baseFov = v.fov;
+    this.camera = new PerspectiveCamera(v.fov, 16 / 9, 0.03, 600);
     this.tier = toTier(v.quality);
     this.quality = QUALITY[this.tier];
     this.resolutionScale = v.resScale;
@@ -62,10 +65,17 @@ export class Renderer {
     this.dynres.targetFps = v.targetFps;
     this.dynres.max = Math.min(1, this.quality.maxScale);
     this.bodycam = new BodycamEffect(this.quality);
+    this.bodycam.uniforms.get('uGamma')!.value = 1 / Math.max(0.5, v.gamma);
     this.composer = new EffectComposer(this.renderer, { frameBufferType: HalfFloatType });
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.composer.addPass(new EffectPass(this.camera, this.bodycam));
     videoSettings.onChange((s) => {
+      this.bodycam.uniforms.get('uGamma')!.value = 1 / Math.max(0.5, s.gamma);
+      if (s.fov !== this.baseFov) {
+        this.camera.fov += s.fov - this.baseFov;
+        this.baseFov = s.fov;
+        this.camera.updateProjectionMatrix();
+      }
       this.resolutionScale = s.resScale;
       this.dynres.enabled = s.dynamicResolution;
       this.dynres.targetFps = s.targetFps;

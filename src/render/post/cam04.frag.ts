@@ -27,6 +27,7 @@ uniform vec4 uNoise;    // luma grain, chroma grain, seed, noise-gain EV referen
 uniform vec4 uCodec;    // quant step, detail keep, chroma smear, block chroma mix
 uniform vec3 uWB;
 uniform vec4 uExpo;     // EV bias, boot EV, fade (1 = visible), flash
+uniform float uGamma;   // display gamma exponent (1 / settings gamma)
 uniform vec4 uGrade;    // contrast, warm highlights, shadow lift, ring glow
 
 float cHash(vec2 p) {
@@ -213,6 +214,8 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   d = (d + ring) * vec3(mr, mg, mb);
 
   d *= uExpo.z;
+  // Display gamma (settings): applied last, after the camera's own processing.
+  d = pow(max(d, vec3(0.0)), vec3(uGamma));
   outputColor = vec4(d, 1.0);
 }
 `;

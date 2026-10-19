@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { videoSettings } from '../render/quality';
 import { AudioEngine } from '../audio/AudioEngine';
 import { Fx } from '../fx/Fx';
 import { AimAssist } from '../input/AimAssist';
@@ -218,6 +219,9 @@ export class Game {
       this.last = now;
       return;
     }
+    // Optional frame cap (settings: video.frameCap); 0 = vsync-limited only.
+    const cap = Number(videoSettings.get().frameCap) || 0;
+    if (cap > 0 && now - this.last < 1000 / cap - 1) return;
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     this.step(dt);
