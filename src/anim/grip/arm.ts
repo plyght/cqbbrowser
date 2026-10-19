@@ -103,7 +103,9 @@ export function armSwivel(
       Math.max(0, -L.ulnar + 5 - w.dev) +
       Math.max(0, 0.1 - drop) * 400 +
       Math.abs(th) * 4 +
-      (avoid ? Math.max(0, avoidR - Math.min(segDist(avoid, shoulder, _e), segDist(avoid, _e, _end))) * 600 : 0);
+      (avoid
+        ? Math.max(0, avoidR - Math.min(segDist(avoid, shoulder, _e), segDist(avoid, _e, _end))) * 600
+        : 0);
     if (c < best) {
       best = c;
       out.copy(_pole);

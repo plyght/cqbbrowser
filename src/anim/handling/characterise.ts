@@ -16,9 +16,26 @@ export interface HandlingReport {
   /** 5-shot string at 0.15 s: mean muzzle rise per shot (deg) and recovery to 0.25° after the last (s). */
   risePerShot: number;
   recovery: number;
+  /** Peak rearward kick of the grip (mm) per shot. */
+  kickBack: number;
+  /** Feel layer: chest-cam pitch kick (deg), aim climb per shot (deg), FOV punch (deg, approx). */
+  camKick: number;
+  climb: number;
+  fovPunch: number;
 }
 
 const DT = 1 / 240;
+
+/** Springs the feel impulses go into (Player chest-cam pitch jolt, WeaponController FOV punch). */
+export const CAM_KICK_SPRING = { freq: 4.5, zeta: 0.5 };
+export const FOV_SPRING = { freq: 7, zeta: 0.6 };
+
+/** Peak displacement of an under-damped spring after a velocity impulse `v`. */
+export function springPeak(v: number, freq: number, z: number): number {
+  const w = 2 * Math.PI * freq;
+  const d = Math.sqrt(1 - z * z);
+  return (v / w) * Math.exp((-z * Math.atan(d / z)) / d);
+}
 const HOLD = new Vector3(0.03, -0.2, -0.33);
 const _e = new Euler(0, 0, 0, 'YXZ');
 const _v = new Vector3();
@@ -95,20 +112,26 @@ export function characterise(id: string, def: WeaponDef): HandlingReport {
 
   // 5-shot string.
   b = makeBody(def);
-  const rec = recoilFor(def);
+  const { profile, feel } = recoilFor(def);
   let rise = 0;
   let after = 0;
+  let kick = 0;
+  const g0 = new Vector3();
   for (let shot = 0; shot < 5; shot++) {
-    b.recoil(rec.profile, rec.impulseNs, 0);
+    b.recoil(profile, { back: feel.back, lever: feel.lever, side: 0, roll: 0 });
     let peak = 0;
     const gap = shot < 4 ? 0.15 : 1.5;
     for (let s = 0; s < gap; s += DT) {
       b.step(DT);
       peak = Math.max(peak, s < 0.15 ? pitchError(b) : 0);
+      b.origin(_v).sub(b.targetPos);
+      _w.set(0, 0, 1).applyQuaternion(b.targetQ);
+      kick = Math.max(kick, _v.dot(_w) - g0.z);
       if (shot === 4 && aimError(b) > 0.25) after = s + DT;
     }
     rise += peak;
   }
+  const deg = 180 / Math.PI;
   return {
     id,
     mass: def.mass,
@@ -118,16 +141,20 @@ export function characterise(id: string, def: WeaponDef): HandlingReport {
     settle,
     risePerShot: rise / 5,
     recovery: after,
+    kickBack: kick * 1000,
+    camKick: springPeak(feel.camPitch, CAM_KICK_SPRING.freq, CAM_KICK_SPRING.zeta) * deg,
+    climb: feel.climb * deg,
+    fovPunch: springPeak(feel.fov, FOV_SPRING.freq, FOV_SPRING.zeta),
   };
 }
 
 export function formatTable(rows: HandlingReport[]): string {
   const h =
-    '| build | kg | half-life ms | 90° peak lag ° | overshoot ° | settle ms | rise/shot ° | recovery ms |';
-  const sep = '|---|---|---|---|---|---|---|---|';
+    '| build | kg | half-life ms | 90° peak lag ° | overshoot ° | settle ms | rise/shot ° | kick mm | recovery ms | cam kick ° | climb/shot ° | FOV punch ° |';
+  const sep = '|---|---|---|---|---|---|---|---|---|---|---|---|';
   const lines = rows.map(
     (r) =>
-      `| ${r.id} | ${r.mass.toFixed(2)} | ${(r.halfLife * 1000).toFixed(0)} | ${r.peakLag.toFixed(1)} | ${r.overshoot.toFixed(2)} | ${(r.settle * 1000).toFixed(0)} | ${r.risePerShot.toFixed(2)} | ${(r.recovery * 1000).toFixed(0)} |`,
+      `| ${r.id} | ${r.mass.toFixed(2)} | ${(r.halfLife * 1000).toFixed(0)} | ${r.peakLag.toFixed(1)} | ${r.overshoot.toFixed(2)} | ${(r.settle * 1000).toFixed(0)} | ${r.risePerShot.toFixed(2)} | ${r.kickBack.toFixed(1)} | ${(r.recovery * 1000).toFixed(0)} | ${r.camKick.toFixed(2)} | ${r.climb.toFixed(2)} | ${r.fovPunch.toFixed(2)} |`,
   );
   return [h, sep, ...lines].join('\n');
 }

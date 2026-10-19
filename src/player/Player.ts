@@ -4,6 +4,7 @@ import { Spring, clamp, damp, noise1, rng } from '../core/math';
 import { RAPIER } from '../physics/Physics';
 import type { Surface } from '../core/bus';
 import { settings } from '../settings/Settings';
+import { CAM_KICK_SPRING } from '../anim/handling/characterise';
 
 export type ReadyPos = 'high' | 'low' | 'compressed';
 export type CameraMount = 'chest' | 'helmet';
@@ -14,6 +15,9 @@ export interface PlayerTuning {
   sprintSpeed: number;
   crouchSpeed: number;
   accelHalfLife: number;
+  /** Time (s) to reach walk speed from a standstill, and to stop from walk speed (linear accel, no ice). */
+  accelTime: number;
+  stopTime: number;
   chestHeight: number;
   hipHeight: number;
   eyeHeight: number;
@@ -25,24 +29,26 @@ export interface PlayerTuning {
 }
 
 export const DEFAULT_TUNING: PlayerTuning = {
-  walkSpeed: 1.9,
-  slowSpeed: 0.9,
-  sprintSpeed: 4.6,
-  crouchSpeed: 1.1,
-  accelHalfLife: 0.06,
+  walkSpeed: 2.2,
+  slowSpeed: 1.0,
+  sprintSpeed: 5.0,
+  crouchSpeed: 1.2,
+  accelHalfLife: 0.012,
+  accelTime: 0.12,
+  stopTime: 0.085,
   chestHeight: 1.36,
   hipHeight: 0.95,
   eyeHeight: 1.66,
   crouchDrop: 0.42,
   leanAngle: 0.38,
   leanOffset: 0.32,
-  cameraShake: 1,
+  cameraShake: 0.6,
 };
 
 /** Camera presentation settings (PRD §5.1/§5.2 accessibility). */
 export const cameraSettings = settings.ns('camera', {
   /** 0..1 "Camera shake" slider. */
-  shake: 1,
+  shake: 0.6,
   mount: 'chest' as CameraMount,
   /** Removes roll only. */
   stableHorizon: false,
@@ -84,7 +90,7 @@ export class Player implements System {
   knockPitch = 0;
   knockRoll = 0;
   /** Secondary plate-carrier spring (m), also swings the placard. */
-  readonly carrier = new Spring(2.3, 0.32);
+  readonly carrier = new Spring(3.4, 0.6);
 
   /** Torso transform the camera, shoulders and weapon hold are attached to (world space). */
   readonly torso = new Object3D();
@@ -101,10 +107,14 @@ export class Player implements System {
   private prevPos = new Vector3();
   private renderPos = new Vector3();
   private lastStepSign = 1;
-  private camRoll = new Spring(3.2, 0.55);
-  private camPitchJolt = new Spring(4.5, 0.5);
+  private camRoll = new Spring(4, 0.75);
+  private camPitchJolt = new Spring(CAM_KICK_SPRING.freq, CAM_KICK_SPRING.zeta);
   private camYawLag = new Spring(9, 0.7);
-  private camSide = new Spring(3.5, 0.6);
+  private camSide = new Spring(5, 0.8);
+  /** Rearward chest shove from the stock (m, torso +z): moves the camera and the shoulders together. */
+  private camBack = new Spring(5.5, 0.5);
+  /** Smoothed planar velocity used for the jerk limit on top of the linear accel. */
+  private velCmd = new Vector3();
   private knockFix = 0;
   private lastYaw = this.yaw;
   private grounded = true;
@@ -172,6 +182,7 @@ export class Player implements System {
     this.prevPos.copy(p);
     this.renderPos.copy(p);
     this.velocity.set(0, 0, 0);
+    this.velCmd.set(0, 0, 0);
     this.yaw = yaw;
     this.lastYaw = yaw;
     this.pitch = 0;
@@ -261,9 +272,27 @@ export class Player implements System {
       0,
       ((rz * f.move.x + fz * f.move.y) / len) * speed * Math.min(1, mag),
     );
-    const k = damp(t.accelHalfLife * (this.sprinting ? 2.2 : 1), dt);
-    this.velocity.x += (this.wantMove.x - this.velocity.x) * k;
-    this.velocity.z += (this.wantMove.z - this.velocity.z) * k;
+    // Linear accel / decel (a person, not a camera on a spring): walk speed in `accelTime`, stop from walk in
+    // `stopTime`; sprint builds up slower. The commanded velocity moves straight toward the wish velocity, so
+    // strafe reversals are planted, then a very short jerk filter rounds the corners.
+    const wantLen = Math.hypot(this.wantMove.x, this.wantMove.z);
+    const curLen = Math.hypot(this.velCmd.x, this.velCmd.z);
+    const braking =
+      wantLen < curLen - 1e-3 || this.wantMove.x * this.velCmd.x + this.wantMove.z * this.velCmd.z < 0;
+    const accel = braking
+      ? t.walkSpeed / t.stopTime
+      : (this.sprinting && curLen > t.walkSpeed ? 0.35 : 1) * (t.walkSpeed / t.accelTime);
+    const dx = this.wantMove.x - this.velCmd.x,
+      dz = this.wantMove.z - this.velCmd.z;
+    const dl = Math.hypot(dx, dz);
+    const stepV = Math.min(dl, accel * dt);
+    if (dl > 1e-6) {
+      this.velCmd.x += (dx / dl) * stepV;
+      this.velCmd.z += (dz / dl) * stepV;
+    }
+    const k = damp(t.accelHalfLife, dt);
+    this.velocity.x += (this.velCmd.x - this.velocity.x) * k;
+    this.velocity.z += (this.velCmd.z - this.velocity.z) * k;
 
     this.vy = this.grounded ? -1 : this.vy - 9.81 * dt;
     const desired = this.desired;
@@ -291,6 +320,7 @@ export class Player implements System {
       this.knockMount(clamp(planar / 4.6, 0.3, 1));
       this.camPitchJolt.impulse(-0.25 * t.cameraShake);
       this.velocity.multiplyScalar(0.3);
+      this.velCmd.multiplyScalar(0.3);
     }
     // Sprint stop: hard deceleration from a sprint jostles the mount.
     this.peakSpeed = Math.max(planar, this.peakSpeed - dt * 3);
@@ -320,14 +350,15 @@ export class Player implements System {
     ) {
       this.joltCooldown = 0.25;
       const s = Math.sign(this.prevStrafe) * t.cameraShake;
-      this.camSide.impulse(s * 0.12);
-      this.camRoll.impulse(s * 0.35);
-      this.carrier.impulse(-0.15 * t.cameraShake);
+      this.camSide.impulse(s * 0.05);
+      this.camRoll.impulse(s * 0.06);
+      this.carrier.impulse(-0.06 * t.cameraShake);
     }
     if (Math.abs(strafe) > 0.05 || Math.abs(this.prevStrafe) > 0.9) this.prevStrafe = strafe;
 
     // Gait: stride shortens (cadence rises) with stress; heel strikes drive footsteps + bob.
-    const stride = (this.sprinting ? 1.65 : 1.15) * (1 - this.stress * 0.15);
+    // Stride (two steps) lengthens with speed: ~1.6 steps/s slow-walking, ~2.6 walking, ~3.8 sprinting.
+    const stride = clamp(0.9 + 0.35 * planar, 1.1, 2.7) * (1 - this.stress * 0.15);
     this.gaitPhase += (planar / stride) * dt * Math.PI * 2;
     this.gaitAmount += (clamp(planar / 1.2, 0, 1) - this.gaitAmount) * damp(0.12, dt);
     if (planar > 0.3) {
@@ -349,8 +380,9 @@ export class Player implements System {
         speed: planar,
         scuff,
       });
-      this.camPitchJolt.impulse(-(0.02 + planar * 0.012) * t.cameraShake);
-      this.carrier.impulse(-(0.02 + planar * 0.02) * t.cameraShake);
+      // Heel strike: a small dip through the body (the plate carrier settles a touch later).
+      this.camPitchJolt.impulse(-(0.006 + planar * 0.004) * t.cameraShake);
+      this.carrier.impulse(-(0.01 + planar * 0.008) * t.cameraShake);
     }
     this.sampleSurface();
   }
@@ -361,13 +393,17 @@ export class Player implements System {
     if (hit) this.surfaceUnderfoot = hit.tag.surface;
   }
 
-  /** Recoil / impact impulse into the body-mounted camera (radians/sec). */
-  kick(pitch: number, yaw: number, roll: number) {
-    const s = this.tuning.cameraShake;
+  /**
+   * Recoil / impact impulse into the body-mounted camera: pitch (+ = up), yaw, roll (rad/s) and a rearward
+   * chest shove (m/s). Recoil is normalised to the default camera-shake setting and never drops below 35%.
+   */
+  kick(pitch: number, yaw: number, roll: number, shove = 0) {
+    const s = clamp(this.tuning.cameraShake / DEFAULT_TUNING.cameraShake, 0.35, 1.5);
     this.camPitchJolt.impulse(pitch * s);
     this.camYawLag.impulse(yaw * s);
     this.camRoll.impulse(roll * s);
-    this.carrier.impulse(pitch * 0.05 * s);
+    this.camBack.impulse(shove * s);
+    this.carrier.impulse(-shove * 0.4 * s);
   }
 
   private updateCamera(dt: number) {
@@ -380,14 +416,15 @@ export class Player implements System {
     const helmet = this.mount === 'helmet';
 
     // Rig springs: turn lag/overshoot on the chest + roll into turns.
-    this.camYawLag.step(clamp(-yawRate * 0.004, -0.04, 0.04) * shake, dt);
-    this.camRoll.step(clamp(yawRate * 0.006, -0.05, 0.05) * shake, dt);
+    this.camYawLag.step(clamp(-yawRate * 0.003, -0.03, 0.03) * shake, dt);
+    this.camRoll.step(clamp(yawRate * 0.0015, -0.012, 0.012) * shake, dt);
     this.camPitchJolt.step(0, dt);
     this.carrier.step(0, dt);
+    this.camBack.step(0, dt);
     const rightX = Math.cos(this.yaw),
       rightZ = -Math.sin(this.yaw);
     const strafe = this.velocity.x * rightX + this.velocity.z * rightZ;
-    this.camSide.step(-strafe * 0.012 * shake, dt);
+    this.camSide.step(-strafe * 0.004 * shake, dt);
 
     // Mount knock relaxes only when the hand fixes it.
     if (this.knockFix > 0) {
@@ -400,10 +437,11 @@ export class Player implements System {
     // Gait-synced bob: vertical double bounce per stride, lateral sway per step, slight roll.
     const g = this.gaitAmount;
     const ph = this.gaitPhase;
-    const bobAmp = (0.011 + planar * 0.0075) * shake * (helmet ? 1.4 : 1);
+    // Subtle on the chest (most of the gait shows on the weapon, see WeaponController): ~1 cm at walk.
+    const bobAmp = (0.004 + planar * 0.0026) * shake * (helmet ? 1.6 : 1);
     const bobY = -(1 - Math.abs(Math.sin(ph))) * bobAmp * g;
-    const swayX = Math.sin(ph) * (0.006 + planar * 0.002) * shake * g;
-    const gaitRoll = Math.sin(ph) * 0.007 * shake * g;
+    const swayX = Math.sin(ph) * (0.002 + planar * 0.0009) * shake * g;
+    const gaitRoll = Math.sin(ph) * 0.0022 * shake * g;
     const time = this.ctx.time;
     const breathe = Math.sin(time * 1.6 * (1 + this.stress * 0.6)) * 0.003 * shake * (1 + this.stress * 2);
 
@@ -441,7 +479,7 @@ export class Player implements System {
     this.tmpV2.set(
       CHEST_MOUNT.x + this.camSide.value + swayX,
       CHEST_MOUNT.y + bobY * 0.4 + this.carrier.value * 0.03,
-      CHEST_MOUNT.z,
+      CHEST_MOUNT.z + this.camBack.value,
     );
     this.tmpV2.applyMatrix4(this.spine.matrixWorld);
     this.tmpE.set(this.pitch, this.yaw, leanRoll);
@@ -463,7 +501,7 @@ export class Player implements System {
     this.invTorso.copy(this.torso.matrixWorld).invert();
     this.camLocal.copy(cam.position).applyMatrix4(this.invTorso);
 
-    const jitter = noise1(time * 7.3, 3) * 0.0015 * shake * (1 + this.stress * 3);
+    const jitter = noise1(time * 7.3, 3) * 0.0008 * shake * (1 + this.stress * 3);
     const roll = this.stableHorizon ? 0 : leanRoll + this.camRoll.value + gaitRoll + this.knockRoll;
     this.tmpE.set(
       this.pitch + this.camPitchJolt.value + jitter + this.carrier.value * 0.04 + this.knockPitch,

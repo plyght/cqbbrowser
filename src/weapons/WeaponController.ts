@@ -1,6 +1,6 @@
 import { Euler, Group, Matrix4, Object3D, Quaternion, Vector3 } from 'three';
 import type { Context, System } from '../core/Context';
-import { clamp, damp, noise1, rng } from '../core/math';
+import { Spring, clamp, damp, noise1, rng } from '../core/math';
 import { ReloadGesture } from '../input/ReloadGesture';
 import { CHEST_MOUNT, type Player } from '../player/Player';
 import { ScopeOverlay } from '../player/ScopeOverlay';
@@ -51,7 +51,8 @@ import {
   weaponRig,
   type WeaponRig,
 } from '../anim/grip/anchors';
-import { recoilFor, type RecoilProfile } from '../anim/handling/recoil';
+import { recoilFor, type RecoilFeel, type RecoilProfile } from '../anim/handling/recoil';
+import { FOV_SPRING } from '../anim/handling/characterise';
 import { WeaponRigidBody, gainsFor } from '../anim/handling/sim';
 
 /** Kept for HUD/tests: what the hands are busy with. */
@@ -91,6 +92,8 @@ interface Equipped {
   /** Rigid-body handling sim for this build. */
   body: WeaponRigidBody;
   recoilProfile: RecoilProfile;
+  /** Feel gains on top of the physical recoil (anim/handling/recoil.ts). */
+  feel: RecoilFeel;
   /** Muzzle tip in the weapon frame (bullets leave the barrel, not the screen centre). */
   muzzleLocal: Vector3;
   /** Rear-of-sight point per aim mode, weapon frame. */
@@ -222,6 +225,7 @@ export class WeaponController implements System {
       return obj ? { obj, rest: obj.position.clone() } : null;
     };
     const mag = part('mag');
+    const rec = recoilFor(def);
     const instability = clamp((def.recoil.up * 0.6 + def.recoil.side * 0.4) / (def.mass * 0.6), 0, 2);
     // Sight lines at rest in the weapon frame (immune to slide travel on pistols).
     const sightLocal = model.sightLines.map((l) =>
@@ -249,7 +253,8 @@ export class WeaponController implements System {
       sightLocal,
       grip: rig,
       body: new WeaponRigidBody(rigParams(def)),
-      recoilProfile: recoilFor(def, model.boreY ?? 0.03),
+      recoilProfile: rec.profile,
+      feel: rec.feel,
       adjustAfter: Math.max(1, Math.round(5 - instability * 2)),
     };
   }
@@ -375,7 +380,12 @@ export class WeaponController implements System {
     this.idleTime += dt;
     if (this.sinceShot > 0.35 && this.shotsInString > 0) this.endString();
 
-    this.simulate(dt, wantYaw + nX, wantPitch + nY + breathY);
+    // Aim climb recovers (faster once the string ends: the shooter drives the gun back down).
+    const ch = e.feel.climbHalfLife * (this.sinceShot < 0.12 ? 2.5 : 1);
+    this.climbPitch -= this.climbPitch * damp(ch, dt);
+    this.climbYaw -= this.climbYaw * damp(ch, dt);
+    this.fovPunch.step(0, dt);
+    this.simulate(dt, wantYaw + nX + this.climbYaw, wantPitch + nY + breathY + this.climbPitch);
     this.updatePlan(dt);
     this.updateParts(dt);
     this.updateHands(dt);
@@ -405,6 +415,18 @@ export class WeaponController implements System {
     // Crouched: slightly lower and tighter; drifting hold (never exactly the same place).
     h.y -= p.crouch * 0.015;
     h.z += p.crouch * 0.02;
+    // Gait: most of the walk shows on the weapon (the chest cam is quiet) — a vertical double bounce per
+    // stride, a lateral sway per step, a slight nod/yaw/cant. Damped in ADS; the handling sim smooths it.
+    const g = p.gaitAmount * (1 - this.ads * 0.75);
+    if (g > 1e-3) {
+      const ph = p.gaitPhase;
+      const amp = (0.003 + Math.min(p.speed, 5.5) * 0.0032) * g;
+      h.y -= (1 - Math.abs(Math.sin(ph))) * amp;
+      h.x += Math.sin(ph) * amp * 0.55;
+      r.x += Math.cos(2 * ph) * 0.007 * g;
+      r.y += Math.sin(ph) * 0.009 * g;
+      r.z += Math.sin(ph) * 0.012 * g;
+    }
     this.drift.lerp(this.driftTarget, damp(0.6, dt));
     h.addScaledVector(this.drift, 1 - this.ads * 0.6);
     // Beat pose offsets.
@@ -519,7 +541,7 @@ export class WeaponController implements System {
 
   /** Eye distance behind the sight's rear: 6–9 cm on long guns, arm-ish length on pistols. */
   private eyeDistance(sl: SightLine): number {
-    return this.equipped.cls === 'pistol' ? 0.3 : clamp(sl.mode.eyeRelief || 0.075, 0.06, 0.09);
+    return this.equipped.cls === 'pistol' ? 0.42 : clamp(sl.mode.eyeRelief || 0.075, 0.06, 0.09);
   }
 
   /** Sight node world position/eye and the camera blend toward it (PRD §6.3.5, ref frame_06). */
@@ -530,6 +552,7 @@ export class WeaponController implements System {
     if (!this.baseNear || Math.abs(cam.near - this.lastNear) > 1e-5) this.baseNear = cam.near;
     const k = this.adsBlend;
     let fov = this.baseFov;
+    const punch = this.fovPunch.value;
     let near = this.baseNear;
     let tube = 0;
     if (sl) {
@@ -555,6 +578,7 @@ export class WeaponController implements System {
         near = this.baseNear + (Math.max(this.baseNear, clipTo) - this.baseNear) * k;
       }
     }
+    fov += punch;
     if (Math.abs(cam.fov - fov) > 1e-3 || Math.abs(cam.near - near) > 1e-5) {
       cam.fov = fov;
       cam.near = near;
@@ -598,21 +622,32 @@ export class WeaponController implements System {
     this.cycle = Math.max(0, this.cycle - dt / 0.07);
     const e = this.equipped;
     if (down && this.planKind === 'micro') this.stopPlan();
+    // Firing during a mag check aborts it cleanly: fast reinsert + seat, then the gun is back up.
+    if (down && !this.triggerHeld && this.planKind === 'check') this.abortCheck();
     const canFire =
       !this.beats.active && !this.switching && this.wLow < 0.5 && this.wSprint < 0.3 && this.tuck < 0.6;
     const pressed = down && !this.triggerHeld;
     this.triggerHeld = down;
+    if (pressed) this.burstLeft = 3;
     this.triggerW += ((down || this.ads > 0.5 ? 1 : 0) - this.triggerW) * damp(0.04, dt);
     if (!down || !canFire || this.cooldown > 0) return;
-    if (e.mode === 'semi' && !pressed) return;
+    if ((e.mode === 'semi' || e.mode === 'pump') && !pressed) return;
+    if (e.mode === 'burst' && this.burstLeft <= 0) return;
     if (!e.mags.fire()) {
       if (pressed) this.ctx.bus.emit('dryFire', { weaponId: e.def.id });
       return;
     }
+    this.burstLeft--;
     if (e.mags.empty) e.boltLocked = true;
     this.cooldown = 60 / e.def.rpm;
     this.shoot();
   }
+
+  private burstLeft = 0;
+  /** FOV punch (deg) and the aim-point climb that stacks over a string (rad, recovers). */
+  private readonly fovPunch = new Spring(FOV_SPRING.freq, FOV_SPRING.zeta);
+  private climbPitch = 0;
+  private climbYaw = 0;
 
   private shoot() {
     const e = this.equipped;
@@ -632,15 +667,29 @@ export class WeaponController implements System {
     this.idleTime = 0;
     this.cycle = 1;
     this.fatigue = clamp(this.fatigue + 0.01 + Math.min(this.shotsInString, 20) * 0.0015, 0, 1);
-    const stab = 1 / (0.6 + d.mass * 0.25);
-    const r = d.recoil;
-    const ramp = 1 + Math.min(this.shotsInString, 8) * 0.06;
+    // Physical impulse packets (physics/ballistics) × feel gains into the rigid body; the hands and shoulder
+    // recover it (§6.3.7). Fatigue and long strings loosen the hold a little.
+    const f = e.feel;
     const fat = 1 + this.fatigue * 0.3;
-    // Impulse on the bore axis into the rigid body; the hands and shoulder recover it (§6.3.7).
-    const rp = e.recoilProfile;
-    e.body.recoil(rp.profile, rp.impulseNs * ramp * fat, (this.rand() - 0.5) * r.side * 0.035 * fat);
-    this.player.kick(-r.up * 0.12 * stab, (this.rand() - 0.5) * 0.05, (this.rand() - 0.5) * 0.08);
-    this.ctx.input.haptics.rumble(0.35 * r.back, 0.6, 70);
+    const ramp = 1 + Math.min(this.shotsInString, 8) * 0.04;
+    const sgn = this.rand() - 0.5;
+    e.body.recoil(e.recoilProfile, {
+      back: f.back * fat,
+      lever: f.lever * ramp * fat * (0.9 + this.rand() * 0.2),
+      side: f.side * sgn * 2 * fat,
+      roll: f.side * (this.rand() - 0.5) * 1.5,
+    });
+    // Aim climb: stacks over a string, recovers toward the original point of aim when the string ends.
+    this.climbPitch += f.climb * ramp * (0.85 + this.rand() * 0.3);
+    this.climbYaw += f.climb * sgn * d.recoil.side * 0.8;
+    // The stock shoves the body: chest cam pitches up and moves back through the body spring.
+    this.player.kick(
+      f.camPitch * (0.9 + this.rand() * 0.2),
+      (this.rand() - 0.5) * f.camJitter,
+      (this.rand() - 0.5) * f.camJitter * 1.6,
+      f.camShove,
+    );
+    this.fovPunch.impulse(f.fov * (1 - this.adsBlend * 0.5));
   }
 
   /** A string of fire ended: maybe readjust the grip (less stable weapons readjust sooner). */
@@ -711,6 +760,12 @@ export class WeaponController implements System {
     this.swapped = false;
     this.startPlan('reload', reloadNames(e.cls, this.reloadVariant, empty, this.rand), stressed);
     this.newDrift(1);
+  }
+
+  /** Fire pressed mid mag-check: release the hold so the plan runs its (fast) reinsert + seat. */
+  private abortCheck() {
+    this.beats.holding = false;
+    this.checking = false;
   }
 
   private stopPlan() {

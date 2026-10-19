@@ -1,4 +1,5 @@
 import { Quaternion, Vector3 } from 'three';
+import { sampleRecoil, type RecoilProfile, type RecoilWindow } from '../../physics/ballistics/recoil';
 
 /**
  * Physically simulated weapon handling (PRD §6.3): the weapon is a rigid body held by the firing hand, the
@@ -103,6 +104,21 @@ const _z2 = new Vector3();
 const _q = new Quaternion();
 const _qi = new Quaternion();
 
+/** Per-shot feel gains (see `anim/handling/recoil.ts`). `side` carries the random sign of this shot. */
+export interface ShotGains {
+  back: number;
+  lever: number;
+  side: number;
+  roll: number;
+}
+
+interface ActiveShot extends ShotGains {
+  t0: number;
+  last: number;
+  end: number;
+  profile: RecoilProfile;
+}
+
 export class WeaponRigidBody {
   /** COM world position and velocity. */
   readonly x = new Vector3();
@@ -123,7 +139,8 @@ export class WeaponRigidBody {
   private readonly com = new Vector3();
   private readonly contacts: { local: Vector3; kind: 'hand' | 'shoulder' }[] = [];
   private acc = 0;
-  private pendingImpulses: { t: number; J: number; torque: number; side: number }[] = [];
+  private shots: ActiveShot[] = [];
+  private readonly win: RecoilWindow = { fx: 0, fy: 0, torque: 0 };
   private time = 0;
 
   constructor(p: RigParams) {
@@ -151,10 +168,7 @@ export class WeaponRigidBody {
     this.contacts.push({ local: new Vector3(0, 0, 0), kind: 'hand' });
     this.contacts.push({ local: new Vector3(...p.support), kind: 'hand' });
     if (p.stock) this.contacts.push({ local: new Vector3(...p.stock), kind: 'shoulder' });
-    this.boreY = p.boreY;
   }
-
-  private boreY = 0.03;
 
   get inertia(): Vector3 {
     return this.I;
@@ -170,7 +184,7 @@ export class WeaponRigidBody {
     this.x.copy(this.com).applyQuaternion(this.q).add(this.targetPos);
     this.v.set(0, 0, 0);
     this.w.set(0, 0, 0);
-    this.pendingImpulses.length = 0;
+    this.shots.length = 0;
     this.hasPrev = false;
   }
 
@@ -185,17 +199,14 @@ export class WeaponRigidBody {
   }
 
   /**
-   * Fire: rearward impulse (N·s) along the bore, delivered over the recoil profile, applied on the bore axis
-   * (so the bore-over-grip lever arm produces muzzle rise) plus random yaw wander.
+   * Fire: the physics impulse packets (`sampleRecoil`, model frame: fx rearward on the bore line, fy up at the
+   * muzzle) are applied as they come due during the sub-steps, scaled by the feel gains: `back` on fx, plus an
+   * extra rise torque `lever`·fx (the shoulder/wrist pivot below the bore) and a yaw wander `side`·fx.
    */
-  recoil(profile: { t: number; fx: number; torque: number }[], impulseNs: number, side: number) {
-    for (const s of profile)
-      this.pendingImpulses.push({
-        t: this.time + s.t,
-        J: impulseNs * s.fx,
-        torque: s.torque,
-        side: side * s.fx,
-      });
+  recoil(profile: RecoilProfile, gains: ShotGains) {
+    let end = 0;
+    for (const k of profile.profile) end = Math.max(end, k.t);
+    this.shots.push({ t0: this.time, last: -1e-9, end, profile, ...gains });
   }
 
   /** Apply an impulse at a world point. */
@@ -251,17 +262,31 @@ export class WeaponRigidBody {
   private substep(h: number) {
     this.time += h;
     const g = this.gains;
-    // Delayed recoil slices.
-    for (let i = this.pendingImpulses.length - 1; i >= 0; i--) {
-      const p = this.pendingImpulses[i];
-      if (p.t > this.time) continue;
-      this.pendingImpulses.splice(i, 1);
-      _z.set(0, 0, 1).applyQuaternion(this.q).multiplyScalar(p.J); // rearward = +z
-      _c.set(0, this.boreY, -0.05);
+    // Recoil packets due in this sub-step.
+    for (let i = this.shots.length - 1; i >= 0; i--) {
+      const sh = this.shots[i];
+      const t1 = this.time - sh.t0;
+      const w = sampleRecoil(sh.profile, sh.last, t1, this.win);
+      sh.last = t1;
+      if (t1 > sh.end) this.shots.splice(i, 1);
+      if (w.fx === 0 && w.fy === 0) continue;
+      const pr = sh.profile;
+      _z.set(0, 0, 1)
+        .applyQuaternion(this.q)
+        .multiplyScalar(w.fx * sh.back); // rearward = +z
+      _c.set(0, pr.boreOffset, -0.05);
       this.pointWorld(_c, _d);
       this.impulseAt(_z, _d);
-      // Device/bolt torque (muzzle rise about weapon +x) and wander (about weapon +y).
-      _a.set(p.torque, p.side, 0).applyQuaternion(this.q);
+      if (w.fy !== 0) {
+        _z.set(0, 1, 0)
+          .applyQuaternion(this.q)
+          .multiplyScalar(w.fy * sh.back);
+        _c.set(0, pr.boreOffset, pr.muzzleZ);
+        this.pointWorld(_c, _d);
+        this.impulseAt(_z, _d);
+      }
+      // Rise about weapon +x (muzzle up) and wander about +y.
+      _a.set(w.fx * sh.lever, w.fx * sh.side, w.fx * sh.roll).applyQuaternion(this.q);
       this.addAngularImpulse(_a);
     }
 
