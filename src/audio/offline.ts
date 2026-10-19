@@ -19,12 +19,24 @@ interface Scenario {
   ear?: Vector3;
   /** Time of the first shot: when set, crest / RT60 / wet-dry metrics are measured around it. */
   measureAt?: number;
+  /** Shot times: per-shot peaks are measured on the linear render (level/first-round comparisons). */
+  shots?: number[];
   hitTick?: boolean;
   run(e: AudioEngine, ctx: OfflineAudioContext, cam: PerspectiveCamera): void | Promise<void>;
 }
 
 const shot = (e: AudioEngine, weaponId: string, caliber: string, at: number) =>
   e.gunshot({ weaponId, caliber, suppressed: false, at });
+
+function supRun(e: AudioEngine, weaponId: string, subsonic: boolean, times: number[], paperAt: number) {
+  const caliber = weaponId === 'hb300' ? '300blk' : '5.56';
+  const v = subsonic ? 300 : 790;
+  for (const t of times) {
+    e.gunshot({ weaponId, caliber, suppressed: true, subsonic, at: t });
+    if (paperAt)
+      e.targetHit({ kind: 'paper', zone: 'A', point: new Vector3(0.3, 1.4, -paperAt), at: t + paperAt / v });
+  }
+}
 
 function paperRun(e: AudioEngine, shots: boolean) {
   const hit = (t: number, z: number, noShoot = false) => {
@@ -39,6 +51,7 @@ function paperRun(e: AudioEngine, shots: boolean) {
 export const SCENARIOS: Record<string, Scenario> = {
   'rifle-outdoor': {
     measureAt: 0.4,
+    shots: [0.4, 2.2],
     seconds: 4,
     scene: outdoorRange(),
     run: (e) => {
@@ -131,6 +144,16 @@ export const SCENARIOS: Record<string, Scenario> = {
       e.steelFall({ point: popper, at: 2.2 + 25 / 360 + 0.38 });
     },
   },
+  /** Unsuppressed 9 mm outdoors: the one to compare with the owner's real 9 mm reference pack. */
+  'pistol-outdoor': {
+    measureAt: 0.4,
+    shots: [0.4, 1.6, 2.8],
+    seconds: 4,
+    scene: outdoorRange(),
+    run: (e) => {
+      for (const t of [0.4, 1.6, 2.8]) shot(e, 'p17', '9mm', t);
+    },
+  },
   'pistol-reload-room': {
     seconds: 5,
     scene: room(4, 3.5, 2.6, 'drywall'),
@@ -186,8 +209,45 @@ export const SCENARIOS: Record<string, Scenario> = {
     scene: outdoorRange(),
     run: (e) => {
       for (let i = 0; i < 3; i++)
-        e.gunshot({ weaponId: 'hb300', caliber: '300blk', suppressed: true, at: 0.4 + i * 0.3 });
+        e.gunshot({
+          weaponId: 'hb300',
+          caliber: '300blk',
+          suppressed: true,
+          subsonic: true,
+          at: 0.4 + i * 0.3,
+        });
     },
+  },
+  /** HB-300 integral can + 220 gr subsonic: mostly action noise; the paper hit at 25 m carries. */
+  'sup-hb300-outdoor': {
+    measureAt: 0.4,
+    shots: [0.4, 1.4, 2.4],
+    seconds: 3.6,
+    scene: outdoorRange(),
+    run: (e) => supRun(e, 'hb300', true, [0.4, 1.4, 2.4], 25),
+  },
+  'sup-hb300-indoor': {
+    measureAt: 0.4,
+    shots: [0.4, 1.4, 2.4],
+    seconds: 3.6,
+    scene: room(5, 4, 2.7, 'drywall'),
+    run: (e) => supRun(e, 'hb300', true, [0.4, 1.4, 2.4], 0),
+  },
+  /** SB-16 with an add-on can and supersonic 5.56: louder, cracks downrange. */
+  'sup-sb16-outdoor': {
+    measureAt: 0.4,
+    shots: [0.4, 1.4, 2.4],
+    seconds: 3.6,
+    scene: outdoorRange(),
+    run: (e) => supRun(e, 'sb16', false, [0.4, 1.4, 2.4], 25),
+  },
+  /** First-round pop: a cold can (shot 1) vs two follow-ups 0.25 s apart (shots 2–3). */
+  'sup-first-round': {
+    measureAt: 0.4,
+    shots: [0.4, 0.65, 0.9],
+    seconds: 2,
+    scene: outdoorRange(),
+    run: (e) => supRun(e, 'hb300', true, [0.4, 0.65, 0.9], 0),
   },
   /** Full-auto mag dump in a room with brass raining down: exercises voice stealing (≤ 32 voices). */
   'auto-room': {
@@ -248,6 +308,8 @@ export interface ShotMetrics {
   rt60: number;
   /** Reflected (tail + early taps) vs direct energy in the second after the shot (dB). */
   wetDryDb: number;
+  /** Peak of each shot (dBFS) in the linear render — compare levels between scenarios (pre-clipper). */
+  shotPeaksDb: number[];
 }
 
 export interface RenderResult {
@@ -281,7 +343,8 @@ async function renderOnce(
       master: 0.8,
       sfx: 1,
       ambience: o.ambience,
-      micArtifacts: 1,
+      // Measurement renders (ambience 0) also drop wind/body noise so quiet shots decay into silence.
+      micArtifacts: o.ambience > 0 ? 1 : 0,
       hitTick: sc.hitTick ?? false,
     },
   });
@@ -332,6 +395,10 @@ export async function renderScenario(name: string): Promise<RenderResult> {
       crestDb: crestDb(r, RATE, at(r)),
       rt60: decayRt60(f, RATE, pk, 1.6),
       wetDryDb: wetDryDb(w, d, RATE, pk, 1.0),
+      shotPeaksDb: (sc.shots ?? [sc.measureAt]).map((t) => {
+        const i = peakIndex(f, RATE, t - 0.01, t + 0.2);
+        return 20 * Math.log10(Math.abs(f[i]) + 1e-12);
+      }),
     };
   }
   return {

@@ -38,10 +38,8 @@ const FS = {
   pistol2: fs(371440, 'morganpurkis', 'Single Pistol Gunshot 2.wav'),
   ak47: fs(520934, 'ninebilly', 'ak 47 - single shot.mp3'),
   akRange: fs(136399, 'felix.blume', 'Rifle Gun Shot AK47. close recording in a shooting range.'),
-  sil1: fs(369781, 'morganpurkis', 'Silenced Gunshot.wav'),
-  sil2: fs(380185, 'morganpurkis', 'Silenced Gunshot 2.wav'),
-  sil3: fs(381569, 'morganpurkis', 'Silenced Gunshot 3.wav'),
-  sil4: fs(396015, 'morganpurkis', 'Silenced Gunshot 4.wav'),
+  // Real suppressed fire at a range (the old morganpurkis "Silenced Gunshot" set was a movie-style "pew").
+  supRange: fs(779237, 'YannSauvin', 'Gunshots machine gun with silencer in a shooting range'),
   brass: fs(210102, 'GrayJoy', 'Brass bullet shell casing drop onto concrete, multiple takes'),
   // Foley v2: isolated, close-mic'd clicks/clacks with short decays (the earlier M16/Glock sequences were
   // smeared, scrape-heavy slices that read as "watery").
@@ -70,7 +68,7 @@ const FS = {
 
 /** Report layers are trimmed short: the space (tail, slap) comes from our reverb, not the recording's. */
 const REPORT = { dur: 0.34, fadeOut: 0.22, level: -1 };
-const SIL = { dur: 0.3, fadeOut: 0.18, level: -3 };
+const SIL = { dur: 0.15, fadeOut: 0.08, level: -1 };
 
 const range = (n: number) => [...Array(n).keys()];
 const ks = (key: string, out: string, pack: 'impact-sounds' | 'rpg-audio', files: string[], level = -3) =>
@@ -109,11 +107,12 @@ export const SOURCES: SourceEntry[] = [
     ...REPORT,
     dur: 0.3,
   })),
-  ...[FS.sil1, FS.sil2, FS.sil3, FS.sil4].map((o, i) => ({
+  // Two single shots and five from the burst (155 ms apart → 0.15 s slices end before the next round).
+  ...[1.15, 4.57, 10.635, 10.965, 11.29, 11.605, 11.76].map((st, i) => ({
     key: 'report.suppressed',
     out: `rep-sup-${i}`,
-    origin: o,
-    start: 0,
+    origin: FS.supRange,
+    start: st,
     ...SIL,
   })),
   // --- Brass on concrete (six takes, each with its bounces) -------------------------------------------

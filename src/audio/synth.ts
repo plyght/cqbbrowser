@@ -280,6 +280,19 @@ export function uiTick(rate: number, freq = 1750) {
  * Low-mid "meat" of a close blast (150–600 Hz): a short dense noise body with two damped resonances, so the
  * report isn't just crack + sub. ~70 ms.
  */
+/**
+ * Warm mid "roll" after a close shot (120 Hz–2 kHz, ~0.3 s): the blast's own rolling decay that a recording
+ * keeps after the crack — not reverb (no reflections), just the low-mid body dying away.
+ */
+export function blastRoll(rate: number, rng: Rng) {
+  const out = alloc(0.6, rate);
+  burst(out, rate, rng, { dur: 0.55, gain: 1, lp: 2300, hp: 220, attack: 0.006 });
+  burst(out, rate, rng, { dur: 0.3, gain: 0.45, lp: 900, hp: 140, attack: 0.01 });
+  // Slow amplitude wobble = the "roll".
+  for (let i = 0; i < out.length; i++) out[i] *= 1 + 0.25 * Math.sin((TAU * 9 * i) / rate + 1);
+  return normalisePeak(out, 0.9);
+}
+
 export function blastBody(rate: number, rng: Rng) {
   const out = alloc(0.11, rate);
   burst(out, rate, rng, { dur: 0.07, gain: 1, lp: 650, hp: 140, attack: 0.0008 });
@@ -294,6 +307,86 @@ export function blastBody(rate: number, rng: Rng) {
     rng,
   );
   return normalisePeak(out, 0.9);
+}
+
+/**
+ * Suppressed report at the shooter (~130–135 dB): a sharp, compressed "pfft-crack" — not a hiss.
+ * Mid-heavy thup body (gas leaving the baffle stack), a short high front, a short low thump, and a faint
+ * metallic baffle ring. `pop` = first round: oxygen in the can burns → louder, boomier, longer.
+ */
+export function suppressedReport(rate: number, rng: Rng, pop = false) {
+  const out = alloc(pop ? 0.2 : 0.14, rate);
+  // Front: the muzzle/baffle shock — short and bright, but no open-muzzle blast.
+  const nw = Math.max(2, Math.floor(0.00025 * rate));
+  for (let i = 0; i < nw * 2; i++) out[i] += (i < nw ? 1 - i / nw : -(1 - (i - nw) / nw) * 0.6) * 0.7;
+  burst(out, rate, rng, { dur: 0.004, gain: 0.55, hp: 2600, attack: 0.0001 });
+  // "pfft" body: 250–2200 Hz noise, fast decay.
+  burst(out, rate, rng, { dur: pop ? 0.08 : 0.055, gain: 1.4, lp: 2400, hp: 300, attack: 0.0006 });
+  burst(out, rate, rng, { dur: 0.02, gain: 0.35, lp: 5000, hp: 1500, attack: 0.0004 });
+  // Low thump (short), much bigger on the first-round pop.
+  let ph = 0;
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate;
+    const f = 55 + 45 * Math.exp(-t / 0.015);
+    ph += (TAU * f) / rate;
+    out[i] +=
+      Math.sin(ph) * (pop ? 0.6 : 0.22) * Math.min(1, t / 0.001) * Math.exp(-t / (pop ? 0.05 : 0.028));
+  }
+  // Baffle stack ring.
+  modal(
+    out,
+    rate,
+    [
+      [1150 + rng() * 120, 0.06, 0.05],
+      [2450 + rng() * 200, 0.04, 0.035],
+    ],
+    0.001,
+    rng,
+  );
+  return normalisePeak(out, 0.95);
+}
+
+/** AR buffer spring "sproing": a wobbly decaying ring as the carrier compresses the action spring. */
+export function bufferSpring(rate: number, rng: Rng) {
+  const out = alloc(0.26, rate);
+  const f = 430 + rng() * 120;
+  let ph = 0,
+    ph2 = 0;
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate;
+    const wob = 1 + 0.06 * Math.sin(TAU * 23 * t) * Math.exp(-t / 0.08);
+    ph += (TAU * f * wob) / rate;
+    ph2 += (TAU * f * 3.7 * wob) / rate;
+    out[i] = (Math.sin(ph) * 0.7 + Math.sin(ph2) * 0.25) * Math.min(1, t / 0.002) * Math.exp(-t / 0.07);
+  }
+  burst(out, rate, rng, { dur: 0.006, gain: 0.5, hp: 1500 });
+  return normalisePeak(out, 0.8);
+}
+
+/** Gas blowback at the ejection port (ARs, much worse with a can): a short hiss into the face/mic. */
+export function gasHiss(rate: number, rng: Rng) {
+  const out = alloc(0.16, rate);
+  burst(out, rate, rng, { dur: 0.14, gain: 1, lp: 7500, hp: 1800, attack: 0.004 });
+  return normalisePeak(out, 0.7);
+}
+
+/** Case leaving the port: a bright ping as it clears the action (before it lands as brass). */
+export function casePing(rate: number, rng: Rng) {
+  const out = alloc(0.12, rate);
+  const f = 5600 + rng() * 900;
+  modal(
+    out,
+    rate,
+    [
+      [f, 0.6, 0.08],
+      [f * 1.48, 0.35, 0.05],
+      [f * 0.62, 0.25, 0.06],
+    ],
+    0,
+    rng,
+  );
+  burst(out, rate, rng, { dur: 0.002, gain: 0.4, hp: 3000 });
+  return normalisePeak(out, 0.7);
 }
 
 export type MechKind = 'ar' | 'ak' | 'pistol';
