@@ -23,6 +23,7 @@ import { Ballistics } from '../weapons/Ballistics';
 import { WeaponController } from '../weapons/WeaponController';
 import { Drills } from '../drills/Drills';
 import { World } from '../world/World';
+import { loadoutDefs, loadoutKey, LOADOUT_PRESETS, loadouts, type Loadout } from '../loadout';
 import { bus } from './bus';
 import type { Context, System } from './Context';
 
@@ -129,9 +130,14 @@ export class Game {
       activeDevice: () => this.ctx.input.frame.activeDevice,
       padType: () => this.gamepad.padType,
     });
-    this.menu.onPlay = () => this.enter(canvas);
+    // Every way into gameplay from the menus spawns with the active loadout (a no-op if it's already equipped).
+    this.menu.onPlay = () => {
+      this.applyLoadout(loadouts().active());
+      this.enter(canvas);
+    };
     setDrillSource(() => this.drills.list().map(toDrillInfo));
     this.menu.onStartDrill = (d) => {
+      this.applyLoadout(loadouts().active());
       this.enter(canvas);
       this.drills.start(d.id);
     };
@@ -161,6 +167,23 @@ export class Game {
     // Warm up one physics step so bodies settle before first frame.
     physics.step();
     requestAnimationFrame(this.frame);
+  }
+
+  /** What the controller carries now (the constructor's default ids = the standard-issue preset). */
+  private appliedLoadout = loadoutKey(LOADOUT_PRESETS[0]);
+
+  /**
+   * Equip a loadout (src/loadout): builds, ammo and pouch mag counts. Skips the rebuild when nothing changed
+   * unless `force`. Returns true if the weapons were swapped.
+   */
+  applyLoadout(l: Loadout, force = false): boolean {
+    const key = loadoutKey(l);
+    if (!force && key === this.appliedLoadout) return false;
+    const defs = loadoutDefs(l);
+    if (!defs.length) return false;
+    this.weapons.setLoadout(defs);
+    this.appliedLoadout = key;
+    return true;
   }
 
   /** Tests/headless set this so losing pointer lock doesn't pause. */

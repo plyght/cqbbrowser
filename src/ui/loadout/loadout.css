@@ -1,0 +1,452 @@
+/* Loadout screen (src/ui/loadout) + the Play screen's loadout quick-pick. Tokens from src/ui/style.css. */
+.screen.loadout {
+  inset: auto;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(1240px, calc(100vw - 32px));
+  height: min(700px, calc(100vh - 24px));
+  display: flex;
+  flex-direction: column;
+  padding: 18px 24px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  animation: none;
+  font-size: 0.92em;
+}
+.menu[data-screen='loadout'] {
+  background: rgba(6, 7, 5, 0.7);
+}
+.loadout .lo-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--faint);
+}
+.loadout .lo-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.loadout .lo-head h2 {
+  margin: 2px 0 10px;
+  font-size: 2.1em;
+}
+.loadout .lo-badge {
+  margin-bottom: 6px;
+  padding: 2px 8px;
+  font-size: 0.68em;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--good);
+  border: 1px solid rgba(159, 184, 122, 0.45);
+}
+.loadout .lo-tabs {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+.loadout .lo-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+.loadout .lo-tab small {
+  font-family: var(--mono);
+  font-size: 0.62em;
+  letter-spacing: 0.08em;
+  text-transform: none;
+  color: var(--dim);
+}
+.loadout .lo-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 330px;
+  gap: 20px;
+  padding-top: 12px;
+}
+.loadout .lo-left,
+.loadout .lo-right,
+.loadout .lo-centre {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.loadout .lo-colhead,
+.loadout .lo-group {
+  font-size: 0.68em;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 4px 10px 6px;
+}
+.loadout .lo-group {
+  padding-top: 12px;
+  color: var(--accent-2);
+}
+.loadout .lo-list,
+.loadout .lo-side {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(232, 228, 218, 0.18) transparent;
+}
+.menu .loadout button.lo-item,
+.menu .loadout button.lo-row,
+.menu .loadout button.lo-opt {
+  display: block;
+  width: 100%;
+  padding: 0.45em 10px;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--faint);
+  transition: background 90ms;
+}
+.menu .loadout button.lo-item:focus,
+.menu .loadout button.lo-row:focus,
+.menu .loadout button.lo-opt:focus {
+  background: rgba(193, 170, 124, 0.12);
+  border-left-color: var(--accent);
+}
+.loadout .lo-item-in {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.loadout .lo-dot {
+  width: 0.9em;
+  flex: none;
+  color: var(--good);
+  font-size: 0.75em;
+}
+.loadout .lo-item-txt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.loadout .lo-name {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 1.08em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.loadout .lo-item small {
+  font-size: 0.72em;
+  color: var(--dim);
+}
+.menu .loadout button.lo-item.on {
+  background: rgba(84, 85, 57, 0.28);
+}
+.menu .loadout button.lo-item.on .lo-name {
+  color: #fff;
+}
+.loadout .lo-rename {
+  width: 100%;
+  font: inherit;
+  font-family: var(--display);
+  font-size: 1.05em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--accent);
+  padding: 1px 4px;
+  outline: none;
+}
+.loadout .lo-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding-top: 8px;
+}
+.menu .loadout button.ghost.sm {
+  padding: 0.35em 0.4em;
+  font-size: 0.82em;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.menu .loadout button.ghost.sm.danger {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+/* Centre: turntable + stats */
+.loadout .lo-stage {
+  position: relative;
+  flex: 1;
+  min-height: 160px;
+  background:
+    radial-gradient(ellipse at 50% 58%, rgba(193, 170, 124, 0.09), rgba(0, 0, 0, 0) 62%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.25));
+  border: 1px solid var(--faint);
+}
+.loadout .lo-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+.loadout .lo-cap {
+  position: absolute;
+  left: 14px;
+  top: 10px;
+  pointer-events: none;
+}
+.loadout .lo-wname {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.35em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.loadout .lo-wsub {
+  font-size: 0.75em;
+  color: var(--dim);
+  letter-spacing: 0.06em;
+}
+.loadout .lo-prev {
+  margin-left: 8px;
+  padding: 0 5px;
+  color: var(--accent);
+  border: 1px solid rgba(193, 170, 124, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.9em;
+}
+.loadout .lo-empty {
+  margin-top: 8px;
+  color: var(--dim);
+}
+.loadout .lo-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 22px;
+  padding: 12px 2px 0;
+  min-height: 92px;
+}
+.loadout .lo-stat {
+  display: grid;
+  grid-template-columns: 96px 1fr 70px 44px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8em;
+}
+.loadout .lo-stat-l {
+  font-size: 0.86em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.loadout .lo-bar {
+  position: relative;
+  height: 4px;
+  background: rgba(232, 228, 218, 0.08);
+}
+.loadout .lo-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+}
+.loadout .lo-bar .base {
+  background: rgba(232, 228, 218, 0.62);
+}
+.loadout .lo-stat.up .delta {
+  background: var(--good);
+}
+.loadout .lo-stat.down .delta {
+  background: var(--bad);
+}
+.loadout .lo-stat-v {
+  text-align: right;
+}
+.loadout .lo-stat-v small {
+  color: var(--dim);
+}
+.loadout .lo-stat-d {
+  text-align: right;
+  font-size: 0.92em;
+}
+.loadout .lo-stat.up .lo-stat-d {
+  color: var(--good);
+}
+.loadout .lo-stat.down .lo-stat-d {
+  color: var(--bad);
+}
+.loadout .lo-kit {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.85em;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--faint);
+}
+
+/* Right: slots and options */
+.loadout .lo-side-head {
+  min-height: 28px;
+}
+.menu .loadout button.lo-crumb {
+  width: 100%;
+  padding: 2px 10px 6px;
+  font-family: var(--display);
+  font-size: 1.15em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.menu .loadout button.lo-crumb:focus {
+  color: #fff;
+}
+.loadout .lo-back {
+  margin-right: 8px;
+}
+.loadout .lo-row-in {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.loadout .lo-lab {
+  flex: none;
+  font-size: 0.74em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.loadout .lo-lab em {
+  margin-left: 6px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  color: var(--accent-2);
+  text-transform: lowercase;
+}
+.loadout .lo-val {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 1.02em;
+  letter-spacing: 0.04em;
+  text-align: right;
+}
+.loadout .lo-val > span:not(.lo-arrow) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.loadout .lo-arrow {
+  color: var(--dim);
+  font-family: var(--mono);
+}
+.loadout button:focus .lo-arrow {
+  color: var(--accent);
+}
+.loadout .lo-opt-in {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.loadout .lo-opt-name {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 1.05em;
+  letter-spacing: 0.04em;
+}
+.loadout .lo-cur {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 0.66em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--good);
+}
+.loadout .lo-opt-sub {
+  font-size: 0.74em;
+  color: var(--dim);
+  line-height: 1.35;
+}
+.loadout .lo-reason {
+  font-size: 0.74em;
+  color: var(--bad);
+  line-height: 1.35;
+}
+.loadout .lo-reason::before {
+  content: '✕ ';
+}
+.menu .loadout button.lo-opt.bad {
+  cursor: not-allowed;
+}
+.menu .loadout button.lo-opt.bad .lo-opt-name {
+  color: rgba(232, 228, 218, 0.38);
+}
+.menu .loadout button.lo-opt.cur {
+  border-left-color: rgba(159, 184, 122, 0.6);
+}
+.loadout .screen-foot button.primary.done {
+  color: var(--good);
+}
+.loadout .screen-foot button.primary.flash {
+  background: var(--good);
+  color: #15160f;
+}
+
+/* Play screen: loadout quick-pick above GO */
+.menu .drill-detail button.lo-pick {
+  width: 100%;
+  margin: auto 0 10px;
+  padding: 0.5em 0.8em;
+  border: 1px solid var(--faint);
+}
+.menu .drill-detail button.lo-pick:focus {
+  border-color: var(--accent);
+  background: rgba(193, 170, 124, 0.1);
+}
+.drill-detail .lo-pick-in {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.drill-detail .lo-pick-l {
+  font-size: 0.72em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.drill-detail .lo-pick-v {
+  display: flex;
+  gap: 8px;
+  font-family: var(--display);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.drill-detail .lo-arrow {
+  color: var(--dim);
+}
+.menu .drill-detail button.lo-pick:focus .lo-arrow {
+  color: var(--accent);
+}
+.menu .drill-detail .lo-pick + .go {
+  margin-top: 0;
+}
+.loadout .lo-item-edit {
+  padding: 0.45em 10px 0.45em 26px;
+  border-left: 3px solid var(--accent);
+  border-bottom: 1px solid var(--faint);
+}
