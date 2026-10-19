@@ -1,4 +1,5 @@
 import { AudioEngine } from '../audio/AudioEngine';
+import { Fx } from '../fx/Fx';
 import { Input } from '../input/Input';
 import { KeyboardMouse } from '../input/KeyboardMouse';
 import type { ActionFrame, InputSource } from '../input/actions';
@@ -35,6 +36,7 @@ export class Game {
   renderer!: Renderer;
   player!: Player;
   weapons!: WeaponController;
+  fx!: Fx;
   range!: Range;
   audio!: AudioEngine;
   hud!: Hud;
@@ -68,6 +70,8 @@ export class Game {
     this.player.teleport(this.range.spawn.clone(), this.range.spawnYaw);
     this.weapons = new WeaponController(this.ctx, this.player, ['sb16', 'p17']);
     this.systems.push(this.player, this.weapons, this.range);
+    this.fx = new Fx(this.ctx, { weapons: this.weapons, player: this.player, renderer: this.renderer });
+    this.systems.push(this.fx);
     this.audio = new AudioEngine(bus, this.ctx.camera);
     this.hud = new Hud(ui);
     this.menu = new Menu(ui);
@@ -100,6 +104,7 @@ export class Game {
     this.audio.resume();
     this.menu.show(false);
     this.paused = false;
+    this.renderer.camPowerOn();
     if (canvas && !this.allowUnlocked) this.lock(canvas);
   }
 
@@ -110,6 +115,7 @@ export class Game {
 
   resetDrill() {
     this.range.reset();
+    this.fx.reset();
     this.player.teleport(this.range.spawn.clone(), this.range.spawnYaw);
   }
 
@@ -146,6 +152,8 @@ export class Game {
     for (const s of this.systems) s.update?.(dt, alpha);
     this.audio.update();
     this.hud.update(this.weapons);
+    // Input turn rate drives CAM04 bitrate starvation alongside the measured camera rotation.
+    this.renderer.setMotion(Math.hypot(f.look.yaw, f.look.pitch) / Math.max(dt, 1e-3));
     this.renderer.render(dt);
   }
 }

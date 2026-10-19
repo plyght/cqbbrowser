@@ -1,102 +1,290 @@
-import { Effect, EffectAttribute } from 'postprocessing';
-import { Uniform, Vector2 } from 'three';
+import { Effect, EffectAttribute, MipmapBlurPass } from 'postprocessing';
+import {
+  HalfFloatType,
+  Matrix3,
+  Matrix4,
+  Quaternion,
+  Uniform,
+  Vector2,
+  Vector3,
+  Vector4,
+  type Texture,
+  type WebGLRenderTarget,
+  type WebGLRenderer,
+} from 'three';
+import { clamp, lerp, noise1 } from '../../core/math';
+import { postSettings, type PostSettings, type QualityPreset } from '../quality';
+import { AutoExposure } from './AutoExposure';
+import { BitrateModel } from './BitrateModel';
+import { cam04Frag } from './cam04.frag';
+import { fitScale, type LensParams } from './lens';
+import { makeLensDirt } from './lensDirt';
+
+const smooth = (a: number, b: number, x: number) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+/** Daylight EV the noise gain and shutter stretch are referenced to. */
+const EV_REF = -1.4;
 
 /**
- * CAM04 sensor/lens look (v0): barrel distortion, radial chromatic aberration, vignette,
- * luminance-dependent grain, unsharp halo and motion-driven block compression.
+ * CAM04: the chest-camera look as a single merged pmndrs Effect (see cam04.frag.ts).
+ * Owns the shared half-res blur pyramid (bloom/halation, AE metering, codec macroblocks, defocus) and the
+ * GPU auto-exposure state. Feed it camera motion every frame (`setCameraMotion`/`setMotion`).
  */
-const frag = /* glsl */ `
-uniform float uDistort;
-uniform float uCA;
-uniform float uVignette;
-uniform float uGrain;
-uniform float uSharpen;
-uniform float uBlock;
-uniform float uTime;
-uniform float uIntensity;
-uniform vec2 uRes;
-
-vec2 barrel(vec2 uv, float k) {
-  vec2 c = uv * 2.0 - 1.0;
-  float aspect = uRes.x / uRes.y;
-  c.x *= aspect;
-  float r2 = dot(c, c);
-  c *= 1.0 + k * r2 + k * 0.35 * r2 * r2;
-  c.x /= aspect;
-  // Normalise so the corners stay on-screen (crop like a real dewarped lens).
-  float norm = 1.0 + k * (1.0 + aspect * aspect) * 0.62;
-  return (c / norm) * 0.5 + 0.5;
-}
-
-float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-
-void mainImage(const in vec4 inputColor, const in vec2 uv0, out vec4 outputColor) {
-  vec2 px = 1.0 / uRes;
-  vec2 uv = barrel(uv0, uDistort * uIntensity);
-  // Block quantisation: snap sampling to 8x8 blocks proportionally to uBlock (bitrate starvation).
-  vec2 suv = uv;
-  if (uBlock > 0.001) {
-    vec2 b = 8.0 * px;
-    vec2 snapped = (floor(uv / b) + 0.5) * b;
-    suv = mix(uv, snapped, clamp(uBlock, 0.0, 1.0) * 0.6);
-  }
-  vec2 dir = uv - 0.5;
-  float r = length(uv0 - 0.5);
-  vec2 off = dir * r * uCA * uIntensity * 0.02;
-  vec3 col;
-  col.r = texture2D(inputBuffer, suv + off).r;
-  col.g = texture2D(inputBuffer, suv).g;
-  col.b = texture2D(inputBuffer, suv - off).b;
-
-  // Unsharp mask (over-processed digital look).
-  vec3 blur = (
-    texture2D(inputBuffer, suv + vec2(px.x, 0.0) * 2.0).rgb +
-    texture2D(inputBuffer, suv - vec2(px.x, 0.0) * 2.0).rgb +
-    texture2D(inputBuffer, suv + vec2(0.0, px.y) * 2.0).rgb +
-    texture2D(inputBuffer, suv - vec2(0.0, px.y) * 2.0).rgb) * 0.25;
-  col += (col - blur) * uSharpen * uIntensity;
-
-  // Grain: stronger in shadows.
-  float luma = dot(col, vec3(0.299, 0.587, 0.114));
-  float n = hash(uv * uRes + fract(uTime * 29.97) * 100.0) - 0.5;
-  col += n * uGrain * uIntensity * mix(1.6, 0.4, luma);
-
-  // Vignette.
-  float v = smoothstep(0.85, 0.25, r * (1.0 + uVignette * uIntensity * 0.6));
-  col *= mix(1.0, v, uVignette * uIntensity);
-
-  // Outside the dewarped image → black (lens circle crop at extreme distortion).
-  outputColor = vec4(max(col, 0.0), inputColor.a);
-}
-`;
-
 export class BodycamEffect extends Effect {
-  constructor() {
-    super('BodycamEffect', frag, {
-      attributes: EffectAttribute.CONVOLUTION,
+  readonly bitrate = new BitrateModel();
+  readonly exposure = new AutoExposure();
+  private mips = new MipmapBlurPass();
+  private dirt: Texture = makeLensDirt();
+  private p: PostSettings = postSettings.get();
+  private aspect = 16 / 9;
+  private tanHalf = new Vector2(1, 1);
+  private omega = new Vector3();
+  private extraSpeed = 0;
+  private time = 0;
+  private flashV = 0;
+  private flashKick = 0;
+  private boot = { t: 10, on: true, offT: -1 };
+  private q = new Quaternion();
+  private m4 = new Matrix4();
+  private axis = new Vector3();
+  /** k1, k2, circle, aspect last used to fit the crop (NaN = refit). */
+  private lensKey = [NaN, NaN, NaN, NaN];
+  /** Current lens model (same values the shader uses), for HUD projection via distortPoint(). */
+  readonly lens: LensParams = { k1: 0, k2: 0, scale: 1, circle: Infinity };
+
+  constructor(quality: QualityPreset) {
+    super('BodycamEffect', cam04Frag, {
+      attributes: EffectAttribute.CONVOLUTION | EffectAttribute.DEPTH,
+      defines: new Map(),
       uniforms: new Map<string, Uniform>([
-        ['uDistort', new Uniform(0.28)],
-        ['uCA', new Uniform(1.0)],
-        ['uVignette', new Uniform(0.55)],
-        ['uGrain', new Uniform(0.06)],
-        ['uSharpen', new Uniform(0.6)],
-        ['uBlock', new Uniform(0)],
-        ['uTime', new Uniform(0)],
-        ['uIntensity', new Uniform(1)],
-        ['uRes', new Uniform(new Vector2(1, 1))],
+        ['tMip0', new Uniform(null)],
+        ['tMip1', new Uniform(null)],
+        ['tMip2', new Uniform(null)],
+        ['tBloom', new Uniform(null)],
+        ['tExposure', new Uniform(null)],
+        ['tDirt', new Uniform(null)],
+        ['uLens', new Uniform(new Vector4(0.11, 0.025, 0.6, 1.86))],
+        ['uLens2', new Uniform(new Vector4(0.07, 0.006, 0.5, 0.45))],
+        ['uTanHalf', new Uniform(new Vector2(1, 1))],
+        ['uBlurRot', new Uniform(new Matrix3())],
+        ['uBlur', new Uniform(new Vector4(1, EV_REF, 2.2, 0))],
+        ['uRoll', new Uniform(new Vector2())],
+        ['uNear', new Uniform(new Vector4(0.55, 0.18, 1, 0.012))],
+        ['uPost', new Uniform(new Vector4(0.09, 0.6, 0.5, 0.9))],
+        ['uNoise', new Uniform(new Vector4(0.02, 0.03, 0, EV_REF))],
+        ['uCodec', new Uniform(new Vector4(0.006, 1, 0.6, 0))],
+        ['uWB', new Uniform(new Vector3(1, 1, 1))],
+        ['uExpo', new Uniform(new Vector4(0, 0, 1, 0))],
+        ['uGrade', new Uniform(new Vector4(1, 0.5, 0.02, 0.35))],
       ]),
+    });
+    this.uniforms.get('tDirt')!.value = this.dirt;
+    this.mips.radius = 0.85;
+    this.setQuality(quality, false);
+    postSettings.onChange((v) => {
+      this.p = v;
+      this.lensKey[0] = NaN;
     });
   }
 
-  set(name: string, v: number) {
-    this.uniforms.get(name)!.value = v;
+  setQuality(q: QualityPreset, notify = true) {
+    this.mips.levels = q.mipLevels;
+    const d = this.defines;
+    d.set('MB_TAPS', String(q.motionBlurTaps));
+    if (q.nearBlur) d.set('NEAR_BLUR', '1');
+    else d.delete('NEAR_BLUR');
+    if (q.lensDirt) d.set('LENS_DIRT', '1');
+    else d.delete('LENS_DIRT');
+    if (notify) this.setChanged();
+  }
+
+  /** Camera tan(half-FOV), needed to reproject rotation blur. */
+  setCamera(fovYDeg: number, aspect: number) {
+    const ty = Math.tan((fovYDeg * Math.PI) / 360);
+    this.tanHalf.set(ty * aspect, ty);
+    (this.uniforms.get('uTanHalf')!.value as Vector2).copy(this.tanHalf);
+  }
+
+  /** Camera angular velocity in camera-local axes (rad/s): x = pitch, y = yaw, z = roll. */
+  setCameraMotion(wx: number, wy: number, wz: number) {
+    this.omega.set(wx, wy, wz);
+  }
+
+  /** Extra angular speed (rad/s) fed by gameplay (e.g. body turn rate) to drive codec starvation. */
+  setMotion(angularSpeed: number) {
+    this.extraSpeed = angularSpeed;
+  }
+
+  /** Muzzle flash / bright transient: brief sensor clip + halation, and a small AE pull-down. */
+  flash(strength = 1) {
+    this.flashV = Math.max(this.flashV, strength);
+    this.flashKick = Math.max(this.flashKick, 0.35 * strength);
+  }
+
+  /** CAM04 boot: black → overexposed → AE hunts down, white balance settles (~0.6 s). */
+  powerOn() {
+    this.boot = { t: 0, on: true, offT: -1 };
+    this.exposure.reset(3.2);
+    this.bitrate.kick(1, 0.15);
+  }
+
+  /** CAM04 shutdown: encoder glitch, brief bloom, black. */
+  powerOff() {
+    if (!this.boot.on) return;
+    this.boot.offT = 0;
+    this.bitrate.kick(1, 0.2);
+  }
+
+  get poweredOn() {
+    return this.boot.on && this.boot.offT < 0;
+  }
+
+  override initialize(renderer: WebGLRenderer, alpha: boolean, frameBufferType: number) {
+    super.initialize(renderer, alpha, frameBufferType);
+    this.mips.initialize(renderer, alpha, HalfFloatType);
   }
 
   override setSize(w: number, h: number) {
-    (this.uniforms.get('uRes')!.value as Vector2).set(w, h);
+    this.mips.setSize(w, h);
+    this.aspect = w / h;
+    this.lensKey[0] = NaN;
   }
 
-  override update(_r: unknown, _i: unknown, dt?: number) {
-    this.uniforms.get('uTime')!.value += dt ?? 0.016;
+  private get mipTargets(): WebGLRenderTarget[] {
+    return (this.mips as unknown as { downsamplingMipmaps: WebGLRenderTarget[] }).downsamplingMipmaps;
+  }
+
+  override update(renderer: WebGLRenderer, inputBuffer: WebGLRenderTarget, dt = 1 / 60) {
+    this.time += dt;
+    const u = this.uniforms;
+    const p = this.p;
+    const I = clamp(p.footageIntensity, 0, 1);
+
+    // Shared blur pyramid from the HDR scene.
+    this.mips.render(renderer, inputBuffer, null as never);
+    const mips = this.mipTargets;
+    u.get('tMip0')!.value = mips[0].texture;
+    u.get('tMip1')!.value = mips[Math.min(1, mips.length - 1)].texture;
+    u.get('tMip2')!.value = mips[Math.min(2, mips.length - 1)].texture;
+    u.get('tBloom')!.value = this.mips.texture;
+
+    // Transients.
+    this.flashV = Math.max(0, this.flashV - dt * 22);
+    this.flashKick = Math.max(0, this.flashKick - dt * 2.5);
+
+    // Auto-exposure (GPU).
+    this.exposure.setParams(
+      p.exposureDarkTime,
+      p.exposureBrightTime,
+      p.exposureOvershoot,
+      p.exposureCompensation,
+    );
+    this.exposure.update(
+      renderer,
+      mips[Math.min(4, mips.length - 1)].texture,
+      dt,
+      this.time,
+      p.exposureHunt,
+      this.flashKick,
+    );
+    u.get('tExposure')!.value = this.exposure.texture;
+
+    // Lens geometry (refit crop only when something changed).
+    const k1 = 0.11 * p.distortion * I,
+      k2 = 0.025 * p.distortion * I;
+    const circle = lerp(3.2, 1.78, smooth(0, 0.85, I * p.imageCircle));
+    const lk = this.lensKey;
+    const lens = u.get('uLens')!.value as Vector4;
+    if (lk[0] !== k1 || lk[1] !== k2 || lk[2] !== circle || lk[3] !== this.aspect) {
+      lk[0] = k1;
+      lk[1] = k2;
+      lk[2] = circle;
+      lk[3] = this.aspect;
+      lens.set(k1, k2, fitScale(k1, k2, this.aspect, circle), circle);
+      Object.assign(this.lens, { k1, k2, scale: lens.z, circle });
+    }
+    (u.get('uLens2')!.value as Vector4).set(
+      0.07,
+      0.0065 * p.chromaticAberration * I,
+      0.5 * I,
+      0.42 * p.vignette * I,
+    );
+
+    // Camera motion → shutter blur rotation, rolling shutter, codec starvation.
+    const w = this.omega;
+    const speed = w.length();
+    const shutter = 1 / 45;
+    const ang = Math.min(speed * shutter, 0.25) * clamp(p.motionBlur, 0, 2) * lerp(0.35, 1, I);
+    if (ang > 1e-5) this.axis.copy(w).divideScalar(speed);
+    else this.axis.set(0, 1, 0);
+    this.q.setFromAxisAngle(this.axis, ang);
+    this.m4.makeRotationFromQuaternion(this.q);
+    (u.get('uBlurRot')!.value as Matrix3).setFromMatrix4(this.m4);
+    const readout = 0.018 * p.rollingShutter * I;
+    const rs = (readout * 0.5) / Math.max(this.tanHalf.y * lens.z, 0.1);
+    (u.get('uRoll')!.value as Vector2).set(clamp(w.y * rs, -0.08, 0.08), clamp(-w.x * rs * 0.5, -0.05, 0.05));
+    this.bitrate.update(dt, Math.max(speed, this.extraSpeed));
+
+    // Boot / shutdown.
+    const b = this.boot;
+    let fade = 1,
+      bootWarm = 0,
+      evBoot = 0;
+    b.t += dt;
+    if (b.t < 0.8) {
+      fade = smooth(0.08, 0.16, b.t);
+      bootWarm = 1 - smooth(0.1, 0.65, b.t);
+    }
+    if (b.offT >= 0) {
+      b.offT += dt;
+      evBoot = smooth(0.0, 0.12, b.offT) * 1.2;
+      fade = 1 - smooth(0.12, 0.3, b.offT);
+      if (b.offT > 0.3) {
+        b.on = false;
+        b.offT = -1;
+      }
+    }
+    if (!b.on) fade = 0;
+
+    // White balance: slow AWB drift + boot shift (starts cool, settles).
+    const drift = noise1(this.time * 0.07, 3) * 0.035 * p.whiteBalanceDrift * I;
+    const tint = noise1(this.time * 0.05, 5) * 0.012 * p.whiteBalanceDrift * I;
+    (u.get('uWB')!.value as Vector3).set(
+      (1 + drift) * (1 - 0.14 * bootWarm),
+      1 + tint,
+      (1 - drift) * (1 + 0.22 * bootWarm),
+    );
+    (u.get('uExpo')!.value as Vector4).set(p.exposureBias, evBoot, fade, this.flashV);
+
+    // Look.
+    (u.get('uPost')!.value as Vector4).set(
+      0.085 * p.bloom * lerp(0.4, 1, I),
+      0.9 * p.lensDirt * I,
+      0.55 * p.sharpen * I,
+      lerp(1, 0.86, I),
+    );
+    (u.get('uGrade')!.value as Vector4).set(1, 0.55 * I, 0.018 * I, 0.15 * I);
+    (u.get('uBlur')!.value as Vector4).set(1, EV_REF, 2.4, 0);
+    (u.get('uNear')!.value as Vector4).set(0.6, 0.22, clamp(p.nearBlur * I, 0, 1), 0.012);
+    // Grain re-seeds at the camera's ~30 fps cadence.
+    const seed = (Math.floor(this.time * 29.97) % 113) * 7.31;
+    (u.get('uNoise')!.value as Vector4).set(0.022 * p.noise * I, 0.026 * p.noise * I, seed, EV_REF);
+    const st = this.bitrate.starve * p.starvation;
+    (u.get('uCodec')!.value as Vector4).set(
+      (0.004 + 0.028 * st + 0.008 * this.bitrate.gop) * p.compression * I,
+      1 - 0.3 * clamp(st, 0, 1) * I,
+      0.5 * p.compression * I,
+      0.3 * clamp(st, 0, 1) * I,
+    );
+  }
+
+  override dispose() {
+    super.dispose();
+    this.mips.dispose();
+    this.exposure.dispose();
+    this.dirt.dispose();
   }
 }
