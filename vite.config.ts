@@ -7,7 +7,7 @@ export default defineConfig({
     sourcemap: true,
     chunkSizeWarningLimit: 4000,
     // Multi-page: the game and the weapon bench (dev/loadout page).
-    rolldownOptions: { input: { main: 'index.html', bench: 'bench.html' } },
+    rolldownOptions: { input: { main: 'index.html', bench: 'bench.html', anim: 'anim.html' } },
   },
   server: { port: 5173 },
 });
