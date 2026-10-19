@@ -7,6 +7,7 @@ import { Player } from '../player/Player';
 import { Renderer } from '../render/Renderer';
 import { Hud } from '../ui/Hud';
 import { Menu } from '../ui/Menu';
+import type { RunResult } from '../ui/drills';
 import { Ballistics } from '../weapons/Ballistics';
 import { WeaponController } from '../weapons/WeaponController';
 import { Range } from '../world/Range';
@@ -72,6 +73,10 @@ export class Game {
     this.hud = new Hud(ui);
     this.menu = new Menu(ui);
     this.menu.onPlay = () => this.enter(canvas);
+    this.menu.onRestart = () => {
+      this.resetDrill();
+      this.enter(canvas);
+    };
     canvas.addEventListener('click', () => {
       if (!this.paused && document.pointerLockElement !== canvas) this.lock(canvas);
     });
@@ -106,6 +111,13 @@ export class Game {
   pause() {
     this.paused = true;
     this.menu.show(true);
+  }
+
+  /** End-of-run results screen (drills call this). */
+  showResults(r: RunResult) {
+    this.paused = true;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.menu.showResults(r);
   }
 
   resetDrill() {
