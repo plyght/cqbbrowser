@@ -9,14 +9,15 @@ import { boot, play } from './helpers';
 const dir = 'screenshots';
 const shot = (page: Page, name: string) => page.screenshot({ path: `${dir}/feel-${name}.png` });
 
-/** Advance the sim, rendering only every `every` frames and the last one (SwiftShader is slow). */
+/** Advance the sim, rendering every `every` frames and the last one (SwiftShader is slow); `every` ≤ 0 = no render. */
 async function sim(page: Page, n: number, input?: Record<string, unknown>, every = 15) {
   await page.evaluate(
     ([n, input, every]) => {
       const g = (window as any).__sb;
       for (let i = 0; i < (n as number); i++) {
         if (input) g.test.next = structuredClone(input);
-        g.step(1 / 60, i === (n as number) - 1 || i % (every as number) === (every as number) - 1);
+        const e = every as number;
+        g.step(1 / 60, e > 0 && (i === (n as number) - 1 || i % e === e - 1));
       }
       g.test.next = {};
     },
@@ -28,6 +29,10 @@ async function start(page: Page) {
   const errors = await boot(page);
   await page.evaluate(() => ((window as any).__sb.renderer.dynres.enabled = false));
   await play(page);
+  // The authored arms rig loads async (clips + GLB); wait for it so screenshots show the real arms.
+  await page
+    .waitForFunction(() => !!(window as any).__sb.weapons.rig, null, { timeout: 60_000 })
+    .catch(() => {});
   await sim(page, 120);
   return errors;
 }
@@ -167,7 +172,8 @@ test('feel: recoil strip (5-shot string, frames 0/2/4/8/16 after the last shot)'
     expect(peak.muzzle - before.muzzle).toBeGreaterThan(0.5);
     expect(peak.cam - base.cam).toBeGreaterThan(0.12);
     expect(peak.fov - base.fov).toBeGreaterThan(0.3);
-    expect(Math.abs(after.muzzle - base.muzzle)).toBeLessThan(0.6);
+    // The view keeps part of its climb (Player.viewRecoil); the gun returns onto the view.
+    expect(Math.abs(after.muzzle - after.cam - (base.muzzle - base.cam))).toBeLessThan(0.6);
   }
   expect(errors).toEqual([]);
 });
@@ -210,5 +216,98 @@ test('feel: walking — responsive accel, planted stops, subtle chest bob', asyn
   expect(slow.at(-1)![0]).toBeCloseTo(1, 1);
   await sim(page, 20, { move: { x: 0, y: 1 } });
   await shot(page, 'walk');
+  expect(errors).toEqual([]);
+});
+
+test('feel: punchy reload, animated mag check (out → show → back in → seat), abort, switch', async ({
+  page,
+}) => {
+  const errors = await start(page);
+  await page.evaluate(() => {
+    const g = (window as any).__sb;
+    g.__beats = [];
+    g.ctx.bus.on('weaponBeat', (e: { beat: string }) => g.__beats.push(e.beat));
+  });
+  const beats = () => page.evaluate(() => (window as any).__sb.__beats.splice(0) as string[]);
+  const peek = () => page.evaluate(() => (window as any).__sb.__beats.slice() as string[]);
+  const state = () =>
+    page.evaluate(() => {
+      const w = (window as any).__sb.weapons;
+      const m = w.equipped.mag;
+      return {
+        kind: w.reload.kind as string,
+        // World distance of the mag from its seated place in the well.
+        out: m
+          ? m.obj.getWorldPosition(m.rest.clone()).distanceTo(m.obj.parent.localToWorld(m.rest.clone()))
+          : 0,
+      };
+    });
+  /** `want` appears in order inside `got`. */
+  const inOrder = (got: string[], want: string[]) => {
+    let k = 0;
+    for (const g of got) if (g === want[k]) k++;
+    return k === want.length;
+  };
+  for (const p of ['sb16_cqb', 'p17_std']) {
+    await equip(page, p);
+    await sim(page, 40);
+    await beats();
+    // Hold reload: the mag comes out of the well and is held up; the HUD count floats at it.
+    let at = 0;
+    let maxOut = 0;
+    for (const [f, name] of [
+      [20, 'grab'],
+      [36, 'out'],
+      [70, 'hold'],
+    ] as const) {
+      await sim(page, f - at, { down: ['reload'] }, 99);
+      at = f;
+      await shot(page, `check-${p}-${name}`);
+      maxOut = Math.max(maxOut, (await state()).out);
+    }
+    expect((await state()).kind).toBe('check');
+    expect(maxOut).toBeGreaterThan(0.02);
+    // Release: back in, seated.
+    await sim(page, 16, undefined, 99);
+    await shot(page, `check-${p}-in`);
+    await sim(page, 120);
+    expect((await state()).kind).toBe('idle');
+    expect((await state()).out).toBeLessThan(1e-4);
+    const got = await beats();
+    console.log(p, 'check beats', got.join(','));
+    expect(inOrder(got, ['magCheck', 'magCheckOut', 'magCheckIn', 'magSeat'])).toBe(true);
+    // Fire during a check: aborts (reinsert), then the gun is back up.
+    await sim(page, 50, { down: ['reload'] }, 99);
+    await sim(page, 2, { down: ['fire'] });
+    await sim(page, 120);
+    expect((await state()).kind).toBe('idle');
+    expect((await state()).out).toBeLessThan(1e-4);
+    await beats();
+    // Tactical reload: capture the seat contact frame.
+    await sim(page, 1, { down: ['fire'] });
+    await sim(page, 12);
+    await sim(page, 2, { down: ['reload'] });
+    for (let i = 0; i < 240; i++) {
+      await sim(page, 1, undefined, -1); // no render while searching
+      if ((await peek()).includes('magSeat')) break;
+    }
+    await sim(page, 2, undefined, 99);
+    await shot(page, `reload-${p}-seat`);
+    await sim(page, 200);
+    expect((await state()).kind).toBe('idle');
+    expect(await beats()).toContain('magSeat');
+  }
+  // Switch: pressing switch again mid-swap reverses it; a full switch lands on the other gun.
+  await equip(page, 'sb16_cqb');
+  await sim(page, 30);
+  const id = () => page.evaluate(() => (window as any).__sb.weapons.equipped.def.id as string);
+  await sim(page, 1, { down: ['switchWeapon'] });
+  await sim(page, 6);
+  await sim(page, 1, { down: ['switchWeapon'] });
+  await sim(page, 150);
+  expect(await id()).toBe('sb16');
+  await sim(page, 1, { down: ['switchWeapon'] });
+  await sim(page, 150);
+  expect(await id()).toBe('p17');
   expect(errors).toEqual([]);
 });

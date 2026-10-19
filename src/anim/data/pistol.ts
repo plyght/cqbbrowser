@@ -5,10 +5,13 @@ import { COMMON_BEATS, add, hk, pk } from './common';
  * Pistol beat tracks. `well` is the magazine frame with its origin just under the baseplate when seated,
  * so p.y ≈ -0.095 puts the mag top at the mouth of the grip.
  */
-const WP: V3 = [-0.03, 0.09, 0.2];
+const WP: V3 = [-0.02, 0.06, 0.11];
 const WR: V3 = [0.38, 0.1, -0.38];
-const WP2: V3 = [-0.01, 0.07, 0.22];
+const WP2: V3 = [0, 0.05, 0.12];
 const WR2: V3 = [0.3, 0.05, -0.28];
+/** Mag-check pose: gun drawn in a little and canted so the support hand and the witness holes face the lens. */
+const PCP: V3 = [0.02, 0.03, 0.12];
+const PCR: V3 = [0.4, 0.3, -0.9];
 
 export const PISTOL_BEATS: BeatLibrary = {
   ...COMMON_BEATS,
@@ -169,6 +172,7 @@ export const PISTOL_BEATS: BeatLibrary = {
         left: [hk(0.5, 'well', [0, 0.002, 0], 'magGrab', 'out'), hk(1, 'well', [0, -0.006, 0], 'flat')],
         weapon: [pk(0.55, add(WP, [0, 0.01, 0]), add(WR, [0.04, 0, 0])), pk(1, WP, WR)],
         events: [{ t: 0.5, ev: 'magToWell' }],
+        kick: { at: 'well', j: [0, 0.7, 0.05], cam: 0.04 },
       },
       {
         id: 'slap',
@@ -182,6 +186,7 @@ export const PISTOL_BEATS: BeatLibrary = {
         ],
         weapon: [pk(0.87, add(WP, [0, 0.014, 0]), add(WR, [0.05, 0, 0])), pk(1, WP, WR)],
         events: [{ t: 0.35, ev: 'magToWell' }],
+        kick: { at: 'well', j: [0, 0.9, 0.05], cam: 0.05 },
       },
     ],
   },
@@ -205,6 +210,8 @@ export const PISTOL_BEATS: BeatLibrary = {
           ],
         },
         events: [{ t: 0.8, ev: 'chamber' }],
+        // Bolt / slide slams home: a recoil-like jolt.
+        kick: { at: 'slide', j: [0, 0.15, -0.7], cam: 0.05 },
       },
       {
         id: 'thumb',
@@ -218,6 +225,8 @@ export const PISTOL_BEATS: BeatLibrary = {
           ],
         },
         events: [{ t: 0.4, ev: 'chamber' }],
+        // Bolt / slide slams home: a recoil-like jolt.
+        kick: { at: 'slide', j: [0, 0.15, -0.7], cam: 0.05 },
       },
     ],
   },
@@ -263,32 +272,53 @@ export const PISTOL_BEATS: BeatLibrary = {
         id: 'a',
         dur: 0.3,
         left: [hk(0.6, 'well', [-0.02, -0.05, 0.02], 'relaxed'), hk(1, 'well', [0, 0, 0], 'magGrab', 'out')],
-        weapon: [pk(1, [-0.03, 0.12, 0.24], [0.42, 0.2, -0.95])],
+        weapon: [pk(1, PCP, PCR)],
         events: [{ t: 1, ev: 'magToHand' }],
       },
     ],
   },
-  checkPull: {
-    calm: [{ id: 'a', dur: 0.2, hit: 0.4, left: [hk(1, 'well', [0, -0.045, 0], 'magGrab', 'out')] }],
+  // Pistol mag check: drop the mag partway (thumb on the release), tilt the gun to read the witness holes, push it
+  // back up and slap it home (magSeat).
+  magCheckOut: {
+    calm: [
+      {
+        id: 'a',
+        dur: 0.24,
+        hit: 0.3,
+        left: [
+          hk(0.3, 'well', [0, -0.01, 0], 'magGrab', 'in'),
+          hk(1, 'well', [0, -0.05, 0.004], 'magGrab', 'out'),
+        ],
+        weapon: [pk(1, add(PCP, [0, 0.01, 0.01]), add(PCR, [0.08, 0.05, -0.1]))],
+        kick: { at: 'well', j: [0, -0.2, 0] },
+      },
+    ],
   },
   checkHold: {
     calm: [
       {
         id: 'a',
-        dur: 0.5,
+        dur: 0.6,
         hold: true,
-        left: [hk(0.5, 'well', [0.003, -0.048, 0.003], 'magGrab'), hk(1, 'well', [0, -0.045, 0], 'magGrab')],
+        left: [
+          hk(0.5, 'well', [0.003, -0.053, 0.006], 'magGrab'),
+          hk(1, 'well', [0, -0.05, 0.004], 'magGrab'),
+        ],
+        weapon: [
+          pk(0.5, add(PCP, [0, 0.014, 0.01]), add(PCR, [0.1, 0.06, -0.12])),
+          pk(1, add(PCP, [0, 0.01, 0.01]), add(PCR, [0.08, 0.05, -0.1])),
+        ],
       },
     ],
   },
-  checkSeat: {
+  magCheckIn: {
     calm: [
       {
         id: 'a',
         dur: 0.2,
-        hit: 0.6,
-        left: [hk(0.6, 'well', [0, 0.002, 0], 'magGrab', 'out'), hk(1, 'well', [0, -0.004, 0], 'flat')],
-        events: [{ t: 0.6, ev: 'magToWell' }],
+        hit: 0.8,
+        left: [hk(0.8, 'well', [0, -0.012, 0], 'magGrab', 'in'), hk(1, 'well', [0, -0.012, 0], 'magGrab')],
+        weapon: [pk(1, WP, WR)],
       },
     ],
   },

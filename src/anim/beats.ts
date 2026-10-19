@@ -40,7 +40,19 @@ export interface PoseKey extends TimedKey {
   r?: V3;
 }
 
+/** `magPull` = metres the (released) mag sits out of the well along its axis (partly inserted, before a slap). */
 export type PartChannel = 'charge' | 'bolt' | 'slide' | 'magPull';
+
+/**
+ * Contact impulse delivered into the handling rigid body on the beat's `hit` frame (seat slap, bolt slam):
+ * `j` in N·s in the weapon frame (-z forward, +y up), applied at a weapon point; `cam` = chest-cam pitch kick
+ * (rad/s, + = up) through the body spring.
+ */
+export interface BeatKick {
+  at: 'well' | 'bore' | 'charging' | 'slide';
+  j: V3;
+  cam?: number;
+}
 
 export type BeatEventName =
   | 'magToHand' // mag leaves the well and rides the support hand
@@ -66,6 +78,8 @@ export interface BeatVariant {
   events?: { t: number; ev: BeatEventName }[];
   /** Loops at its end while the player's `holding` flag is set (mag check). */
   hold?: boolean;
+  /** Physical jolt on the contact frame. */
+  kick?: BeatKick;
 }
 
 export interface BeatSet {

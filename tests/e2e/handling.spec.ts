@@ -92,7 +92,7 @@ test('handling: tactical reload, mag check, speed reload drops a mag', async ({ 
   expect(mag.dist).toBeLessThan(0.55);
   expect(Math.abs(mag.x)).toBeLessThan(0.45);
   expect(mag.y).toBeLessThan(0.1);
-  await sim(page, 60);
+  await sim(page, 110);
   expect(await kind(page)).toBe('idle');
 
   // Double tap: speed reload, physical mag hits the floor and stays there.

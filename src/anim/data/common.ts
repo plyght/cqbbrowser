@@ -17,6 +17,10 @@ export const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 
 /** Beats shared by all weapon classes: camera fix (left hand to the chest cam) and grip readjusts. */
 export const COMMON_BEATS: BeatLibrary = {
+  // Mag check aborted before the mag left the well: let go of it and get back on the gun.
+  checkRelease: {
+    calm: [{ id: 'a', dur: 0.08, events: [{ t: 0, ev: 'magToWell' }] }],
+  },
   camReach: {
     calm: [
       {
