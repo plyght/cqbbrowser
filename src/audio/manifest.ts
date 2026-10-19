@@ -174,6 +174,8 @@ export function pickFormat(formats: string[], canPlay: (mime: string) => boolean
 export interface SoundVariant {
   buffer: AudioBuffer;
   set: SoundSetName | 'synth';
+  /** Source URL (load order is async; variants are re-sorted by this so picks are reproducible). */
+  src?: string;
 }
 
 /**
@@ -261,7 +263,7 @@ export class SoundBank {
           const data = await fetcher(j.url);
           if (!data) continue;
           const buffer = await ctx.decodeAudioData(data);
-          this.add(j.key, { buffer, set: j.set });
+          this.add(j.key, { buffer, set: j.set, src: j.url });
           this.loadedFrom[j.set] = (this.loadedFrom[j.set] ?? 0) + 1;
         } catch {
           /* undecodable/missing file → synth fallback covers the key */
@@ -269,5 +271,6 @@ export class SoundBank {
       }
     };
     await Promise.all(Array.from({ length: concurrency }, worker));
+    for (const list of this.variants.values()) list.sort((a, b) => (a.src ?? '').localeCompare(b.src ?? ''));
   }
 }

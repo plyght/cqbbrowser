@@ -36,7 +36,7 @@ export interface PlayOpts {
   /** Resonant boost [freq, dB, Q] (pressure layer room mode). */
   peak?: [number, number, number];
   /** shot = uncompressed wide-band gunshot path; dry (default) = bed path (foley, steps); thump/amb. */
-  bus?: 'shot' | 'dry' | 'thump' | 'amb';
+  bus?: 'shot' | 'dry' | 'thump' | 'amb' | 'ui';
   /** Higher survives voice stealing. */
   prio?: number;
   loop?: boolean;
@@ -75,6 +75,22 @@ export function saturationCurve(drive: number, n = 4096) {
   return c;
 }
 
+/**
+ * Asymmetric capsule-overload curve: unity small-signal gain, the positive half saturates earlier than the
+ * negative one (diaphragm/preamp asymmetry → even harmonics). drive 0 = identity.
+ */
+export function overloadCurve(drive: number, n = 4096) {
+  const c = new Float32Array(n);
+  const b = 0.3;
+  const k = Math.max(1e-3, drive);
+  const slope = k * (1 - Math.tanh(k * b) ** 2);
+  for (let i = 0; i < n; i++) {
+    const x = ((i / (n - 1)) * 2 - 1) * HEADROOM;
+    c[i] = drive <= 0 ? x : (Math.tanh(k * (x + b)) - Math.tanh(k * b)) / slope;
+  }
+  return c;
+}
+
 interface ModeSpec {
   /** Small-capsule EQ amount on the bed path (0 = flat). */
   eq: number;
@@ -88,16 +104,48 @@ interface ModeSpec {
   /** Parallel saturation mix (0..1) and drive. */
   sat: number;
   drive: number;
+  /** Shot-path capsule overload drive (asymmetric soft clip); 0 = clean. */
+  overload: number;
   artifacts: number;
 }
 
 const MODES: Record<ListeningMode, ModeSpec> = {
   // What CAM04 records: shots slam into the soft ceiling, everything else ducks and breathes back.
-  footage: { eq: 1, shotDb: 3, bedDb: 0, duckDb: 14, duckTau: 0.32, sat: 0.55, drive: 2.5, artifacts: 1 },
+  footage: {
+    eq: 1,
+    shotDb: 5,
+    bedDb: 0,
+    duckDb: 14,
+    duckTau: 0.32,
+    sat: 0.7,
+    drive: 3.5,
+    overload: 1.0,
+    artifacts: 1,
+  },
   // Electronic ear-pro: shots clamped, quiet sounds lifted, fast protective release.
-  earpro: { eq: 0.15, shotDb: -9, bedDb: 5, duckDb: 16, duckTau: 0.12, sat: 0, drive: 1, artifacts: 0.2 },
+  earpro: {
+    eq: 0.15,
+    shotDb: -9,
+    bedDb: 5,
+    duckDb: 16,
+    duckTau: 0.12,
+    sat: 0,
+    drive: 1,
+    overload: 0,
+    artifacts: 0.2,
+  },
   // Bare ears: no mic, little saturation; dulling + tinnitus come from exposure().
-  noprotect: { eq: 0, shotDb: 3, bedDb: 0, duckDb: 3, duckTau: 0.5, sat: 0.2, drive: 1.5, artifacts: 0 },
+  noprotect: {
+    eq: 0,
+    shotDb: 3,
+    bedDb: 0,
+    duckDb: 3,
+    duckTau: 0.5,
+    sat: 0.2,
+    drive: 1.5,
+    overload: 0.4,
+    artifacts: 0,
+  },
 };
 
 export class Mixer {
@@ -128,7 +176,16 @@ export class Mixer {
   private saturator: WaveShaperNode;
   private dull: BiquadFilterNode;
   private tailSend: GainNode;
+  /** Everything reflected (tail + early taps); offline metrics mute it to measure the dry part. */
+  readonly wetOut: GainNode;
+  /** Direct (unreflected) shot-path voices; offline metrics mute it to measure the wet part alone. */
+  readonly direct: GainNode;
+  /** Non-diegetic UI sounds: straight to master, past the mic. */
+  readonly ui: GainNode;
   private sfxShot: GainNode;
+  private overload!: WaveShaperNode;
+  /** Fixed 30–80 ms early cluster (ground + nearby baffles): gives every shot its size, outdoors too. */
+  private cluster: GainNode;
   readonly master: GainNode;
   private tinnitus: GainNode;
   private windL: GainNode;
@@ -162,6 +219,8 @@ export class Mixer {
     // --- Output chain (built from the end backwards) ---------------------------------------------------
     this.master = g(0.8);
     this.master.connect(c.destination);
+    this.ui = g(1);
+    this.ui.connect(this.master);
     const ceiling = c.createWaveShaper();
     ceiling.oversample = '4x';
     ceiling.curve = ceilingCurve();
@@ -201,7 +260,20 @@ export class Mixer {
     this.shot = g(1);
     const shotHp = bq('highpass', 32, 0.7);
     const shotPresence = bq('peaking', 3400, 1, 2.5);
-    this.shot.connect(shotHp).connect(shotPresence).connect(this.shotLevel);
+    // Capsule overload: asymmetric soft clip (even + odd harmonics) on the shot path only, before the shared
+    // parallel saturator — this is where a bodycam gunshot gets its dense, slightly torn texture.
+    const overloadPre = g(1 / HEADROOM);
+    const dcBlock = bq('highpass', 22, 0.7); // asymmetric clipping makes DC on loud shots
+    this.overload = c.createWaveShaper();
+    this.overload.oversample = '4x';
+    this.overload.curve = overloadCurve(MODES.footage.overload);
+    this.shot
+      .connect(shotHp)
+      .connect(shotPresence)
+      .connect(overloadPre)
+      .connect(this.overload)
+      .connect(dcBlock)
+      .connect(this.shotLevel);
 
     // --- Bed path: small-capsule EQ → AGC duck ------------------------------------------------------------
     this.bedLevel = g(1);
@@ -231,11 +303,15 @@ export class Mixer {
     this.dry = g(1);
     this.dry.connect(this.sfx);
     this.sfxShot = g(1);
+    this.wetOut = g(1);
+    this.wetOut.connect(this.sfxShot);
     this.sfxShot.connect(this.shot);
+    this.direct = g(1);
+    this.direct.connect(this.sfxShot);
     this.wet = g(0.4);
     this.roomBoost = bq('peaking', 100, 1.5, 0);
     const wetHp = bq('highpass', 70, 0.7);
-    this.wet.connect(this.roomBoost).connect(wetHp).connect(this.sfxShot);
+    this.wet.connect(this.roomBoost).connect(wetHp).connect(this.wetOut);
     this.send = g(1);
     this.tailSend = g(1);
     this.predelay = c.createDelay(0.2);
@@ -257,8 +333,24 @@ export class Mixer {
       const lp = bq('lowpass', 8000, 0.5);
       const gain = g(0);
       const pan = c.createStereoPanner();
-      erIn.connect(delay).connect(lp).connect(gain).connect(pan).connect(this.sfxShot);
+      erIn.connect(delay).connect(lp).connect(gain).connect(pan).connect(this.wetOut);
       this.taps.push({ delay, lp, gain, pan });
+    }
+    this.cluster = g(0.8);
+    this.cluster.connect(this.wetOut);
+    for (const [d, gn, p, lpf] of [
+      [0.031, 0.3, -0.45, 6500],
+      [0.043, 0.24, 0.4, 5500],
+      [0.058, 0.17, -0.2, 4500],
+      [0.077, 0.11, 0.3, 3500],
+    ]) {
+      const delay = c.createDelay(0.1);
+      delay.delayTime.value = d;
+      const lp = bq('lowpass', lpf, 0.5);
+      const gain = g(gn);
+      const pan = c.createStereoPanner();
+      pan.pan.value = p;
+      erIn.connect(delay).connect(lp).connect(gain).connect(pan).connect(this.cluster);
     }
 
     // --- Ambience (heard through the same mic, so the AGC ducks it after shots) -------------------------
@@ -338,7 +430,9 @@ export class Mixer {
     this.roomBoost.frequency.setTargetAtTime(clamp(a.roomMode * 1.2, 40, 220), t, tau);
     this.roomBoost.gain.setTargetAtTime(a.bass * 10, t, tau);
     // ER taps: outdoors they are the slapback off berms; indoors the dense first reflections.
-    const erScale = 0.35 + 0.65 * Math.max(a.enclosure, 0.4);
+    const erScale = 0.6 * (0.35 + 0.65 * Math.max(a.enclosure, 0.4));
+    // The fixed size cluster dominates outdoors; indoors the probe's own taps take over.
+    this.cluster.gain.setTargetAtTime(0.9 - 0.45 * a.enclosure, t, tau);
     for (let i = 0; i < TAPS; i++) {
       const tap = a.taps[i];
       const n = this.taps[i];
@@ -368,10 +462,20 @@ export class Mixer {
     this.shotLevel.gain.setValueAtTime(dbToGain(m.shotDb), t);
     this.bedLevel.gain.setValueAtTime(dbToGain(m.bedDb), t);
     this.saturator.curve = saturationCurve(m.drive);
+    this.overload.curve = overloadCurve(m.overload);
     this.satMix.gain.setValueAtTime(m.sat, t);
     this.cleanMix.gain.setValueAtTime(1 - m.sat * 0.5, t);
     this.applyArtifacts();
     if (mode !== 'noprotect') this.exposure(0, 0);
+  }
+
+  /** Measurement only: bypass every saturator and scale the shot path down so the chain is linear. */
+  setLinear(level: number) {
+    const t = this.ctx.currentTime;
+    this.satMix.gain.setValueAtTime(0, t);
+    this.cleanMix.gain.setValueAtTime(1, t);
+    this.overload.curve = overloadCurve(0);
+    this.shotLevel.gain.setValueAtTime(level, t);
   }
 
   /**
@@ -477,10 +581,12 @@ export class Mixer {
         : o.bus === 'amb'
           ? this.amb
           : o.bus === 'shot'
-            ? this.sfxShot
-            : this.dry;
+            ? this.direct
+            : o.bus === 'ui'
+              ? this.ui
+              : this.dry;
     tail.connect(bus);
-    const sends = bus === this.dry || bus === this.sfxShot;
+    const sends = bus === this.dry || bus === this.direct;
     if (o.send && sends) {
       const s = c.createGain();
       s.gain.value = o.send;

@@ -23,41 +23,40 @@ export interface IrSpec {
 
 /** Spec per bank entry (same order as BANK in acoustics.ts). */
 export const BANK_SPECS: Record<(typeof BANK)[number]['name'], IrSpec> = {
+  // Outdoors: mostly dry. A distinct slapback off the berms/baffles, a couple of quieter far echoes and a
+  // short, quiet low rumble — not a wash.
   outdoor: {
-    rt60: 1.1,
-    lowMul: 1.3,
+    rt60: 0.6,
+    lowMul: 1.4,
     highMul: 0.35,
-    bandGain: [1.0, 0.5, 0.15],
-    buildUp: 0.12,
-    diffuse: 0.25,
+    bandGain: [1.0, 0.45, 0.12],
+    buildUp: 0.1,
+    diffuse: 0.1,
     echoes: [
-      [0.11, 0.55, 5000],
-      [0.19, 0.7, 4200],
-      [0.26, 0.4, 3500],
-      [0.38, 0.45, 2800],
-      [0.52, 0.3, 2200],
-      [0.71, 0.25, 1700],
-      [0.95, 0.18, 1300],
-      [1.25, 0.12, 900],
+      [0.12, 0.6, 4500],
+      [0.18, 0.75, 4000],
+      [0.27, 0.3, 3000],
+      [0.42, 0.18, 2200],
+      [0.65, 0.1, 1500],
     ],
   },
   covered: {
-    rt60: 0.9,
+    rt60: 0.55,
     lowMul: 1.3,
     highMul: 0.5,
     bandGain: [1.0, 0.8, 0.35],
-    buildUp: 0.05,
-    diffuse: 0.8,
+    buildUp: 0.04,
+    diffuse: 0.7,
     echoes: [
-      [0.09, 0.4, 5000],
-      [0.17, 0.35, 3500],
-      [0.33, 0.25, 2500],
+      [0.09, 0.35, 5000],
+      [0.17, 0.3, 3500],
     ],
   },
-  hall: { rt60: 1.5, lowMul: 1.15, highMul: 0.55, bandGain: [1.0, 1.0, 0.55], buildUp: 0.06 },
-  room: { rt60: 0.8, lowMul: 1.15, highMul: 0.6, bandGain: [1.1, 1.0, 0.6], buildUp: 0.025 },
-  small: { rt60: 0.6, lowMul: 1.35, highMul: 0.55, bandGain: [1.6, 1.0, 0.55], buildUp: 0.012 },
-  booth: { rt60: 0.5, lowMul: 1.7, highMul: 0.45, bandGain: [2.4, 1.0, 0.5], buildUp: 0.005 },
+  // Indoors: short and dense. Small rooms are boomy (long low band) but brief.
+  hall: { rt60: 1.0, lowMul: 1.15, highMul: 0.55, bandGain: [1.0, 1.0, 0.55], buildUp: 0.05 },
+  room: { rt60: 0.45, lowMul: 1.25, highMul: 0.6, bandGain: [1.2, 1.0, 0.6], buildUp: 0.018 },
+  small: { rt60: 0.36, lowMul: 1.45, highMul: 0.55, bandGain: [1.7, 1.0, 0.55], buildUp: 0.008 },
+  booth: { rt60: 0.3, lowMul: 1.7, highMul: 0.45, bandGain: [2.4, 1.0, 0.5], buildUp: 0.004 },
 };
 
 /** One-pole low-pass coefficient for cutoff fc. */

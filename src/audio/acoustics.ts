@@ -305,12 +305,12 @@ export function smoothAcoustics(cur: Acoustics, target: Acoustics, k: number): A
  * convolver assignment only 2 convolvers are ever needed and a buffer swap always happens at zero weight.
  */
 export const BANK = [
-  { name: 'outdoor', rt60: 1.6, volume: 1e5 },
-  { name: 'covered', rt60: 0.9, volume: 3000 },
-  { name: 'hall', rt60: 1.5, volume: 800 },
-  { name: 'room', rt60: 0.8, volume: 150 },
-  { name: 'small', rt60: 0.6, volume: 30 },
-  { name: 'booth', rt60: 0.5, volume: 6 },
+  { name: 'outdoor', rt60: 0.6, volume: 1e5 },
+  { name: 'covered', rt60: 0.55, volume: 3000 },
+  { name: 'hall', rt60: 1.0, volume: 800 },
+  { name: 'room', rt60: 0.45, volume: 150 },
+  { name: 'small', rt60: 0.36, volume: 30 },
+  { name: 'booth', rt60: 0.3, volume: 6 },
 ] as const;
 
 /**
@@ -349,8 +349,14 @@ export function convolverMix(pos: number) {
 }
 
 /** Overall wet (tail) level: grows with enclosure and room size, outdoor tail stays present but low. */
-export function wetLevel(a: Pick<Acoustics, 'enclosure' | 'rt60' | 'absorption'>) {
-  return clamp(0.22 + 0.6 * a.enclosure * clamp(a.rt60 / 1.2, 0.35, 1.2) * (1 - 0.5 * a.absorption), 0, 1);
+export function wetLevel(a: Pick<Acoustics, 'enclosure' | 'rt60' | 'absorption' | 'volume'>) {
+  // Kept low on purpose: the default mix should read close, dry and punchy. Big enclosed spaces get a bit more.
+  const big = clamp(Math.log10(Math.max(1, a.volume) / 100) / 1.5, 0, 1);
+  return clamp(
+    0.1 + a.enclosure * (0.3 * clamp(a.rt60 / 1.2, 0.4, 1.1) * (1 - 0.5 * a.absorption) + 0.15 * big),
+    0,
+    1,
+  );
 }
 
 // --- Authored room graph (§9.2 A / §9.3) — hook for a future JSON layout --------------------------------
