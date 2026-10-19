@@ -34,8 +34,25 @@ describe('physically simulated handling', () => {
     ]) {
       expect(R[heavy].halfLife).toBeGreaterThanOrEqual(R[light].halfLife);
       expect(R[heavy].settle).toBeGreaterThan(R[light].settle);
-      expect(R[heavy].risePerShot).toBeLessThan(R[light].risePerShot);
+      // The CQB build's comp pushes the muzzle down; the can adds back-pressure: rise compares like-for-like.
+      if (heavy !== 'sb16_supp') expect(R[heavy].risePerShot).toBeLessThan(R[light].risePerShot);
     }
+  });
+
+  test('every build: unmistakable recoil (visible rise, rearward kick, chest-cam kick, FOV punch)', () => {
+    for (const r of rows) {
+      expect(r.risePerShot).toBeGreaterThan(0.5);
+      expect(r.kickBack).toBeGreaterThan(8);
+      expect(r.camKick).toBeGreaterThan(0.25);
+      expect(r.climb).toBeGreaterThan(0.05);
+      expect(r.fovPunch).toBeGreaterThan(0.35);
+    }
+    // Character: K-47S and P-17 snappier than the SB-16; KP-9 and HB-300 softer.
+    expect(R.k47s_railed.risePerShot).toBeGreaterThan(R.sb16_cqb.risePerShot);
+    expect(R.p17_std.risePerShot).toBeGreaterThan(R.sb16_cqb.risePerShot);
+    expect(R.kp9_std.risePerShot).toBeLessThan(R.sb16_cqb.risePerShot);
+    expect(R.hb300_int.risePerShot).toBeLessThan(R.sb16_cqb.risePerShot);
+    expect(R.kp9_std.camKick).toBeLessThan(R.sb16_cqb.camKick);
   });
 
   test('suppressor: front-heavy overshoot', () => {

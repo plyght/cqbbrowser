@@ -1,7 +1,8 @@
 import { Euler, Matrix4, Quaternion, Vector3, type Object3D } from 'three';
 import type { WeaponModel } from '../../weapons/models';
 import type { Anchor, HandKey, V3 } from '../beats';
-import type { ClassCfg } from '../holds';
+import { holdShiftZ, type ClassCfg } from '../holds';
+import { layoutBuild, resolveBuild } from '../../weapons/attachments';
 import { armContexts } from './arm';
 import { gripShapes, type GripShapes } from './shapes';
 import {
@@ -27,6 +28,8 @@ export interface WeaponRig {
   fire: HandSolution;
   fireTrigger: HandSolution;
   support: HandSolution;
+  /** Torso-z shift of the class holds for this build's length of pull (`holdShiftZ`). */
+  holdDz: number;
 }
 
 export const WEAPON_ANCHORS = new Set<Anchor>([
@@ -106,16 +109,23 @@ export function weaponRig(model: WeaponModel, cfg: ClassCfg): WeaponRig {
   const magGrasp = new Vector3(0, -cfg.graspDepth, 0).applyQuaternion(magRestQ).add(sockets.magwell);
   if (magRest) magGrasp.sub(magRest).applyQuaternion(magRestQ.clone().invert());
   // The solve (~0.5 s) depends only on the build and the class holds: cache it per build.
+  let buttZ: number | undefined;
+  try {
+    buttZ = layoutBuild(resolveBuild(model.build)).buttZ;
+  } catch {
+    /* hand-built model without a valid build */
+  }
+  const holdDz = holdShiftZ(cfg, buttZ);
   const key = JSON.stringify(model.build) + JSON.stringify(cfg.holds) + JSON.stringify(cfg.shoulderL);
   let solved = SOLVED.get(key);
   if (!solved) {
     const shapes = gripShapes(model);
     const fire = solveFiring(shapes, false);
     const fireTrigger = solveFiring(shapes, true);
-    const support = solveSupport(shapes, fire, armContexts(cfg, -1));
+    const support = solveSupport(shapes, fire, armContexts(cfg, -1, holdDz));
     SOLVED.set(key, (solved = { shapes, fire, fireTrigger, support }));
   }
-  return { sockets, magGrasp, magRestQ, magRest, ...solved };
+  return { sockets, magGrasp, magRestQ, magRest, holdDz, ...solved };
 }
 
 const SOLVED = new Map<string, Pick<WeaponRig, 'shapes' | 'fire' | 'fireTrigger' | 'support'>>();

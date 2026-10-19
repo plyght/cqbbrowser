@@ -49,7 +49,7 @@ export function buildStats(build: WeaponBuild): StatValues | null {
   const s = computeStats(resolveBuild(build));
   const def = applyBuild(BASE_WEAPONS[build.weapon], build);
   // Free recoil energy of the weapon: E = p² / 2m (impulse from the recoil model, mass of the loaded gun).
-  const p = recoilFor(def).impulseNs;
+  const p = recoilFor(def).profile.impulseNs;
   return {
     mass: s.mass,
     length: s.length * 100,

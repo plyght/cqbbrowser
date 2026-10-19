@@ -32,6 +32,19 @@ export interface ClassCfg {
   /** Hand bases [finger dir, back-of-hand dir] in the weapon frame. */
   gripBasis: [V3, V3];
   supportBasis: [V3, V3];
+  /**
+   * Shouldered builds index the stock to the shoulder pocket: the hold moves forward by this fraction of the
+   * build's length of pull beyond `BUTT_REF` (a longer stock sits the gun further out). 0 = no stock.
+   */
+  buttFollow: number;
+}
+
+/** Butt-pad z (behind the grip) the rifle holds were authored for (SB-16 CQB). */
+export const BUTT_REF = 0.288;
+
+/** Torso-z shift of every hold for a build with butt pad at `buttZ` (m behind the grip). */
+export function holdShiftZ(cfg: ClassCfg, buttZ: number | undefined): number {
+  return buttZ === undefined ? 0 : -(buttZ - BUTT_REF) * cfg.buttFollow;
 }
 
 /**
@@ -41,17 +54,17 @@ export interface ClassCfg {
 export const CFG: Record<WeaponClass, ClassCfg> = {
   rifle: {
     holds: {
-      high: { p: [0.06, -0.2, -0.28], r: [-0.017, 0, 0] },
-      ads: { p: [-0.014, -0.015, -0.27], r: [0.084, 0, 0] },
-      low: { p: [0.017, -0.239, -0.22], r: [-0.398, 0.11, 0.06] },
-      compressed: { p: [0.04, -0.2, -0.22], r: [-0.12, 0, 0] },
+      high: { p: [0.05, -0.135, -0.38], r: [0.03, 0.06, 0] },
+      ads: { p: [-0.014, -0.035, -0.27], r: [0.084, 0, 0] },
+      low: { p: [0.04, -0.2, -0.352], r: [-0.405, 0.12, 0.05] },
+      compressed: { p: [0.045, -0.16, -0.28], r: [-0.1, 0.04, 0] },
       sprint: { p: [0.02, -0.25, -0.25], r: [-0.75, 0.55, -0.5] },
     },
     graspDepth: 0.065,
     shoulderR: [0.19, 0.02, -0.02],
-    shoulderL: [-0.19, 0.0, -0.1],
+    shoulderL: [-0.19, -0.04, -0.15],
     poleR: [0.45, -0.55, 0.15],
-    poleL: [-0.8, -0.6, 0.0],
+    poleL: [-0.3, -0.95, 0.1],
     away: { p: [0.07, -0.34, 0.1], r: [-1.05, 0.35, 0.75] },
     awayTime: 0.32,
     drawTime: 0.42,
@@ -71,13 +84,14 @@ export const CFG: Record<WeaponClass, ClassCfg> = {
       [0.8, 0.5, -0.33],
       [-0.5, -0.85, 0],
     ],
+    buttFollow: 0.5,
   },
   pistol: {
     holds: {
-      high: { p: [-0.055, -0.14, -0.55], r: [0, 0, 0] },
+      high: { p: [-0.035, -0.115, -0.47], r: [0, 0, 0] },
       ads: { p: [-0.078, -0.03, -0.61], r: [-0.06, -0.011, 0.03] },
-      low: { p: [-0.05, -0.254, -0.487], r: [-0.6, 0, 0] },
-      compressed: { p: [-0.01, -0.17, -0.3], r: [-0.1, 0, 0] },
+      low: { p: [-0.045, -0.175, -0.42], r: [-0.5, 0.05, 0] },
+      compressed: { p: [-0.01, -0.14, -0.3], r: [-0.1, 0, 0] },
       sprint: { p: [0.06, -0.28, -0.3], r: [-1.0, 0.15, 0] },
     },
     graspDepth: 0.012,
@@ -104,5 +118,6 @@ export const CFG: Record<WeaponClass, ClassCfg> = {
       [0.1, -0.25, -0.96],
       [-1, 0, 0.1],
     ],
+    buttFollow: 0,
   },
 };
