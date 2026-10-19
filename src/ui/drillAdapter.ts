@@ -12,11 +12,17 @@ const medal = (m: EngineMedal | null | undefined): Medal | undefined =>
         ? 'bronze'
         : undefined;
 
+const FACILITY_NAMES: Record<EngineDrill['facility'], string> = {
+  range: 'Square Range',
+  steel: 'Steel Park',
+  killhouse: 'Kill House',
+};
+
 export function toDrillInfo(d: EngineDrill): DrillInfo {
   return {
     id: d.id,
     name: d.name,
-    facility: d.facility,
+    facility: FACILITY_NAMES[d.facility] ?? d.facility,
     par: d.par?.gold ?? 0,
     best: d.pb?.final,
     medal: medal(d.pb?.medal),
@@ -31,7 +37,7 @@ export function toRunResult(r: DrillResult, info?: EngineDrill): RunResult {
   const out: RunResult = {
     drillId: r.drillId,
     drillName: r.name,
-    facility: info?.facility,
+    facility: info ? FACILITY_NAMES[info.facility] : undefined,
     time: s.time,
     par: info?.par?.gold ?? 0,
     hits: s.alphas + s.charlies + s.deltas + s.steelHits,
