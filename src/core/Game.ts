@@ -9,7 +9,8 @@ import { Hud } from '../ui/Hud';
 import { Menu } from '../ui/Menu';
 import { Ballistics } from '../weapons/Ballistics';
 import { WeaponController } from '../weapons/WeaponController';
-import { Range } from '../world/Range';
+import { Drills } from '../drills/Drills';
+import { World } from '../world/World';
 import { bus } from './bus';
 import type { Context, System } from './Context';
 
@@ -35,7 +36,8 @@ export class Game {
   renderer!: Renderer;
   player!: Player;
   weapons!: WeaponController;
-  range!: Range;
+  world!: World;
+  drills!: Drills;
   audio!: AudioEngine;
   hud!: Hud;
   menu!: Menu;
@@ -64,10 +66,11 @@ export class Game {
     };
     this.player = new Player(this.ctx);
     const ballistics = new Ballistics(this.ctx, () => this.player.rigidBody);
-    this.range = new Range(this.ctx, ballistics);
-    this.player.teleport(this.range.spawn.clone(), this.range.spawnYaw);
+    this.world = new World(this.ctx, ballistics, this.player);
+    this.player.teleport(this.world.spawn, this.world.spawnYaw);
     this.weapons = new WeaponController(this.ctx, this.player, ['sb16', 'p17']);
-    this.systems.push(this.player, this.weapons, this.range);
+    this.drills = new Drills(this.ctx, this.world, this.player, () => this.paused);
+    this.systems.push(this.player, this.weapons, this.world, this.drills);
     this.audio = new AudioEngine(bus, this.ctx.camera);
     this.hud = new Hud(ui);
     this.menu = new Menu(ui);
@@ -108,9 +111,13 @@ export class Game {
     this.menu.show(true);
   }
 
+  /** @deprecated alias for `world` (the old single-range facility). */
+  get range() {
+    return this.world;
+  }
+
   resetDrill() {
-    this.range.reset();
-    this.player.teleport(this.range.spawn.clone(), this.range.spawnYaw);
+    this.drills.restart();
   }
 
   /** When true the rAF loop only renders; tests drive `step()` explicitly. */

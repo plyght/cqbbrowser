@@ -1,333 +1,308 @@
 import {
-  CircleGeometry,
-  CylinderGeometry,
-  Group,
-  Mesh,
-  PlaneGeometry,
-  Vector3,
-  BoxGeometry,
   CanvasTexture,
+  DoubleSide,
+  Mesh,
   MeshStandardMaterial,
+  PlaneGeometry,
   SRGBColorSpace,
+  Vector3,
+  type Object3D,
 } from 'three';
 import type { Context, System } from '../core/Context';
-import { RAPIER, type RayHit } from '../physics/Physics';
-import type { HitListener } from '../weapons/Ballistics';
+import { Spring } from '../core/math';
+import type { RayHit } from '../physics/Physics';
+import { WEAPONS } from '../weapons/defs';
+import type { StaticBatch } from './geo';
 import type { Materials } from './materials';
+import {
+  A_BODY,
+  A_HEAD,
+  BODY,
+  C_BODY,
+  HEAD,
+  NECK,
+  PAPER_H_CM,
+  PAPER_W_CM,
+  zoneAt,
+  type Pt,
+} from './paperZones';
+import type { PaintAtlas } from './steel/paint';
+
+export type TargetKind = 'paper' | 'gong' | 'popper' | 'plate' | 'paddle' | 'star';
 
 export interface Target extends System {
   id: string;
-  kind: 'gong' | 'popper' | 'paper';
+  kind: TargetKind;
   hits: number;
+  /** Steel: fallen / knocked off / swung over. */
   down: boolean;
+  /** Steel that scores only when it falls (poppers, rack/star plates, paddles) vs. rings (gongs). */
+  mustFall: boolean;
+  steel: boolean;
+  /** No-shoot paper: penalty on hit, and aim assist must ignore it. */
+  noShoot: boolean;
+  /** World-space point to aim at (centre of the scoring area / remaining plate). For aim assist. */
+  aimPoint(): Vector3;
+  onHit(hit: RayHit, dir: Vector3, energy: number): boolean;
   reset(): void;
 }
 
-let nextId = 1;
-
-/** AR500-style gong hung on chains: dynamic body on a revolute joint under a steel frame. */
-export class Gong implements Target, HitListener {
-  id = `gong${nextId++}`;
-  kind = 'gong' as const;
-  hits = 0;
-  down = false;
-  readonly group = new Group();
-  private body: RAPIER.RigidBody;
-  private mesh: Mesh;
-
-  constructor(
-    private ctx: Context,
-    mats: Materials,
-    pos: Vector3,
-    public size = 0.3,
-    public round = true,
-    public thicknessMm = 10,
-  ) {
-    const w = ctx.physics.world;
-    const hang = 1.45;
-    // Frame
-    const postGeo = new BoxGeometry(0.05, hang + 0.15, 0.05);
-    for (const s of [-1, 1]) {
-      const post = new Mesh(postGeo, mats.steelPost);
-      post.position.set(pos.x + s * (size * 0.5 + 0.25), pos.y + (hang + 0.15) / 2, pos.z);
-      this.group.add(post);
-    }
-    const bar = new Mesh(new BoxGeometry(size + 0.55, 0.05, 0.05), mats.steelPost);
-    bar.position.set(pos.x, pos.y + hang + 0.12, pos.z);
-    this.group.add(bar);
-    // Plate
-    const geo = round
-      ? new CylinderGeometry(size / 2, size / 2, thicknessMm / 1000, 28)
-      : new BoxGeometry(size, thicknessMm / 1000, size);
-    geo.rotateX(Math.PI / 2);
-    this.mesh = new Mesh(geo, mats.steel);
-    this.group.add(this.mesh);
-    ctx.scene.add(this.group);
-
-    const plateY = pos.y + hang - 0.18 - size / 2;
-    this.body = w.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(pos.x, plateY, pos.z)
-        .setAngularDamping(0.25)
-        .setLinearDamping(0.3),
-    );
-    const col = w.createCollider(
-      RAPIER.ColliderDesc.cuboid(size / 2, size / 2, thicknessMm / 2000).setDensity(7850),
-      this.body,
-    );
-    ctx.physics.tag(col, { surface: 'steel_target', targetId: this.id });
-    const anchor = w.createRigidBody(
-      RAPIER.RigidBodyDesc.fixed().setTranslation(pos.x, pos.y + hang + 0.12, pos.z),
-    );
-    const joint = RAPIER.JointData.revolute(
-      { x: 0, y: 0, z: 0 },
-      { x: 0, y: hang + 0.12 - (plateY - pos.y), z: 0 },
-      { x: 1, y: 0, z: 0 },
-    );
-    w.createImpulseJoint(joint, anchor, this.body, true);
-    // Chain visuals
-    for (const s of [-1, 1]) {
-      const chain = new Mesh(new BoxGeometry(0.008, 0.3, 0.008), mats.steelPost);
-      chain.name = 'chain';
-      chain.userData.side = s;
-      this.group.add(chain);
-    }
-  }
-
-  onHit(hit: RayHit, dir: Vector3, energy: number): boolean {
-    if (hit.tag.targetId !== this.id) return false;
-    this.hits++;
-    const momentum = Math.sqrt(2 * energy * 0.008); // rough p from E with assumed mass
-    this.body.applyImpulseAtPoint(
-      { x: dir.x * momentum * 2, y: dir.y * momentum * 2, z: dir.z * momentum * 2 },
-      hit.point,
-      true,
-    );
-    const cam = this.ctx.camera.position;
-    this.ctx.bus.emit('steelHit', {
-      point: hit.point,
-      targetId: this.id,
-      size: this.size,
-      thicknessMm: this.thicknessMm,
-      energy,
-      distance: cam.distanceTo(hit.point),
+/** Remembers the projectile of the most recent shot so steel can judge momentum, not just energy. */
+export class ShotTracker {
+  massKg = 0.0075;
+  constructor(ctx: Context) {
+    ctx.bus.on('shot', (s) => {
+      const d = WEAPONS[s.weaponId];
+      this.massKg = d ? d.bulletMass / 1000 / (d.pellets ?? 1) : 0.0075;
     });
-    return true;
-  }
-
-  update() {
-    const t = this.body.translation();
-    const r = this.body.rotation();
-    this.mesh.position.set(t.x, t.y, t.z);
-    this.mesh.quaternion.set(r.x, r.y, r.z, r.w);
-    const top = new Vector3(0, this.size / 2, 0)
-      .applyQuaternion(this.mesh.quaternion)
-      .add(this.mesh.position);
-    for (const c of this.group.children) {
-      if (c.name !== 'chain') continue;
-      const s = c.userData.side as number;
-      c.position.set(top.x + s * this.size * 0.3, top.y + 0.13, top.z);
-    }
-  }
-
-  reset() {
-    this.hits = 0;
   }
 }
 
-/** Steel popper: falls when struck above the calibration line with enough momentum. */
-export class Popper implements Target, HitListener {
-  id = `popper${nextId++}`;
-  kind = 'popper' as const;
-  hits = 0;
-  down = false;
-  private body: RAPIER.RigidBody;
-  private mesh: Group;
-  private home: Vector3;
-
-  constructor(
-    private ctx: Context,
-    mats: Materials,
-    pos: Vector3,
-    /** Joules above calibration needed to fall. */
-    public threshold = 380,
-  ) {
-    this.home = pos.clone();
-    const w = ctx.physics.world;
-    this.mesh = new Group();
-    const plate = new Mesh(new BoxGeometry(0.3, 0.75, 0.012), mats.steel);
-    plate.position.y = 0.55;
-    const head = new Mesh(new CircleGeometry(0.15, 24), mats.steel);
-    head.position.set(0, 1.05, 0.0065);
-    const headBack = head.clone();
-    headBack.rotation.y = Math.PI;
-    headBack.position.z = -0.0065;
-    const base = new Mesh(new BoxGeometry(0.5, 0.06, 0.4), mats.steelPost);
-    base.position.y = 0.03;
-    this.mesh.add(plate, head, headBack);
-    base.position.add(pos);
-    ctx.scene.add(base, this.mesh);
-    this.body = w.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(pos.x, pos.y + 0.12, pos.z)
-        .setAngularDamping(0.6),
-    );
-    const c1 = w.createCollider(
-      RAPIER.ColliderDesc.cuboid(0.15, 0.45, 0.006).setTranslation(0, 0.45, 0).setDensity(7850),
-      this.body,
-    );
-    const c2 = w.createCollider(
-      RAPIER.ColliderDesc.ball(0.15).setTranslation(0, 0.93, 0).setDensity(200),
-      this.body,
-    );
-    for (const c of [c1, c2]) ctx.physics.tag(c, { surface: 'steel_target', targetId: this.id });
-    const anchor = w.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(pos.x, pos.y + 0.12, pos.z));
-    const j = w.createImpulseJoint(
-      RAPIER.JointData.revolute({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }),
-      anchor,
-      this.body,
-      true,
-    ) as RAPIER.RevoluteImpulseJoint;
-    j.setLimits(-1.6, 1.6);
-    // Hold upright with a stiff-ish motor that a solid hit overcomes; released when knocked.
-    j.configureMotorPosition(0, 600, 40);
-    this.joint = j;
-  }
-
-  private joint: RAPIER.RevoluteImpulseJoint;
-
-  onHit(hit: RayHit, dir: Vector3, energy: number): boolean {
-    if (hit.tag.targetId !== this.id) return false;
-    this.hits++;
-    const local = hit.point.y - this.home.y;
-    const aboveCal = local > 0.7;
-    if (!this.down && aboveCal && energy >= this.threshold) {
-      this.down = true;
-      this.joint.configureMotorPosition(0, 0, 0);
-      this.body.applyImpulseAtPoint({ x: dir.x * 8, y: 0, z: dir.z * 8 }, hit.point, true);
-      setTimeout(() => this.ctx.bus.emit('steelFall', { point: hit.point.clone(), targetId: this.id }), 380);
-    } else {
-      this.body.applyImpulseAtPoint({ x: dir.x * 1.5, y: 0, z: dir.z * 1.5 }, hit.point, true);
-    }
-    this.ctx.bus.emit('steelHit', {
-      point: hit.point,
-      targetId: this.id,
-      size: 0.35,
-      thicknessMm: 10,
-      energy,
-      distance: this.ctx.camera.position.distanceTo(hit.point),
-    });
-    return true;
-  }
-
-  update() {
-    const t = this.body.translation();
-    const r = this.body.rotation();
-    this.mesh.position.set(t.x, t.y - 0.12, t.z);
-    this.mesh.quaternion.set(r.x, r.y, r.z, r.w);
-  }
-
-  reset() {
-    this.down = false;
-    this.hits = 0;
-    this.body.setTranslation({ x: this.home.x, y: this.home.y + 0.12, z: this.home.z }, true);
-    this.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
-    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    this.joint.configureMotorPosition(0, 600, 40);
-  }
+/** Everything a target needs to build itself into a facility. */
+export interface TargetEnv {
+  ctx: Context;
+  mats: Materials;
+  atlas: PaintAtlas;
+  shots: ShotTracker;
+  /** Static, merged geometry (frames, stands). */
+  batch: StaticBatch;
+  /** Facility root for moving meshes. */
+  parent: Object3D;
+  /** Register a target (and extra collider target ids that route to it). */
+  register(t: Target, ids?: string[]): void;
 }
 
-/** IPSC-style cardboard target on a stand. Draws hits onto a canvas texture. */
-export class PaperTarget implements Target, HitListener {
-  id = `paper${nextId++}`;
+export function emitSteelHit(
+  env: TargetEnv,
+  targetId: string,
+  point: Vector3,
+  size: number,
+  thicknessMm: number,
+  energy: number,
+) {
+  const bus = env.ctx.bus;
+  bus.emit('steelHit', {
+    point: point.clone(),
+    targetId,
+    size,
+    thicknessMm,
+    energy,
+    distance: env.ctx.camera.position.distanceTo(point),
+  });
+  bus.emit('targetHit', { targetId, kind: 'steel', point: point.clone() });
+}
+
+/**
+ * IPSC-style cardboard target on a lath stand. Hits are punched into its canvas (visible from both
+ * sides). `noShoot` turns it into a white hands-up no-shoot.
+ */
+export class PaperTarget implements Target {
   kind = 'paper' as const;
   hits = 0;
   down = false;
+  mustFall = false;
+  steel = false;
   score = 0;
-  private canvas: HTMLCanvasElement;
+  private canvas = document.createElement('canvas');
   private tex: CanvasTexture;
-  private mesh: Mesh;
-  static readonly W = 0.46;
-  static readonly H = 0.76;
+  readonly mesh: Mesh;
+  private flutter = new Spring(5, 0.25);
+  static readonly W = PAPER_W_CM / 100;
+  static readonly H = PAPER_H_CM / 100;
+  private static PX = 3; // px per cm
 
-  constructor(ctx: Context, mats: Materials, pos: Vector3, yaw = 0) {
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = 230;
-    this.canvas.height = 380;
+  constructor(
+    private env: TargetEnv,
+    public id: string,
+    pos: Vector3,
+    yaw = 0,
+    public noShoot = false,
+    centreHeight = 1.3,
+  ) {
+    const ctx = env.ctx;
+    this.canvas.width = PAPER_W_CM * PaperTarget.PX;
+    this.canvas.height = PAPER_H_CM * PaperTarget.PX;
     this.tex = new CanvasTexture(this.canvas);
     this.tex.colorSpace = SRGBColorSpace;
+    this.tex.anisotropy = 4;
     this.drawFace();
-    const mat = new MeshStandardMaterial({ map: this.tex, roughness: 0.95 });
+    const mat = new MeshStandardMaterial({
+      map: this.tex,
+      roughness: 0.95,
+      alphaTest: 0.5,
+      side: DoubleSide,
+    });
     this.mesh = new Mesh(new PlaneGeometry(PaperTarget.W, PaperTarget.H), mat);
-    this.mesh.position.set(pos.x, pos.y + 1.2, pos.z);
+    this.mesh.position.set(pos.x, pos.y + centreHeight, pos.z);
     this.mesh.rotation.y = yaw;
-    const back = new Mesh(new PlaneGeometry(PaperTarget.W, PaperTarget.H), mats.paper);
-    back.rotation.y = Math.PI;
-    this.mesh.add(back);
-    ctx.scene.add(this.mesh);
-    for (const s of [-1, 1]) {
-      const stick = new Mesh(new BoxGeometry(0.03, 1.3, 0.02), mats.woodStand);
-      stick.position.set(pos.x + Math.cos(yaw) * s * 0.2, pos.y + 0.6, pos.z - Math.sin(yaw) * s * 0.2);
-      stick.rotation.y = yaw;
-      ctx.scene.add(stick);
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
+    env.parent.add(this.mesh);
+
+    // Stand: 2x4 base on the ground + two 1x2 laths stapled behind the cardboard.
+    const c = Math.cos(yaw),
+      s = Math.sin(yaw);
+    const back = -0.012;
+    const bottom = centreHeight - PaperTarget.H / 2;
+    env.batch.box(env.mats.woodStand, pos.x - s * 0.05, pos.y, pos.z - c * 0.05, 0.62, 0.09, 0.09, { yaw });
+    for (const k of [-1, 1]) {
+      const lx = k * 0.17;
+      env.batch.box(
+        env.mats.woodStand,
+        pos.x + c * lx + s * back,
+        pos.y + 0.09,
+        pos.z - s * lx + c * back,
+        0.038,
+        bottom + PaperTarget.H * 0.85 - 0.09,
+        0.019,
+        { yaw },
+      );
     }
-    const col = ctx.physics.box(
-      { x: pos.x, y: pos.y + 1.2, z: pos.z },
+    ctx.physics.box(
+      { x: pos.x, y: pos.y + centreHeight, z: pos.z },
       { x: PaperTarget.W / 2, y: PaperTarget.H / 2, z: 0.004 },
-      { surface: 'paper_target', targetId: this.id, penetrable: 0.004 },
+      { surface: 'paper_target', targetId: id, penetrable: 0.004 },
       yaw,
     );
-    void col;
+    env.register(this);
+  }
+
+  aimPoint() {
+    // Centre of the A-zone body.
+    return this.mesh.localToWorld(new Vector3(0, 0.37 - PaperTarget.H / 2, 0));
+  }
+
+  setNoShoot(v: boolean) {
+    this.noShoot = v;
+    this.drawFace();
   }
 
   private drawFace() {
     const g = this.canvas.getContext('2d')!;
+    const P = PaperTarget.PX;
     const W = this.canvas.width,
       H = this.canvas.height;
-    g.fillStyle = '#c4a876';
-    g.fillRect(0, 0, W, H);
-    g.strokeStyle = 'rgba(60,40,20,0.55)';
-    g.lineWidth = 2;
-    // Octagon-ish body (D), C, A zones + head.
-    const zone = (x: number, y: number, w: number, h: number) => g.strokeRect(x, y, w, h);
-    zone(10, 95, W - 20, H - 105); // D
-    zone(40, 120, W - 80, H - 150); // C
-    zone(78, 140, W - 156, 140); // A body
-    g.strokeRect(70, 10, 90, 80); // head C
-    g.strokeRect(92, 28, 46, 34); // head A
-  }
-
-  /** Score zone from local hit coordinates (metres from centre). */
-  static zoneAt(lx: number, ly: number): 'A' | 'C' | 'D' | 'M' {
-    const px = (lx / PaperTarget.W + 0.5) * 230;
-    const py = (0.5 - ly / PaperTarget.H) * 380;
-    const inR = (x: number, y: number, w: number, h: number) =>
-      px >= x && px <= x + w && py >= y && py <= y + h;
-    if (inR(92, 28, 46, 34) || inR(78, 140, 74, 140)) return 'A';
-    if (inR(70, 10, 90, 80) || inR(40, 120, 150, 230)) return 'C';
-    if (inR(10, 95, 210, 275)) return 'D';
-    return 'M';
-  }
-
-  onHit(hit: RayHit, _dir: Vector3, _energy: number): boolean {
-    if (hit.tag.targetId !== this.id) return false;
-    const local = this.mesh.worldToLocal(hit.point.clone());
-    const z = PaperTarget.zoneAt(local.x, local.y);
-    if (z === 'M') return false;
-    this.hits++;
-    this.score += z === 'A' ? 5 : z === 'C' ? 3 : 1;
-    const g = this.canvas.getContext('2d')!;
-    const px = (local.x / PaperTarget.W + 0.5) * 230;
-    const py = (0.5 - local.y / PaperTarget.H) * 380;
-    g.fillStyle = '#120d08';
-    g.beginPath();
-    g.arc(px, py, 2.4, 0, Math.PI * 2);
+    g.clearRect(0, 0, W, H);
+    const X = (x: number) => (x + PAPER_W_CM / 2) * P;
+    const Y = (y: number) => (PAPER_H_CM - y) * P;
+    const poly = (pts: Pt[]) => {
+      g.beginPath();
+      pts.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
+      g.closePath();
+    };
+    const rect = (r: [number, number, number, number]) => {
+      g.beginPath();
+      g.rect(X(r[0]), Y(r[3]), (r[2] - r[0]) * P, (r[3] - r[1]) * P);
+    };
+    const base = this.noShoot ? '#ecebe6' : '#c09f6c';
+    g.fillStyle = base;
+    poly(BODY);
     g.fill();
-    g.strokeStyle = 'rgba(80,60,40,0.6)';
+    rect(NECK);
+    g.fill();
+    rect(HEAD);
+    g.fill();
+    // Cardboard fibre speckle.
+    g.save();
+    poly(BODY);
+    g.rect(X(HEAD[0]), Y(HEAD[3]), (HEAD[2] - HEAD[0]) * P, (HEAD[3] - HEAD[1]) * P);
+    g.clip();
+    for (let i = 0; i < 700; i++) {
+      g.fillStyle = this.noShoot ? 'rgba(150,150,140,0.12)' : 'rgba(90,60,30,0.14)';
+      g.fillRect(Math.random() * W, Math.random() * H, 1 + Math.random() * 2, 1);
+    }
+    g.restore();
+    // Perforated zone lines.
+    g.strokeStyle = this.noShoot ? 'rgba(80,80,80,0.35)' : 'rgba(70,45,20,0.55)';
+    g.lineWidth = 1.5;
+    g.setLineDash([5, 4]);
+    poly(C_BODY);
     g.stroke();
+    rect(A_BODY);
+    g.stroke();
+    rect(A_HEAD);
+    g.stroke();
+    g.setLineDash([]);
+    g.font = `bold ${3 * P}px Arial, sans-serif`;
+    g.fillStyle = this.noShoot ? 'rgba(60,60,60,0.4)' : 'rgba(70,45,20,0.6)';
+    g.textAlign = 'center';
+    g.fillText('A', X(0), Y(48));
+    g.fillText('C', X(0), Y(14));
+    g.fillText('D', X(19), Y(30));
+    if (this.noShoot) this.drawHands(g, X, Y, P);
+  }
+
+  /** Open hands raised in front of the chest: the universal "no-shoot". */
+  private drawHands(
+    g: CanvasRenderingContext2D,
+    X: (x: number) => number,
+    Y: (y: number) => number,
+    P: number,
+  ) {
+    g.fillStyle = '#1b1b1b';
+    for (const side of [-1, 1]) {
+      const cx = X(side * 12),
+        cy = Y(36);
+      // Palm
+      g.beginPath();
+      g.ellipse(cx, cy, 5 * P, 6 * P, 0, 0, Math.PI * 2);
+      g.fill();
+      // Fingers
+      for (let f = 0; f < 4; f++) {
+        const fx = cx + (f - 1.5) * 2.4 * P;
+        g.beginPath();
+        g.roundRect(fx - 1 * P, cy - 13 * P + Math.abs(f - 1.5) * 1.2 * P, 2 * P, 8 * P, P);
+        g.fill();
+      }
+      // Thumb
+      g.save();
+      g.translate(cx - side * 4.5 * P, cy + 0.5 * P);
+      g.rotate(side * 0.7);
+      g.beginPath();
+      g.roundRect(-1.1 * P, -5 * P, 2.2 * P, 6 * P, P);
+      g.fill();
+      g.restore();
+      // Wrist/forearm
+      g.fillRect(cx - 3.5 * P, cy + 4 * P, 7 * P, 10 * P);
+    }
     this.tex.needsUpdate = true;
+  }
+
+  onHit(hit: RayHit, dir: Vector3, _energy: number): boolean {
+    const local = this.mesh.worldToLocal(hit.point.clone());
+    const z = zoneAt(local.x, local.y);
+    if (!z) return false; // through the gap beside the silhouette
+    this.hits++;
+    if (!this.noShoot) this.score += z === 'A' ? 5 : z === 'C' ? 3 : 1;
+    const g = this.canvas.getContext('2d')!;
+    const P = PaperTarget.PX;
+    const px = (local.x * 100 + PAPER_W_CM / 2) * P;
+    const py = (PAPER_H_CM / 2 - local.y * 100) * P;
+    g.fillStyle = 'rgba(70,50,30,0.5)';
+    g.beginPath();
+    g.arc(px, py, 0.75 * P, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#0d0a07';
+    g.beginPath();
+    g.arc(px, py, 0.45 * P, 0, Math.PI * 2);
+    g.fill();
+    this.tex.needsUpdate = true;
+    // Cardboard flutters away from the shot.
+    const n = new Vector3(0, 0, 1).applyQuaternion(this.mesh.quaternion);
+    this.flutter.impulse(-dir.dot(n) * 0.9);
+    this.env.ctx.bus.emit('targetHit', {
+      targetId: this.id,
+      kind: 'paper',
+      zone: z,
+      noShoot: this.noShoot,
+      point: hit.point.clone(),
+    });
     return false; // round continues through paper into the berm
+  }
+
+  update(dt: number) {
+    this.flutter.step(0, dt);
+    this.mesh.rotation.x = this.flutter.value * 0.08;
   }
 
   reset() {
