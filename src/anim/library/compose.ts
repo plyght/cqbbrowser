@@ -35,6 +35,8 @@ export interface Recipe {
   tilt?: { t: number; r: V3 }[];
   /** Bolt/slide channel override keys (replace the source channel between the first and last key). */
   bolt?: Key[];
+  /** Seated-mag hand-weight override keys (0 = the mag stays weapon-relative). */
+  magW?: Key[];
   /** Firing-hand-holds-the-grip override keys (1 = parented to the hand). */
   gunW?: Key[];
   /** Synthesise the old mag falling out of the well (mag slot 1) starting at `t`. */
@@ -186,6 +188,7 @@ export function compose(id: string, action: string, recipe: Recipe, clips: Recor
   };
   overrideKeys(recipe.bolt, L.ch.bolt);
   overrideKeys(recipe.gunW, L.gunW);
+  overrideKeys(recipe.magW, L.mag[0].w);
 
   if (recipe.magDrop) {
     const m = L.mag[1];
