@@ -132,9 +132,13 @@ test('feel: recoil strip (5-shot string, frames 0/2/4/8/16 after the last shot)'
     page.evaluate(() => {
       const g = (window as any).__sb;
       const cam = g.ctx.camera;
-      const d = g.weapons.muzzleWorld().dir;
+      const m = g.weapons.muzzleWorld();
+      const d = m.dir;
       const c = cam.position.clone().set(0, 0, -1).applyQuaternion(cam.quaternion);
+      // Bore error against the point the gun converges on (camera centre ray hit).
+      const toAim = g.weapons.aimTarget.clone().sub(m.origin).normalize();
       return {
+        aimErr: (d.angleTo(toAim) * 180) / Math.PI,
         muzzle: (Math.asin(d.y) * 180) / Math.PI,
         cam: (Math.asin(c.y) * 180) / Math.PI,
         fov: cam.fov,
@@ -172,8 +176,8 @@ test('feel: recoil strip (5-shot string, frames 0/2/4/8/16 after the last shot)'
     expect(peak.muzzle - before.muzzle).toBeGreaterThan(0.5);
     expect(peak.cam - base.cam).toBeGreaterThan(0.12);
     expect(peak.fov - base.fov).toBeGreaterThan(0.3);
-    // The view keeps part of its climb (Player.viewRecoil); the gun returns onto the view.
-    expect(Math.abs(after.muzzle - after.cam - (base.muzzle - base.cam))).toBeLessThan(0.6);
+    // The view keeps part of its climb (Player.viewRecoil); the gun recovers onto the aim point.
+    expect(Math.abs(after.aimErr - base.aimErr)).toBeLessThan(0.6);
   }
   expect(errors).toEqual([]);
 });
