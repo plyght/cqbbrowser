@@ -384,7 +384,7 @@ function grip(c: Ctx) {
     beaver: 0.003,
     grooves: g.style === 'ak' ? 0 : 0,
   });
-  c.s.add(profile(shape(pts), 0.027, 0.006), g.style === 'akWood' ? c.M.wood : c.M.polymer);
+  c.s.add(profile(shape(pts), 0.027, 0.006), g.style === 'akWood' ? c.M.wood : c.M.polymerGrip);
   c.socket('gripRight', [0, BOT - 0.045, 0.06], [angle, 0, 0]);
 }
 
@@ -397,9 +397,9 @@ function magazine(c: Ctx) {
     len,
     depthTop: 0.064,
     depthBottom: 0.074,
-    curve: 0.095 * (len / 0.22) * (len / 0.22),
-    straight: 0.04,
-    power: 1.6,
+    straight: 0,
+    radius: 0.26,
+    tilt: 0.07,
   };
   const mat = magMaterial(c, m);
   buildBoxMag(c, col, o, 0.027, mat, {

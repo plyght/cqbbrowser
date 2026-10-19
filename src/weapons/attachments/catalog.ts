@@ -1466,7 +1466,7 @@ const mags: MagazinePart[] = [
     mass: 0.105,
     capacity: 20,
     material: 'polymer',
-    drop: 0.105,
+    drop: 0.093,
   },
   {
     id: 'ar_mag_p30',
@@ -1476,7 +1476,7 @@ const mags: MagazinePart[] = [
     mass: 0.135,
     capacity: 30,
     material: 'polymer',
-    drop: 0.16,
+    drop: 0.148,
   },
   {
     id: 'ar_mag_p40',
@@ -1486,7 +1486,7 @@ const mags: MagazinePart[] = [
     mass: 0.17,
     capacity: 40,
     material: 'polymer',
-    drop: 0.212,
+    drop: 0.2,
     mods: { adsMul: 1.02 },
     blurb: 'Long: harder to get low prone, slower to index.',
   },
@@ -1498,7 +1498,7 @@ const mags: MagazinePart[] = [
     mass: 0.16,
     capacity: 20,
     material: 'steel',
-    drop: 0.1,
+    drop: 0.09,
   },
   {
     id: 'ar_mag_s30',
@@ -1508,7 +1508,7 @@ const mags: MagazinePart[] = [
     mass: 0.22,
     capacity: 30,
     material: 'steel',
-    drop: 0.155,
+    drop: 0.145,
   },
   {
     id: 'ar_mag_s40',
@@ -1518,7 +1518,7 @@ const mags: MagazinePart[] = [
     mass: 0.29,
     capacity: 40,
     material: 'steel',
-    drop: 0.205,
+    drop: 0.195,
   },
   {
     id: 'ak_mag_steel30',

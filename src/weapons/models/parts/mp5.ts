@@ -301,9 +301,9 @@ function magazine(c: Ctx) {
     len,
     depthTop: 0.034,
     depthBottom: 0.036,
-    curve: 0.034 * (len / 0.2) * (len / 0.2),
-    straight: 0.15,
-    power: 1.6,
+    straight: 0.22,
+    radius: 0.55,
+    tilt: 0.02,
   };
   buildBoxMag(c, col, o, 0.022, c.M.blued, { ribs: [0.5], base: 'mp5' });
 }
