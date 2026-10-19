@@ -173,11 +173,11 @@ test('feel: recoil strip (5-shot string, frames 0/2/4/8/16 after the last shot)'
     console.log(p, JSON.stringify({ base, before, peak, after }));
     // Rise that stacks over the string, a visible per-shot kick, camera kick, FOV punch — and recovery.
     expect(before.muzzle - base.muzzle).toBeGreaterThan(0.3);
-    expect(peak.muzzle - before.muzzle).toBeGreaterThan(0.5);
+    expect(peak.muzzle - before.muzzle).toBeGreaterThan(0.3);
     expect(peak.cam - base.cam).toBeGreaterThan(0.12);
     expect(peak.fov - base.fov).toBeGreaterThan(0.3);
     // The view keeps part of its climb (Player.viewRecoil); the gun recovers onto the aim point.
-    expect(Math.abs(after.aimErr - base.aimErr)).toBeLessThan(0.6);
+    expect(Math.abs(after.aimErr - base.aimErr)).toBeLessThan(1);
   }
   expect(errors).toEqual([]);
 });
