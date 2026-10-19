@@ -1,0 +1,163 @@
+{
+  "version": 1,
+  "set": "open",
+  "formats": [
+    "webm",
+    "m4a"
+  ],
+  "sounds": {
+    "report.rifle556.long": [
+      "rep-ar15-0"
+    ],
+    "report.rifle556.short": [
+      "rep-ar15p-0"
+    ],
+    "report.rifle762.short": [
+      "rep-ak-0",
+      "rep-ak-1",
+      "rep-ak-2",
+      "rep-ak-3",
+      "rep-ak-4",
+      "rep-ak-5"
+    ],
+    "report.pistol9": [
+      "rep-p9-0",
+      "rep-p9-1",
+      "rep-p9-2"
+    ],
+    "report.suppressed": [
+      "rep-sup-0",
+      "rep-sup-1",
+      "rep-sup-2",
+      "rep-sup-3"
+    ],
+    "brass.hard": [
+      "brass-conc-0",
+      "brass-conc-1",
+      "brass-conc-2",
+      "brass-conc-3",
+      "brass-conc-4",
+      "brass-conc-5"
+    ],
+    "foley.rifle.magRelease": [
+      "rl-r-release-0"
+    ],
+    "foley.rifle.magOut": [
+      "rl-r-out-0"
+    ],
+    "foley.rifle.magIn": [
+      "rl-r-in-0"
+    ],
+    "foley.rifle.magSeat": [
+      "rl-r-seat-0"
+    ],
+    "foley.rifle.magCheck": [
+      "rl-r-check-0"
+    ],
+    "foley.rifle.boltRelease": [
+      "rl-r-bolt-0"
+    ],
+    "foley.pistol.magOut": [
+      "rl-p-out-0",
+      "rl-p-out-1",
+      "rl-p-out-2"
+    ],
+    "foley.pistol.magIn": [
+      "rl-p-in-0",
+      "rl-p-in-1",
+      "rl-p-in-2"
+    ],
+    "foley.pistol.magSeat": [
+      "rl-p-seat-0",
+      "rl-p-seat-1",
+      "rl-p-seat-2"
+    ],
+    "foley.any.click": [
+      "click-0",
+      "click-1"
+    ],
+    "foley.cloth": [
+      "cloth-0",
+      "cloth-1",
+      "cloth-2",
+      "cloth-3"
+    ],
+    "step.concrete": [
+      "step-conc-0",
+      "step-conc-1",
+      "step-conc-2",
+      "step-conc-3",
+      "step-conc-4"
+    ],
+    "step.wood": [
+      "step-wood-0",
+      "step-wood-1",
+      "step-wood-2",
+      "step-wood-3",
+      "step-wood-4"
+    ],
+    "step.carpet": [
+      "step-carpet-0",
+      "step-carpet-1",
+      "step-carpet-2",
+      "step-carpet-3",
+      "step-carpet-4"
+    ],
+    "step.grass": [
+      "step-grass-0",
+      "step-grass-1",
+      "step-grass-2",
+      "step-grass-3",
+      "step-grass-4"
+    ],
+    "step.dirt": [
+      "step-dirt-0",
+      "step-dirt-1",
+      "step-dirt-2",
+      "step-dirt-3",
+      "step-dirt-4"
+    ],
+    "step.gravel": [
+      "step-gravel-0",
+      "step-gravel-1",
+      "step-gravel-2",
+      "step-gravel-3"
+    ],
+    "step.tile": [
+      "step-tile-0",
+      "step-tile-1"
+    ],
+    "mag.hard": [
+      "mag-hard-0",
+      "mag-hard-1",
+      "mag-hard-2",
+      "mag-hard-3",
+      "mag-hard-4"
+    ],
+    "mag.metal": [
+      "mag-metal-0",
+      "mag-metal-1",
+      "mag-metal-2",
+      "mag-metal-3",
+      "mag-metal-4"
+    ],
+    "mag.wood": [
+      "mag-wood-0",
+      "mag-wood-1",
+      "mag-wood-2",
+      "mag-wood-3",
+      "mag-wood-4"
+    ],
+    "mag.soft": [
+      "mag-soft-0",
+      "mag-soft-1",
+      "mag-soft-2",
+      "mag-soft-3",
+      "mag-soft-4"
+    ],
+    "amb.outdoor": [
+      "amb-outdoor-1",
+      "amb-outdoor-0"
+    ]
+  }
+}
