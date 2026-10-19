@@ -36,8 +36,8 @@ const rigs = Object.entries(PRESETS).map(([id, b]) => {
 });
 
 /** Arm IK to a weapon-frame palm transform for a hold pose (weapon frame, from the hold's arm context). */
-function arm(cls: WeaponClass, pose: HoldName, side: 1 | -1, handW: Matrix4): ArmMetrics {
-  const c = armContexts(CFG[cls], side)[VALIDATED_HOLDS.indexOf(pose)];
+function arm(cls: WeaponClass, pose: HoldName, side: 1 | -1, handW: Matrix4, dz = 0): ArmMetrics {
+  const c = armContexts(CFG[cls], side, dz)[VALIDATED_HOLDS.indexOf(pose)];
   return armMetrics(c.shoulder, c.natural, handW, side, c.up);
 }
 
@@ -86,8 +86,8 @@ describe('grip solver', () => {
   test('arms reach the solved grips in anatomical ranges in every hold', () => {
     for (const { id, cls, rig } of rigs)
       for (const pose of ['high', 'ads', 'low', 'compressed'] as HoldName[]) {
-        expectArm(arm(cls, pose, 1, handMat(rig.fire)), `${id} ${pose} right`);
-        expectArm(arm(cls, pose, -1, handMat(rig.support)), `${id} ${pose} left`);
+        expectArm(arm(cls, pose, 1, handMat(rig.fire), rig.holdDz), `${id} ${pose} right`);
+        expectArm(arm(cls, pose, -1, handMat(rig.support), rig.holdDz), `${id} ${pose} left`);
       }
     if (failures.length) console.log(failures.join('\n'));
     expect(failures).toEqual([]);

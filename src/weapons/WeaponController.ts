@@ -104,6 +104,8 @@ const DEFAULT_RIGHT: HandKey = { t: 1, at: 'grip', pose: 'grip' };
 const ZERO3: V3 = [0, 0, 0];
 const X_AXIS = new Vector3(1, 0, 0);
 const CAM_GRIP = new Vector3(-0.07, 0.015, 0.012);
+/** Minimum arm centre-line distance from the chest-cam lens the elbow swivel aims for (m). */
+const ARM_CLEAR = 0.2;
 
 // Scratch (no per-frame allocation).
 const _v = new Vector3();
@@ -398,6 +400,8 @@ export class WeaponController implements System {
     this.mixHold(this.wLow, H.low);
     this.mixHold(this.wSprint, H.sprint);
     this.mixHold(this.adsBlend, H.ads);
+    // Stock indexed to the shoulder pocket: longer length of pull → the gun sits further out.
+    h.z += e.grip.holdDz;
     // Crouched: slightly lower and tighter; drifting hold (never exactly the same place).
     h.y -= p.crouch * 0.015;
     h.z += p.crouch * 0.02;
@@ -1000,7 +1004,8 @@ export class WeaponController implements System {
     _v.copy(WRIST).applyMatrix4(_m);
     _v2.fromArray(natural).transformDirection(tw);
     _v3.set(0, 1, 0).transformDirection(tw);
-    armSwivel(a.shoulder, _v, _m, _v2, _v3, a.side, a.pole);
+    // Keep the sleeve off the chest-cam lens: swivel the elbow away from it when the wrist allows.
+    armSwivel(a.shoulder, _v, _m, _v2, _v3, a.side, a.pole, this.ctx.camera.position, ARM_CLEAR);
   }
 
   private updateHands(_dt: number) {

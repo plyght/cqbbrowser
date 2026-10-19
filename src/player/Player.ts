@@ -49,7 +49,7 @@ export const cameraSettings = settings.ns('camera', {
 });
 
 /** Chest cam: on the plate carrier, left of centre, just in front of the plate bag (torso-local). */
-export const CHEST_MOUNT = new Vector3(-0.075, 0, -0.16);
+export const CHEST_MOUNT = new Vector3(-0.04, 0, -0.16);
 /** Helmet side-rail mount, relative to the head pivot, in the look frame. */
 const HELMET_MOUNT = new Vector3(0.075, 0.09, -0.06);
 

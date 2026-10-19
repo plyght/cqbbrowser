@@ -8,7 +8,7 @@
  * Prints the suggested holds for `src/anim/holds.ts`; the grip tests then confirm them.
  */
 import { Matrix4, Vector3 } from 'three';
-import { CFG } from '../holds';
+import { CFG, holdShiftZ } from '../holds';
 import { armContexts, armMetrics, armViolation, VALIDATED_HOLDS } from './arm';
 import { installHeadlessCanvas } from './headlessDom';
 import { gripShapes } from './shapes';
@@ -17,19 +17,21 @@ import { solveFiring, supportCandidates, supportScore } from './solve';
 export async function optimiseHolds(log = console.log) {
   installHeadlessCanvas();
   const { buildModel } = await import('../../weapons/models');
-  const { PRESETS } = await import('../../weapons/attachments');
+  const { PRESETS, layoutBuild, resolveBuild } = await import('../../weapons/attachments');
   const ONE = new Vector3(1, 1, 1);
   for (const cls of ['rifle', 'pistol'] as const) {
     const cfg = CFG[cls];
     const data = Object.entries(PRESETS)
       .filter(([, b]) => (b.weapon === 'p17') === (cls === 'pistol'))
-      .map(([id]) => {
+      .map(([id, b]) => {
         const g = gripShapes(buildModel(id));
+        const dz = holdShiftZ(cfg, layoutBuild(resolveBuild(b)).buttZ);
         const fire = solveFiring(g, false);
         return {
           R: new Matrix4().compose(fire.pos, fire.quat, ONE),
           cands: supportCandidates(g, fire),
           pistol: g.pistol,
+          dz,
         };
       });
     const x0 = VALIDATED_HOLDS.flatMap((p) => [...cfg.holds[p].p, ...cfg.holds[p].r]);
@@ -41,10 +43,10 @@ export async function optimiseHolds(log = console.log) {
     let viol = 0;
     const cost = (v: number[]) => {
       set(v);
-      const R = armContexts(cfg, 1),
-        L = armContexts(cfg, -1);
       let c = 0;
       for (const d of data) {
+        const R = armContexts(cfg, 1, d.dz),
+          L = armContexts(cfg, -1, d.dz);
         for (const ctx of R) c += armViolation(armMetrics(ctx.shoulder, ctx.natural, d.R, 1, ctx.up), 3);
         let best = Infinity;
         for (const s of d.cands) best = Math.min(best, supportScore(s, L, d.pistol));

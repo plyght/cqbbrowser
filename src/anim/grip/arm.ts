@@ -80,6 +80,8 @@ export function armSwivel(
   up: Vector3,
   side: 1 | -1,
   out: Vector3,
+  avoid?: Vector3,
+  avoidR = 0,
 ): Vector3 {
   _n.subVectors(wrist, shoulder).normalize();
   _a0.copy(natural).addScaledVector(_n, -natural.dot(_n));
@@ -100,13 +102,24 @@ export function armSwivel(
       Math.max(0, w.dev - L.radial + 5) +
       Math.max(0, -L.ulnar + 5 - w.dev) +
       Math.max(0, 0.1 - drop) * 400 +
-      Math.abs(th) * 4;
+      Math.abs(th) * 4 +
+      (avoid ? Math.max(0, avoidR - Math.min(segDist(avoid, shoulder, _e), segDist(avoid, _e, _end))) * 600 : 0);
     if (c < best) {
       best = c;
       out.copy(_pole);
     }
   }
   return out;
+}
+
+const _sd = new Vector3();
+const _sf = new Vector3();
+/** Distance from `p` to the segment a–b. */
+export function segDist(p: Vector3, a: Vector3, b: Vector3): number {
+  _sd.subVectors(b, a);
+  const l2 = _sd.lengthSq();
+  const t = l2 > 0 ? Math.min(1, Math.max(0, _sd.dot(_sf.subVectors(p, a)) / l2)) : 0;
+  return _sf.copy(a).addScaledVector(_sd, t).distanceTo(p);
 }
 
 /** Two-bone IK to a hand frame (all in one frame, elbow swivel searched) and the resulting joint angles. */
@@ -154,13 +167,13 @@ export function armViolation(m: ArmMetrics, margin = 0): number {
 export const VALIDATED_HOLDS: HoldName[] = ['high', 'ads', 'low', 'compressed'];
 
 /** Arm contexts (weapon frame) for each validated hold of a class. ADS draws the right shoulder in. */
-export function armContexts(cfg: ClassCfg, side: 1 | -1): ArmContext[] {
+export function armContexts(cfg: ClassCfg, side: 1 | -1, dz = 0): ArmContext[] {
   return VALIDATED_HOLDS.map((pose) => {
     const h = cfg.holds[pose];
     const ads = pose === 'ads' ? 1 : 0;
     const weaponInv = new Matrix4()
       .compose(
-        new Vector3(...h.p),
+        new Vector3(h.p[0], h.p[1], h.p[2] + dz),
         new Quaternion().setFromEuler(new Euler(h.r[0], h.r[1], h.r[2], 'YXZ')),
         new Vector3(1, 1, 1),
       )
