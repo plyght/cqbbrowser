@@ -168,6 +168,8 @@ function upper(c: Ctx) {
     ),
     fin,
   );
+  // Upper/lower parting line.
+  s.add(boxZ(0.0254, 0.0008, 0.083, -0.099, 0, 0.0125, 0), M.dark);
   // Round barrel-nut boss at the front.
   s.add(cylZ(0.0158, -0.088, -0.1048, B, 0, 20), fin);
   const rail = c.r.platform.frame.receiverRail!;

@@ -123,10 +123,10 @@ function frame(c: Ctx) {
     [-0.0605, -0.0335],
     [-0.02, -0.0345],
     [0.004, -0.031],
-    [0.035, -0.03],
-    [0.058, -0.008],
-    [0.06, 0.003],
-    [0.05, SLIDE_BOT],
+    [0.03, -0.03],
+    [0.047, -0.012],
+    [0.051, 0.004],
+    [0.042, SLIDE_BOT],
   ];
   const guard: P2[] = [
     [-0.0605, -0.007],
@@ -137,7 +137,7 @@ function frame(c: Ctx) {
     [-0.0035, -0.007],
   ];
   c.s.add(profile(shape(pts, [guard]), 0.026, 0.0022), mat);
-  const g = gripProfile(GRIP_TOP, GRIP_ANGLE, 0.074, 0.047, { grooves: 3, beaver: 0.001, swell: 0.002 });
+  const g = gripProfile(GRIP_TOP, GRIP_ANGLE, 0.074, 0.046, { grooves: 3, beaver: 0.001, swell: 0.0035 });
   c.s.add(profile(shape(g), 0.0305, 0.005), mat);
   // Rail slots under the dust cover.
   for (const z of [-0.096, -0.106, -0.116])

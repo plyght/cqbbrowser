@@ -17,6 +17,9 @@ body {
   height: 100%;
   display: block;
 }
+body.with-panel #bench {
+  width: calc(100% - 300px);
+}
 #panel {
   position: fixed;
   top: 0;

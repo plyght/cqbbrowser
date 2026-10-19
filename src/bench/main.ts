@@ -43,6 +43,7 @@ const q = new URLSearchParams(location.search);
 const canvas = document.getElementById('bench') as HTMLCanvasElement;
 const panel = document.getElementById('panel') as HTMLElement;
 if (q.get('ui') === '0') panel.classList.add('hidden');
+else document.body.classList.add('with-panel');
 
 const renderer = new WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -93,8 +94,9 @@ function frame(name: string) {
   const box = new Box3().setFromObject(model.root);
   const c = box.getCenter(new Vector3());
   const size = box.getSize(new Vector3());
-  const L = Math.max(size.z, size.y * 1.6, 0.18);
-  const d = (L / 2 / Math.tan((camera.fov * Math.PI) / 360)) * (innerWidth / innerHeight < 1.2 ? 1.5 : 1.05);
+  const endOn = name === 'rear' || name === 'front';
+  const L = endOn ? Math.max(size.x, size.y) * 1.9 : Math.max(size.z, size.y * 1.6, 0.18);
+  const d = (L / 2 / Math.tan((camera.fov * Math.PI) / 360)) * (camera.aspect < 1.2 ? 1.5 : 1.05);
   const dirs: Record<string, Vector3> = {
     side: new Vector3(1, 0.02, 0),
     left: new Vector3(-1, 0.02, 0),
@@ -282,8 +284,8 @@ function renderPanel(errors: string[]) {
 }
 
 function resize() {
-  const w = innerWidth,
-    h = innerHeight;
+  const w = canvas.clientWidth || innerWidth,
+    h = canvas.clientHeight || innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
