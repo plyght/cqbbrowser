@@ -70,6 +70,12 @@ export const videoSettings = settings.ns('video', {
   footage: 0.9,
   dynamicResolution: true,
   targetFps: 60,
+  /** Vertical lens FOV before the CAM04 fisheye remap (degrees). ADS narrows from this. */
+  fov: 92,
+  /** Display gamma: >1 darkens mids, <1 lifts them. */
+  gamma: 1,
+  /** 0 = uncapped (vsync). */
+  frameCap: '0' as string,
 });
 
 /**

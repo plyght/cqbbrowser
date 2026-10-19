@@ -79,6 +79,7 @@ export class BodycamEffect extends Effect {
         ['uCodec', new Uniform(new Vector4(0.006, 1, 0.6, 0))],
         ['uWB', new Uniform(new Vector3(1, 1, 1))],
         ['uExpo', new Uniform(new Vector4(0, 0, 1, 0))],
+        ['uGamma', new Uniform(1)],
         ['uGrade', new Uniform(new Vector4(1, 0.5, 0.02, 0.35))],
       ]),
     });

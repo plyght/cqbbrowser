@@ -1,8 +1,9 @@
+import type { HitInfo } from '../../weapons/Ballistics';
 import { Mesh, Quaternion, Vector3, type Shape } from 'three';
 import { Spring } from '../../core/math';
 import { RAPIER, type RayHit } from '../../physics/Physics';
 import { emitSteelHit, type Target, type TargetEnv } from '../targets';
-import { bulletMomentum, knocksDown, POPPER_STANDARD, type Calibration } from './momentum';
+import { hitImpulse, knocksDown, POPPER_HEAVY, POPPER_STANDARD, type Calibration } from './momentum';
 import { plateGeometry, shapes, type PaintCell } from './paint';
 import { STEEL_GROUPS, syncMesh, twistAngle, yawQuat, type PendingHit } from './common';
 
@@ -106,7 +107,7 @@ export class Knockdown implements Target {
     return this.mesh.localToWorld(new Vector3(b.minX + b.w / 2, b.minY + b.h * 0.72, 0));
   }
 
-  onHit(hit: RayHit, dir: Vector3, energy: number): boolean {
+  onHit(hit: RayHit, dir: Vector3, energy: number, info?: HitInfo): boolean {
     this.hits++;
     const local = this.mesh.worldToLocal(hit.point.clone());
     const b = this.bounds;
@@ -117,14 +118,20 @@ export class Knockdown implements Target {
       64 / Math.max(b.w, b.h),
       energy,
     );
-    this.pending.push({ point: hit.point.clone(), dir: dir.clone(), energy, height: local.y });
+    this.pending.push({
+      point: hit.point.clone(),
+      dir: dir.clone(),
+      energy,
+      height: local.y,
+      impulse: info?.steelImpulse,
+    });
     emitSteelHit(this.env, this.id, hit.point, this.size, this.thicknessMm, energy);
     return true;
   }
 
   private process() {
     for (const h of this.pending) {
-      const p = bulletMomentum(h.energy, this.env.shots.massKg);
+      const p = h.impulse ?? hitImpulse(h.energy, this.env.shots.massKg);
       const hitHeight = h.height ?? 0;
       if (!this.down && knocksDown(p, hitHeight, this.cal)) this.knock(h, p);
       else if (!this.down) this.wobble.impulse(-(0.25 + p * 0.12));
@@ -175,6 +182,9 @@ export class Knockdown implements Target {
     this.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
     this.body.setTranslation({ x: this.home.x, y: this.home.y, z: this.home.z }, true);
     this.body.setRotation({ x: this.homeQ.x, y: this.homeQ.y, z: this.homeQ.z, w: this.homeQ.w }, true);
+    // Snap the visual now so hit-height maths on the very next shot uses the reset pose.
+    syncMesh(this.mesh, this.body);
+    this.mesh.updateMatrixWorld();
   }
 }
 
@@ -194,7 +204,7 @@ export function makePopper(
     kind: 'popper',
     shape: shapes.popper(1.07, 0.3),
     thicknessMm: heavy ? 13 : 10,
-    cal: cal ?? (heavy ? { calHeight: 0.62, threshold: 4.0 } : POPPER_STANDARD),
+    cal: cal ?? (heavy ? POPPER_HEAVY : POPPER_STANDARD),
     yaw,
     size: 0.3,
   });

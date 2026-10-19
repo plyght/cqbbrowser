@@ -347,7 +347,7 @@ export class AudioEngine {
    * Layers: mechanical, report (by weapon + barrel), pressure (enclosure), early reflections + tail (send),
    * exterior escape (through openings), and the mic stage downstream.
    */
-  gunshot(e: Pick<ShotEvent, 'weaponId' | 'caliber' | 'suppressed'> & { at?: number }) {
+  gunshot(e: Pick<ShotEvent, 'weaponId' | 'caliber' | 'suppressed'> & { at?: number; subsonic?: boolean }) {
     const at = e.at ?? this.now();
     const prof = weaponSound(e.weaponId, e.caliber, e.suppressed);
     const bc = barrelCharacter(prof.barrelIn);
@@ -392,7 +392,8 @@ export class AudioEngine {
 
     if (!sup) {
       // 2b. Crack: a sub-millisecond front so the transient is sharp even when the sample's is soft.
-      const cr = this.pick('crack');
+      // Subsonic loads (e.g. 220 gr .300 BLK) have no supersonic bullet crack.
+      const cr = e.subsonic ? null : this.pick('crack');
       if (cr)
         this.mixer.play(cr, {
           at,

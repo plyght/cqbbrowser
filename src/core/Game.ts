@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { videoSettings } from '../render/quality';
 import { AudioEngine } from '../audio/AudioEngine';
 import { Fx } from '../fx/Fx';
 import { AimAssist } from '../input/AimAssist';
@@ -47,6 +48,7 @@ export class Game {
   weapons!: WeaponController;
   fx!: Fx;
   world!: World;
+  ballistics!: Ballistics;
   drills!: Drills;
   audio!: AudioEngine;
   hud!: Hud;
@@ -86,12 +88,12 @@ export class Game {
       tick: 0,
     };
     this.player = new Player(this.ctx);
-    const ballistics = new Ballistics(this.ctx, () => this.player.rigidBody);
+    const ballistics = (this.ballistics = new Ballistics(this.ctx, () => this.player.rigidBody));
     this.world = new World(this.ctx, ballistics, this.player);
     this.player.teleport(this.world.spawn, this.world.spawnYaw);
     this.weapons = new WeaponController(this.ctx, this.player, ['sb16', 'p17']);
     this.drills = new Drills(this.ctx, this.world, this.player, () => this.paused);
-    this.systems.push(this.player, this.weapons, this.world, this.drills);
+    this.systems.push(this.player, this.weapons, ballistics, this.world, this.drills);
     this.fx = new Fx(this.ctx, { weapons: this.weapons, player: this.player, renderer: this.renderer });
     this.systems.push(this.fx);
     this.aimAssist.provider = this.aimAssistProvider();
@@ -216,6 +218,9 @@ export class Game {
       this.last = now;
       return;
     }
+    // Optional frame cap (settings: video.frameCap); 0 = vsync-limited only.
+    const cap = Number(videoSettings.get().frameCap) || 0;
+    if (cap > 0 && now - this.last < 1000 / cap - 1) return;
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     this.step(dt);

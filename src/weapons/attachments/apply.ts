@@ -1,3 +1,4 @@
+import { cartridge } from '../ammo';
 import type { WeaponDef } from '../defs';
 import { computeStats, layoutBuild, resolveBuild, serializeBuild, validateBuild } from './build';
 import type { WeaponBuild } from './types';
@@ -35,6 +36,9 @@ export function applyBuild(base: WeaponDef, build: WeaponBuild): WeaponDef {
     ...base,
     name: build.name ?? `${r.platform.name} ${inches.toFixed(1).replace(/\.0$/, '')}"`,
     velocity: Math.round(s.velocity),
+    // Projectile mass from the load (grams, whole payload for buckshot).
+    bulletMass: +(cartridge(s.ammo).bulletGr * 0.06479891 * (cartridge(s.ammo).pellets ?? 1)).toFixed(3),
+    ...(cartridge(s.ammo).pellets ? { pellets: cartridge(s.ammo).pellets } : {}),
     mass: +s.mass.toFixed(3),
     length: +s.length.toFixed(3),
     magCapacity: s.capacity,

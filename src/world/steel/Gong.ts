@@ -1,8 +1,9 @@
+import type { HitInfo } from '../../weapons/Ballistics';
 import { Mesh, Vector3 } from 'three';
 import { RAPIER, type RayHit } from '../../physics/Physics';
 import { boxGeo, mergeAny } from '../geo';
 import { emitSteelHit, type Target, type TargetEnv } from '../targets';
-import { bulletMomentum } from './momentum';
+import { hitImpulse } from './momentum';
 import { mapDark, plateGeometry, shapes, type PaintCell } from './paint';
 import { STEEL_GROUPS, syncMesh, type PendingHit } from './common';
 
@@ -122,9 +123,9 @@ export class Gong implements Target {
     return this.mesh.localToWorld(new Vector3(0, -this.dropY, 0));
   }
 
-  onHit(hit: RayHit, dir: Vector3, energy: number): boolean {
+  onHit(hit: RayHit, dir: Vector3, energy: number, info?: HitInfo): boolean {
     this.hits++;
-    this.pending.push({ point: hit.point.clone(), dir: dir.clone(), energy });
+    this.pending.push({ point: hit.point.clone(), dir: dir.clone(), energy, impulse: info?.steelImpulse });
     // Paint mark immediately (visible on the next frame).
     const local = this.mesh.worldToLocal(hit.point.clone());
     const p = this.plate;
@@ -141,7 +142,8 @@ export class Gong implements Target {
 
   private process() {
     for (const h of this.pending) {
-      const p = bulletMomentum(h.energy, this.env.shots.massKg) * 1.7;
+      // Momentum transfer m·v·(1+e) along the shot line (physics/ballistics/steel.ts).
+      const p = h.impulse ?? hitImpulse(h.energy, this.env.shots.massKg);
       this.body.applyImpulseAtPoint({ x: h.dir.x * p, y: h.dir.y * p, z: h.dir.z * p }, h.point, true);
     }
     this.pending.length = 0;

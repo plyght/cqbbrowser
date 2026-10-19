@@ -64,12 +64,15 @@ export class KillHouse {
     const top = STUD.w; // double top plate reads as one 2x4 cap
     for (const p of wallPieces(layout)) {
       const c = at(p.x, p.z);
-      // Collider for the whole piece (plywood, rounds go through).
-      ctx.physics.box(
-        { x: c.x, y: p.y + p.h / 2, z: c.z },
-        { x: p.sx / 2, y: p.h / 2, z: p.sz / 2 },
-        { surface: 'plywood', penetrable: p.exterior ? PLY : PLY * 2 },
-      );
+      // Interior walls: one collider for the whole piece (two plywood skins, rounds go through).
+      // Exterior walls: a thin sheathing collider plus a collider per stud (see below), so rounds through
+      // the stud bays only cross plywood and rounds into a stud fight 89 mm of pine.
+      if (!p.exterior)
+        ctx.physics.box(
+          { x: c.x, y: p.y + p.h / 2, z: c.z },
+          { x: p.sx / 2, y: p.h / 2, z: p.sz / 2 },
+          { surface: 'plywood', penetrable: PLY * 2 },
+        );
       const len = p.axis === 'x' ? p.sx : p.sz;
       const sizeAlong = (l: number, across: number): [number, number] =>
         p.axis === 'x' ? [l, across] : [across, l];
@@ -81,6 +84,11 @@ export class KillHouse {
         const pc = p.axis === 'x' ? at(p.x, p.z + inOff) : at(p.x + inOff, p.z);
         const [sx, sz] = sizeAlong(len, PLY);
         batch.box(mats.plywood, pc.x, p.y, pc.z, sx, plyH, sz, { cast: true });
+        ctx.physics.box(
+          { x: pc.x, y: p.y + p.h / 2, z: pc.z },
+          { x: sx / 2, y: p.h / 2, z: sz / 2 },
+          { surface: 'plywood', penetrable: PLY },
+        );
         const studOff = p.outSign * (t / 2 - STUD.d / 2);
         const n = Math.max(1, Math.round(len / SPACING));
         for (let i = 0; i <= n; i++) {
@@ -89,7 +97,13 @@ export class KillHouse {
           const sz2 = p.axis === 'x' ? p.z + studOff : p.z + along;
           const s = at(sx2, sz2);
           const [w, d] = sizeAlong(STUD.w, STUD.d);
-          batch.box(mats.lumber, s.x, p.y, s.z, w, p.h - (reachesTop ? top : 0), d);
+          const sh = p.h - (reachesTop ? top : 0);
+          batch.box(mats.lumber, s.x, p.y, s.z, w, sh, d);
+          ctx.physics.box(
+            { x: s.x, y: p.y + sh / 2, z: s.z },
+            { x: w / 2, y: sh / 2, z: d / 2 },
+            { surface: 'wood' },
+          );
         }
         if (p.y === 0) {
           const bp = p.axis === 'x' ? at(p.x, p.z + studOff) : at(p.x + studOff, p.z);

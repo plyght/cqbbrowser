@@ -77,15 +77,6 @@ export const PLATFORMS: Record<WeaponId, PlatformDef> = {
     baseMass: 1.36,
     baseComZ: 0.03,
     provides: ['topRail', 'topRailReceiver'],
-    velocity: [
-      [7.5, 701],
-      [10.3, 753],
-      [11.5, 780],
-      [12.5, 808],
-      [14.5, 853],
-      [16, 884],
-      [20, 945],
-    ],
     baseAds: 0.24,
     roundMass: 0.0123,
     frame: {
@@ -141,12 +132,6 @@ export const PLATFORMS: Record<WeaponId, PlatformDef> = {
     baseMass: 1.25,
     baseComZ: 0.03,
     provides: ['topRail', 'topRailReceiver'],
-    velocity: [
-      [5.5, 292],
-      [6, 296],
-      [9, 309],
-      [16, 320],
-    ],
     baseAds: 0.22,
     roundMass: 0.0225,
     frame: {
@@ -200,11 +185,6 @@ export const PLATFORMS: Record<WeaponId, PlatformDef> = {
     baseMass: 1.5,
     baseComZ: -0.02,
     provides: ['irons'],
-    velocity: [
-      [8.5, 655],
-      [10.5, 680],
-      [16.3, 715],
-    ],
     baseAds: 0.26,
     roundMass: 0.0163,
     frame: {
@@ -251,11 +231,6 @@ export const PLATFORMS: Record<WeaponId, PlatformDef> = {
     baseMass: 1.65,
     baseComZ: -0.03,
     provides: ['irons'],
-    velocity: [
-      [4.5, 360],
-      [5.8, 375],
-      [8.9, 400],
-    ],
     baseAds: 0.21,
     roundMass: 0.0118,
     frame: {
@@ -286,11 +261,6 @@ export const PLATFORMS: Record<WeaponId, PlatformDef> = {
     baseMass: 0.42,
     baseComZ: -0.01,
     provides: ['irons', 'pistolRail'],
-    velocity: [
-      [4.0, 350],
-      [4.5, 360],
-      [5.3, 372],
-    ],
     baseAds: 0.17,
     roundMass: 0.0118,
     frame: {
@@ -436,6 +406,8 @@ const barrels: BarrelPart[] = [
     mass: 0.36,
     length: 5.8 * IN,
     integralCan: 0.2,
+    // MP5SD: ports bleed gas so standard 124 gr leaves subsonic (~300 m/s).
+    velocityMul: 0.78,
     provides: ['integralSuppressor'],
   },
   {

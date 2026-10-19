@@ -141,8 +141,14 @@ describe('stats', () => {
   test('barrel length drives velocity, length and mass', () => {
     const s103 = stats(b('sb16', { barrel: 'ar_b103' }));
     const s145 = stats(b('sb16', { barrel: 'ar_b145', handguard: 'ar_hg_mlok13' }));
-    expect(s103.velocity).toBeCloseTo(753, 0);
-    expect(s145.velocity).toBeCloseTo(853, 0);
+    // Interior-ballistics model (src/weapons/ammo): M855 ~795 m/s from 10.3", ~866 m/s from 14.5".
+    expect(s103.ammo).toBe('m855');
+    expect(s103.velocity).toBeCloseTo(795, 0);
+    expect(s145.velocity).toBeCloseTo(866, 0);
+    expect(s103.subsonic).toBe(false);
+    expect(stats(b('sb16', { barrel: 'ar_b103' }, { ammo: 'm193' })).velocity).toBeCloseTo(870, 0);
+    expect(stats(defaultBuild('hb300')).subsonic).toBe(true);
+    expect(stats(b('kp9', { barrel: 'kp_b_sd', muzzle: 'kp_can_int' })).subsonic).toBe(true);
     expect(s145.length - s103.length).toBeCloseTo(4.2 * 0.0254, 4);
     expect(s145.mass).toBeGreaterThan(s103.mass);
     expect(s103.flash).toBeGreaterThan(s145.flash);
@@ -245,7 +251,7 @@ describe('applyBuild', () => {
     const d = applyBuild(BASE_WEAPONS.sb16, PRESETS.sb16_lpvo);
     expect(d.id).toBe('sb16');
     expect(d.model.startsWith('build:')).toBe(true);
-    expect(d.velocity).toBe(853);
+    expect(d.velocity).toBe(866); // M855, 14.5" (interior model)
     expect(d.magCapacity).toBe(30);
     expect(d.recoil.up).toBeCloseTo(BASE_WEAPONS.sb16.recoil.up * 0.82 * 0.96 * 1.02, 5);
     expect(d.handling!.adsTime).toBeGreaterThan(0.25);

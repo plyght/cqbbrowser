@@ -1,3 +1,4 @@
+import { muzzleState, resolveAmmo, type AmmoId } from '../ammo';
 import { BORE_Y, PART_BY_ID, PLATFORMS, getPart } from './catalog';
 import type {
   BarrelPart,
@@ -113,7 +114,14 @@ export interface BuildStats {
   /** Collapsed/folded length (shortest configuration). */
   lengthMin: number;
   comZ: number;
+  /** Muzzle velocity (m/s) from the cartridge's interior-ballistics model at this barrel length. */
   velocity: number;
+  /** The load fired (build param or the caliber default). */
+  ammo: AmmoId;
+  /** Muzzle energy of the whole round (J). */
+  muzzleEnergy: number;
+  /** Projectile leaves below the speed of sound (no supersonic crack). */
+  subsonic: boolean;
   recoilMul: { up: number; side: number; roll: number; back: number };
   handling: Handling;
   flash: number;
@@ -153,6 +161,7 @@ export function resolveBuild(build: WeaponBuild): ResolvedBuild {
     stockFolded: !!(stock?.folds && build.params?.stockFolded),
     lightSide: build.params?.lightSide ?? 'right',
     offsetSide: build.params?.offsetSide ?? 'right',
+    ammo: resolveAmmo(platform.caliber, build.params?.ammo).id,
   };
   const features = new Set<Feature>(platform.provides);
   for (const p of Object.values(parts)) for (const f of p.provides ?? []) features.add(f);
@@ -427,16 +436,6 @@ export function layoutBuild(r: ResolvedBuild): Layout {
 
 // ------------------------------------------------------------------ stats
 
-function interp(table: [number, number][], x: number) {
-  if (x <= table[0][0]) return table[0][1];
-  for (let i = 1; i < table.length; i++) {
-    const [x1, y1] = table[i];
-    const [x0, y0] = table[i - 1];
-    if (x <= x1) return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
-  }
-  return table[table.length - 1][1];
-}
-
 function barrelMass(r: ResolvedBuild): number {
   const b = r.parts.barrel as BarrelPart;
   if (b.mass > 0) return b.mass;
@@ -566,7 +565,9 @@ export function computeStats(r: ResolvedBuild): BuildStats {
   const barrel = r.parts.barrel as BarrelPart;
   const muzzle = r.parts.muzzle as MuzzlePart | undefined;
   const inches = barrel.length / IN;
-  const velocity = interp(pd.velocity, inches);
+  const ammo = resolveAmmo(pd.caliber, r.params.ammo);
+  const ms = muzzleState(ammo, inches, barrel.velocityMul ?? 1);
+  const velocity = ms.velocity;
   const kind = muzzle?.kind ?? 'bare';
   const suppressed = kind === 'suppressor' || kind === 'integral';
   const shortness = clamp(1.6 - inches / 14, 0.4, 1.4);
@@ -585,6 +586,9 @@ export function computeStats(r: ResolvedBuild): BuildStats {
     lengthMin,
     comZ,
     velocity,
+    ammo: ammo.id,
+    muzzleEnergy: ms.energy,
+    subsonic: ms.subsonic,
     recoilMul: rec,
     handling: { adsTime, swayMul, recoveryMul, balance, moment, lagHalfLife, overshoot, switchTime },
     flash,

@@ -35,6 +35,8 @@ export interface PendingHit {
   sub?: number;
   /** Hit height above the hinge (knockdown steel). */
   height?: number;
+  /** Physically computed steel impulse (N·s) from Ballistics' HitInfo, when available. */
+  impulse?: number;
 }
 
 /** Rapier vector helper. */
