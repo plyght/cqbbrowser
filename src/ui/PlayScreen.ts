@@ -19,6 +19,8 @@ export class PlayScreen implements Screen {
   private tabBar = h('nav', { class: 'tabs' });
   private list = h('div', { class: 'drill-list' });
   private detail = h('aside', { class: 'drill-detail' });
+  /** Loadout quick-pick shown above GO (wired by Menu). */
+  loadout?: { name(): string; cycle(dir: -1 | 1): void; open(): void };
 
   constructor(
     private onGo: (d: DrillInfo) => void,
@@ -153,10 +155,38 @@ export class PlayScreen implements Screen {
         h('dt', { text: 'Medal' }),
         h('dd', {}, medalBadge(d.medal), ' ', d.medal ? d.medal.toUpperCase() : 'NONE'),
       ),
+      ...(this.loadout ? [this.loadoutPick()!] : []),
       navButton(h('span', {}, 'GO ', h('span', { class: 'go-arrow', text: '▸' })), () => this.start(), {
         class: 'go',
         'data-role': 'go',
       }),
     );
+  }
+
+  private loadoutPick() {
+    const lo = this.loadout;
+    if (!lo) return null;
+    const name = h('span', { class: 'lo-pick-name', text: lo.name() });
+    const b = navButton(
+      h(
+        'span',
+        { class: 'lo-pick-in' },
+        h('span', { class: 'lo-pick-l', text: 'Loadout' }),
+        h(
+          'span',
+          { class: 'lo-pick-v' },
+          h('span', { class: 'lo-arrow', text: '◂' }),
+          name,
+          h('span', { class: 'lo-arrow', text: '▸' }),
+        ),
+      ),
+      () => lo.open(),
+      { class: 'lo-pick', 'data-axis': 'x', 'data-role': 'loadout' },
+    );
+    b.addEventListener('nav-adjust', (e) => {
+      lo.cycle((e as CustomEvent<number>).detail as -1 | 1);
+      name.textContent = lo.name();
+    });
+    return b;
   }
 }

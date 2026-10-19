@@ -284,6 +284,25 @@ export class WeaponController implements System {
     }
   }
 
+  /**
+   * Replace the whole loadout with custom defs (from `applyBuild`, e.g. `src/loadout` → `loadoutDefs`), primary
+   * first; equips the first one immediately with fresh mags.
+   */
+  setLoadout(defs: WeaponDef[]) {
+    if (!defs.length) return;
+    this.stopPlan();
+    this.switching = null;
+    this.view.remove(this.equipped.model.root);
+    for (const w of this.loadout) w.model.dispose();
+    this.loadout = defs.map((d) => this.make(d));
+    this.rifle = this.loadout.find((x) => x.cls === 'rifle');
+    this.pistol = this.loadout.find((x) => x.cls === 'pistol');
+    this.equipped = this.loadout[0];
+    this.view.add(this.equipped.model.root);
+    this.aimIndex = 0;
+    this.simReset = true;
+  }
+
   /** Fresh mags for a new drill: cancels any hand plan so nothing is mid-swap. */
   resupply() {
     this.stopPlan();

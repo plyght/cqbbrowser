@@ -4,8 +4,6 @@ import {
   Box3,
   CircleGeometry,
   Color,
-  DirectionalLight,
-  HemisphereLight,
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
@@ -17,6 +15,7 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { addBenchLights } from './stage';
 import {
   computeStats,
   defaultBuild,
@@ -56,19 +55,7 @@ const pmrem = new PMREMGenerator(renderer);
 const env = pmrem.fromScene(new RoomEnvironment(), 0.03).texture;
 setWeaponEnvMap(env);
 scene.environment = env;
-scene.add(new HemisphereLight(0xdfe6ee, 0x3a3632, 0.35));
-const fill = new DirectionalLight(0xffffff, 0.9);
-fill.position.set(2, 0.4, -0.3);
-scene.add(fill);
-const key = new DirectionalLight(0xfff4e6, 1.9);
-key.position.set(1.2, 2.2, 1.4);
-scene.add(key);
-const rim = new DirectionalLight(0xbcd2ff, 1.6);
-rim.position.set(-1.5, 0.8, -1.2);
-scene.add(rim);
-const key2 = new DirectionalLight(0xfff8f0, 1.5);
-key2.position.set(-1.3, 2.0, 0.7);
-scene.add(key2);
+addBenchLights(scene);
 const floor = new Mesh(
   new CircleGeometry(1.4, 48),
   new MeshStandardMaterial({ color: 0x232527, roughness: 0.95 }),
