@@ -1,100 +1,171 @@
-import {
-  AmbientLight,
-  BoxGeometry,
-  Color,
-  DirectionalLight,
-  Fog,
-  HemisphereLight,
-  Mesh,
-  PlaneGeometry,
-  Vector3,
-} from 'three';
-import type { Context, System } from '../core/Context';
-import type { Ballistics } from '../weapons/Ballistics';
-import { makeMaterials } from './materials';
-import { Gong, PaperTarget, Popper, type Target } from './targets';
+import { Vector3 } from 'three';
+import { berm, floor, signBoard, type Facility, type FacilityEnv } from './facility';
+import { Gong } from './steel/Gong';
+import { makePopper } from './steel/Knockdown';
+import { PaperTarget } from './targets';
 
-/** Outdoor square range: gravel pad, dirt berms, bay walls, paper + steel. */
-export class Range implements System {
-  targets: Target[] = [];
-  readonly spawn = new Vector3(0, 0, 8);
-  readonly spawnYaw = 0;
+/** Firing line z (front edge of the covered concrete pad); distances are measured from here. */
+export const RANGE_LINE_Z = 6;
+const BAYS = [-16.75, 0, 16.75];
 
-  constructor(ctx: Context, ballistics: Ballistics) {
-    const { scene, physics } = ctx;
-    const m = makeMaterials();
-    scene.background = new Color(0xaeb8c2);
-    scene.fog = new Fog(0xaeb8c2, 60, 260);
+/**
+ * Outdoor square range (3–50 m): three bays split by gravel-filled baffle walls, a covered concrete
+ * firing line, shaped dirt berms, distance stakes, signage and a range flag.
+ */
+export function buildRange(env: FacilityEnv): Facility {
+  const { batch, mats, signs } = env;
+  const line = RANGE_LINE_Z;
 
-    const sun = new DirectionalLight(0xfff1dc, 2.6);
-    sun.position.set(-30, 50, 20);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    const sc = sun.shadow.camera;
-    sc.left = sc.bottom = -40;
-    sc.right = sc.top = 40;
-    sc.far = 150;
-    sun.shadow.bias = -0.0005;
-    scene.add(sun, new HemisphereLight(0xcfd8e2, 0x5a5046, 0.9), new AmbientLight(0xffffff, 0.15));
+  floor(batch, mats.gravel, 0, -17, 58, 64);
+  // Concrete firing-line pad + painted line.
+  batch.box(mats.concrete, 0, 0, 9, 52, 0.06, 6, { tag: { surface: 'concrete' } });
+  batch.box(mats.paintYellow, 0, 0.06, line + 0.1, 52, 0.002, 0.1);
 
-    // Ground
-    const ground = new Mesh(new PlaneGeometry(400, 400), m.gravel);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
-    physics.box({ x: 0, y: -0.5, z: 0 }, { x: 200, y: 0.5, z: 200 }, { surface: 'gravel' });
+  // Berms: back stop (7 m) and side berms.
+  berm(env, 0, -53, 76, 14, 7, 3, 0, 1);
+  berm(env, -31.5, -19, 68, 10, 4.5, 2, Math.PI / 2, 2);
+  berm(env, 31.5, -19, 68, 10, 4.5, 2, Math.PI / 2, 3);
 
-    const solid = (
-      x: number,
-      y: number,
-      z: number,
-      w: number,
-      h: number,
-      d: number,
-      mat = m.concrete,
-      surface: 'concrete' | 'berm' | 'plywood' = 'concrete',
-    ) => {
-      const mesh = new Mesh(new BoxGeometry(w, h, d), mat);
-      mesh.position.set(x, y + h / 2, z);
-      mesh.castShadow = mesh.receiveShadow = true;
-      scene.add(mesh);
-      physics.box({ x, y: y + h / 2, z }, { x: w / 2, y: h / 2, z: d / 2 }, { surface });
-      return mesh;
-    };
-
-    // Back berm and side berms
-    solid(0, 0, -30, 60, 6, 6, m.berm, 'berm');
-    solid(-28, 0, -5, 4, 4, 54, m.berm, 'berm');
-    solid(28, 0, -5, 4, 4, 54, m.berm, 'berm');
-    // Concrete firing line pad + baffles between bays
-    const pad = new Mesh(new BoxGeometry(40, 0.08, 6), m.concrete);
-    pad.position.set(0, 0.04, 9);
-    pad.receiveShadow = true;
-    scene.add(pad);
-    physics.box({ x: 0, y: 0.04, z: 9 }, { x: 20, y: 0.04, z: 3 }, { surface: 'concrete' });
-    for (const x of [-12, 12]) solid(x, 0, 2, 0.4, 2.4, 14, m.plywood, 'plywood');
-    // Shooting barricade
-    solid(-1.2, 0, 4.5, 0.12, 1.8, 1.2, m.plywood, 'plywood');
-    solid(1.2, 0, 4.5, 0.12, 1.8, 1.2, m.plywood, 'plywood');
-
-    // Targets: paper at 7 m, steel line at 10–15 m, long gong at 25 m.
-    const add = <T extends Target & { onHit?: unknown }>(t: T) => {
-      this.targets.push(t);
-      ballistics.listeners.push(t as never);
-      return t;
-    };
-    for (const x of [-2.5, 0, 2.5]) add(new PaperTarget(ctx, m, new Vector3(x, 0, 1), 0));
-    for (const x of [-4, -2, 0, 2, 4]) add(new Popper(ctx, m, new Vector3(x, 0, -6)));
-    add(new Gong(ctx, m, new Vector3(-6, 0, -12), 0.3, true));
-    add(new Gong(ctx, m, new Vector3(6, 0, -12), 0.25, false));
-    add(new Gong(ctx, m, new Vector3(0, 0, -20), 0.45, true, 12));
+  // Bay baffles: double plywood skins on 4x4 posts, gravel-filled (stop rounds).
+  for (const x of [-8.5, 8.5]) {
+    const z0 = -4,
+      z1 = line + 0.4;
+    const len = z1 - z0;
+    const zc = (z0 + z1) / 2;
+    batch.box(mats.plywood, x, 0, zc, 0.3, 2.4, len, {
+      cast: true,
+      tag: { surface: 'plywood' },
+    });
+    batch.box(mats.lumber, x, 2.4, zc, 0.34, 0.06, len + 0.04, { cast: true });
+    for (let z = z0; z <= z1 + 0.01; z += len / 4) {
+      for (const s of [-1, 1]) batch.box(mats.lumber, x + s * 0.19, 0, z, 0.09, 2.46, 0.09);
+    }
   }
 
-  update(dt: number, alpha: number) {
-    for (const t of this.targets) t.update?.(dt, alpha);
+  // Covered firing line: posts, beams, galvanised roof sloping back.
+  const roofFront = line + 0.6,
+    roofBack = 12.4;
+  for (const x of [-25.5, -8.5, 8.5, 25.5]) {
+    batch.box(mats.lumber, x, 0.06, roofFront, 0.14, 3.0, 0.14, { cast: true, tag: { surface: 'wood' } });
+    batch.box(mats.lumber, x, 0.06, roofBack, 0.14, 2.7, 0.14, { cast: true, tag: { surface: 'wood' } });
+  }
+  batch.box(mats.lumber, 0, 2.9, roofFront, 52, 0.2, 0.1, { cast: true });
+  batch.box(mats.lumber, 0, 2.6, roofBack, 52, 0.2, 0.1, { cast: true });
+  const roofLen = Math.hypot(roofBack - roofFront, 0.3) + 0.6;
+  batch.box(mats.galvanized, 0, 2.93, (roofFront + roofBack) / 2, 53, 0.03, roofLen, {
+    cast: true,
+    pitch: Math.atan2(0.3, roofBack - roofFront),
+  });
+
+  // Shooting tables and bench rest per bay.
+  for (const bx of BAYS) {
+    const tx = bx - 1.5,
+      tz = line + 1.2;
+    batch.box(mats.plywood, tx, 0.86, tz, 1.2, 0.04, 0.6, { cast: true, tag: { surface: 'wood' } });
+    for (const sx of [-0.55, 0.55])
+      for (const sz of [-0.25, 0.25]) batch.box(mats.lumber, tx + sx, 0.06, tz + sz, 0.07, 0.8, 0.07);
   }
 
-  reset() {
-    for (const t of this.targets) t.reset();
+  // Distance stakes on the left of each bay (3–25 m; 50 m in bay 3).
+  for (const [i, bx] of BAYS.entries()) {
+    const sx = bx - 7.6;
+    const dists = i === 2 ? [3, 5, 7, 10, 15, 25, 50] : [3, 5, 7, 10, 15, 25];
+    for (const d of dists) {
+      signBoard(
+        env,
+        { lines: [`${d}`], bg: '#f4f1e6', fg: '#b3201b', px: [96, 64], border: '#222' },
+        new Vector3(sx, 0, line - d),
+        0.3,
+        0.2,
+        0,
+        0.45,
+      );
+    }
+    // Bay boards on the inside face of the left baffle.
+    signBoard(
+      env,
+      {
+        lines: [`BAY ${i + 1}`, i === 2 ? 'RIFLE · 3–50 M' : 'PISTOL / CARBINE · 3–25 M'],
+        bg: '#1f3b63',
+        fg: '#f4f1e6',
+        px: [256, 128],
+      },
+      new Vector3(bx - 7.2, 0, line - 1.2),
+      0.9,
+      0.45,
+      Math.PI / 2 - 0.35,
+      1.1,
+    );
   }
+
+  // Rules board behind the line and the facility sign.
+  signBoard(
+    env,
+    {
+      lines: [
+        'AXIS-7 SECURITY TRAINING CENTER',
+        'RANGE 1 · SQUARE RANGE',
+        'EYE & EAR PROTECTION REQUIRED',
+        'COLD RANGE UNTIL RSO CALLS HOT',
+      ],
+      bg: '#efece2',
+      fg: '#1a1a1a',
+      px: [512, 256],
+      border: '#b3201b',
+    },
+    new Vector3(4, 0, 14.5),
+    2.2,
+    1.1,
+    Math.PI,
+    1.0,
+  );
+
+  // Range flag (hot).
+  batch.box(mats.galvanized, 28.4, 0, 9, 0.06, 6, 0.06, { cast: true });
+  signs.place(
+    batch,
+    { lines: [], bg: '#c0201a', px: [96, 64] },
+    new Vector3(28.95, 5.6, 9),
+    1.0,
+    0.65,
+    0,
+    true,
+  );
+
+  // --- Targets ---
+  // Bay 2: papers at 7 m, poppers at 14 m, steel at 18/26 m.
+  for (const [k, x] of [-2, 0, 2].entries())
+    new PaperTarget(env, `range.b2.p${k}`, new Vector3(x, 0, 8 - 7), 0); // 7 m from the bay 2 spawn
+  for (const [k, x] of [-4, -2, 0, 2, 4].entries())
+    makePopper(env, `range.b2.popper${k}`, new Vector3(x, 0, -6));
+  new Gong(env, 'range.b2.gong0', new Vector3(-5.5, 0, -12), { w: 0.3 });
+  new Gong(env, 'range.b2.gong1', new Vector3(5.5, 0, -12), { w: 0.25, round: false });
+  new Gong(env, 'range.b2.gong2', new Vector3(0, 0, -20), { w: 0.45, thicknessMm: 12, hookY: 1.7 });
+
+  // Bay 1: El Presidente — three papers 1 m apart, 9 m from the line.
+  for (const [k, dx] of [-1, 0, 1].entries())
+    new PaperTarget(env, `range.b1.p${k}`, new Vector3(BAYS[0] + dx, 0, 8 - 9.1), 0);
+
+  // Bay 3: long line — 15 / 25 m paper, 50 m gong.
+  new PaperTarget(env, 'range.b3.p15', new Vector3(BAYS[2] - 1, 0, 8 - 15), 0);
+  new PaperTarget(env, 'range.b3.p25', new Vector3(BAYS[2] + 1.5, 0, 8 - 25), 0);
+  new Gong(env, 'range.b3.gong50', new Vector3(BAYS[2], 0, line - 50), {
+    w: 0.5,
+    thicknessMm: 12,
+    hookY: 1.8,
+  });
+
+  const spawn = (x: number, yaw = 0) => ({ pos: new Vector3(x, 0.06, 8), yaw });
+  return {
+    id: 'range',
+    name: 'Square Range',
+    group: env.parent as never,
+    spawns: {
+      'range.bay2': spawn(0),
+      'range.bay1': spawn(BAYS[0]),
+      'range.bay1.uprange': spawn(BAYS[0], Math.PI),
+      'range.bay3': spawn(BAYS[2]),
+    },
+    defaultSpawn: 'range.bay2',
+  };
 }

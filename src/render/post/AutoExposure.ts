@@ -135,7 +135,7 @@ export class AutoExposure {
     const next = this.targets[this.idx];
     u.tPrev.value = prev.texture;
     u.tLum.value = lum;
-    (u.uTime.value as Vector4).set(Math.min(dt, 0.1), time, hunt, this.resetPending ? 1 : 0);
+    (u.uTime.value as Vector4).set(Math.min(dt, 2), time, hunt, this.resetPending ? 1 : 0);
     (u.uRange.value as Vector4).w = this.resetOffset;
     u.uKick.value = kick;
     this.resetPending = false;

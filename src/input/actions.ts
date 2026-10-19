@@ -62,8 +62,14 @@ export interface Haptics {
   triggerRumble?(left: number, right: number, durationMs: number): void;
 }
 
+/** Read-only state from the previous frame, handed to sources (ADS multipliers, gyro-on-ADS, ready cycling). */
+export interface PollInfo {
+  aiming: boolean;
+  ready: 'high' | 'low' | 'compressed';
+}
+
 export interface InputSource {
   /** Called once per render frame before gameplay reads the frame. */
-  poll(frame: ActionFrame, dt: number): void;
+  poll(frame: ActionFrame, dt: number, info?: PollInfo): void;
   dispose?(): void;
 }

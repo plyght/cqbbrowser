@@ -51,7 +51,7 @@ export class BodycamEffect extends Effect {
   private m4 = new Matrix4();
   private axis = new Vector3();
   /** k1, k2, circle, aspect last used to fit the crop (NaN = refit). */
-  private lensKey = [NaN, NaN, NaN, NaN];
+  private lensKey = [NaN, NaN, NaN, NaN, NaN];
   /** Current lens model (same values the shader uses), for HUD projection via distortPoint(). */
   readonly lens: LensParams = { k1: 0, k2: 0, scale: 1, circle: Infinity };
 
@@ -197,21 +197,22 @@ export class BodycamEffect extends Effect {
       k2 = 0.025 * p.distortion * I;
     const circle = lerp(3.2, 1.78, smooth(0, 0.85, I * p.imageCircle));
     const lk = this.lensKey;
+    const caK = 0.0065 * p.chromaticAberration * I;
     const lens = u.get('uLens')!.value as Vector4;
-    if (lk[0] !== k1 || lk[1] !== k2 || lk[2] !== circle || lk[3] !== this.aspect) {
+    if (lk[0] !== k1 || lk[1] !== k2 || lk[2] !== circle || lk[3] !== this.aspect || lk[4] !== caK) {
       lk[0] = k1;
       lk[1] = k2;
       lk[2] = circle;
       lk[3] = this.aspect;
-      lens.set(k1, k2, fitScale(k1, k2, this.aspect, circle), circle);
+      lk[4] = caK;
+      // Margin so the red channel's CA magnification and the worst rolling-shutter shift (|uRoll| ≤ 0.08)
+      // still sample inside the rendered frame: no clamped/smeared edge texels ever reach the image.
+      const r2 = Math.min(circle * circle, this.aspect * this.aspect + 1);
+      const margin = (1 + caK * r2) * 1.08;
+      lens.set(k1, k2, fitScale(k1, k2, this.aspect, circle) / margin, circle);
       Object.assign(this.lens, { k1, k2, scale: lens.z, circle });
     }
-    (u.get('uLens2')!.value as Vector4).set(
-      0.07,
-      0.0065 * p.chromaticAberration * I,
-      0.5 * I,
-      0.42 * p.vignette * I,
-    );
+    (u.get('uLens2')!.value as Vector4).set(0.07, caK, 0.5 * I, 0.42 * p.vignette * I);
 
     // Camera motion → shutter blur rotation, rolling shutter, codec starvation.
     const w = this.omega;

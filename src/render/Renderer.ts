@@ -156,9 +156,22 @@ export class Renderer {
     this.angularSpeed = angle / dt;
   }
 
-  render(dt: number) {
+  private skipped = 0;
+
+  /**
+   * A sim frame that isn't drawn (fast test stepping). The time is carried into the next `render()` so the
+   * camera's temporal state (auto-exposure, codec, boot sequence, motion) still advances by the full span.
+   */
+  advance(dt: number) {
+    this.skipped += dt;
+  }
+
+  render(frameDt: number) {
+    const dt = frameDt + this.skipped;
+    this.skipped = 0;
     this.frameNo++;
-    if (this.dynres.update(dt)) this.resize();
+    // Dynamic resolution only sees real frame times, never a catch-up span.
+    if (dt === frameDt && this.dynres.update(dt)) this.resize();
     this.measureCameraMotion(dt);
     if (this.frameNo % this.quality.shadowEvery === 0) this.renderer.shadowMap.needsUpdate = true;
     this.renderer.info.reset();

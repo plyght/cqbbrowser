@@ -94,8 +94,8 @@ test('render: impacts on steel, berm and plywood', async ({ page }) => {
   await run(page, 1 / 60, 1 / 60, { down: ['fire'] });
   await run(page, 1 / 30, 1 / 30);
   await shot(page, 'impact-steel');
-  // Berm: 3.5 m from the back berm face.
-  await teleport(page, 0, -23.5, 0, -0.18);
+  // Berm: a few metres from the toe of the back berm.
+  await teleport(page, 0, -42, 0, -0.1);
   await run(page, 0.6);
   await fire(page, 3, 0.2);
   await run(page, 1 / 60, 1 / 60, { down: ['fire'] });
@@ -104,7 +104,7 @@ test('render: impacts on steel, berm and plywood', async ({ page }) => {
   await run(page, 1.5);
   await shot(page, 'decals-berm');
   // Plywood baffle close up: decals + splinters.
-  await teleport(page, 10.3, 3, -Math.PI / 2, -0.05);
+  await teleport(page, 7, 3, -Math.PI / 2, -0.05);
   await run(page, 0.6);
   await fire(page, 4, 0.18);
   await run(page, 1 / 60, 1 / 60, { down: ['fire'] });
