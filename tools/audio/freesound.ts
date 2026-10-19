@@ -42,10 +42,22 @@ async function search(q: string) {
 export async function fetchSound(id: number, user: string) {
   const out = join(CACHE, `fs-${id}.ogg`);
   if (existsSync(out)) return out;
-  const page = await (
-    await fetch(`https://freesound.org/people/${encodeURIComponent(user)}/sounds/${id}/`, { headers: UA })
-  ).text();
-  if (!page.includes('creativecommons.org/publicdomain/zero/1.0')) throw new Error(`fs ${id}: not CC0`);
+  let page = '';
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(`https://freesound.org/people/${encodeURIComponent(user)}/sounds/${id}/`, {
+      headers: UA,
+    });
+    page = await res.text();
+    if (res.ok && page.includes('<title>Freesound -')) break;
+    await Bun.sleep(5000 * (attempt + 1)); // rate limited — back off
+  }
+  // The licence block itself (a description may mention other sounds' licences).
+  if (
+    !/title="Go to the full license text" href="https?:\/\/creativecommons\.org\/publicdomain\/zero\/1\.0/.test(
+      page,
+    )
+  )
+    throw new Error(`fs ${id}: not CC0`);
   const base = page.match(/https:\/\/cdn\.freesound\.org\/previews\/\d+\/\d+_\d+-[hl]q\.(?:mp3|ogg)/)?.[0];
   if (!base) throw new Error(`fs ${id}: no preview url`);
   const ogg = base.replace(/-[hl]q\.(mp3|ogg)$/, '-hq.ogg');
@@ -60,6 +72,7 @@ if (import.meta.main) {
   mkdirSync(CACHE, { recursive: true });
   const [cmd, ...args] = process.argv.slice(2);
   if (cmd === 'search') for (const q of args) await search(q);
+  else if (cmd === 'one') console.log(await fetchSound(Number(args[0]), args[1]));
   else if (cmd === 'fetch') {
     const seen = new Set<number>();
     for (const s of SOURCES) {
@@ -71,5 +84,5 @@ if (import.meta.main) {
         console.error('FAIL', s.origin.id, String(e));
       }
     }
-  } else console.log('usage: freesound.ts search <q...> | fetch');
+  } else console.log('usage: freesound.ts search <q...> | one <id> <user> | fetch');
 }

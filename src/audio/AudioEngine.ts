@@ -139,6 +139,8 @@ export class AudioEngine {
     for (const m of ['ar', 'ak', 'pistol'] as const)
       reg(`mech.${m}`, () => n(4, () => synth.mechanical(m, r, rng)));
     reg('pressure', () => [synth.pressurePulse(r)]);
+    reg('crack', () => n(4, () => synth.crack(r, rng)));
+    reg('shot.thump', () => n(3, () => synth.shotThump(r, rng)));
     reg('steel.fall', () => n(3, () => synth.steelFallClank(r, rng)));
     reg('ricochet', () => n(4, () => synth.whizz(r, rng)));
     reg('spall', () => n(3, () => synth.spall(r, rng)));
@@ -355,14 +357,22 @@ export class AudioEngine {
     const j = jitter(this.rng);
     const rate = prof.pitch * j.rate;
 
+    // Everything below rides the uncompressed wide-band shot path (bus 'shot'); only the bed pumps.
     // 1. Mechanical: close and dry; with a can on, it's a big part of what you hear.
     const mech = this.pick(`mech.${prof.mech}`);
     if (mech) {
-      const mj = jitter(this.rng, 0.04, 2);
-      this.mixer.play(mech, { at, gain: (sup ? 0.45 : 0.3) * mj.gain, rate: mj.rate, send: 0.08, prio: 3 });
+      const mj = jitter(this.rng, 0.03, 1.5);
+      this.mixer.play(mech, {
+        at,
+        gain: (sup ? 0.5 : 0.3) * mj.gain,
+        rate: mj.rate,
+        room: 0.08,
+        bus: 'shot',
+        prio: 3,
+      });
     }
 
-    // 2. Report / crack.
+    // 2. Report: the recorded blast, chosen by weapon + barrel; hot into the mic's soft ceiling.
     const report = this.pickFirst([
       KEYS.report(prof.report),
       ...prof.fallbacks.map(KEYS.report),
@@ -372,25 +382,51 @@ export class AudioEngine {
     if (report)
       this.mixer.play(report, {
         at,
-        gain: (sup ? 0.55 : 1) * bc.gain * energy * j.gain,
+        gain: (sup ? 0.6 : 1.9) * bc.gain * energy * j.gain,
         rate,
         presenceDb: sup ? 0 : bc.presenceDb,
         send: sup ? 0.45 : 1,
+        bus: 'shot',
         prio: 5,
       });
+
+    if (!sup) {
+      // 2b. Crack: a sub-millisecond front so the transient is sharp even when the sample's is soft.
+      const cr = this.pick('crack');
+      if (cr)
+        this.mixer.play(cr, {
+          at,
+          gain: (0.9 + 0.6 * bc.harshness) * energy,
+          rate: 0.97 + this.rng() * 0.06,
+          send: 0.3,
+          bus: 'shot',
+          prio: 5,
+        });
+      // 2c. Body/chest thump: tight 40–120 Hz punch on every close shot, more concussive indoors.
+      const th = this.pick('shot.thump');
+      if (th)
+        this.mixer.play(th, {
+          at,
+          gain: 0.75 * prof.energy * bc.pressure * (1 + 2.4 * enc + 1.5 * a.bass),
+          rate: 0.97 + this.rng() * 0.06,
+          bus: 'shot',
+          prio: 5,
+        });
+    }
 
     // 3. Pressure: LF pulse; huge in a bathroom, nearly gone outdoors. Rings at the room's axial mode.
     const pressure = this.pick('pressure');
     if (pressure) {
       const leak = Math.hypot(a.openness.x, a.openness.y, a.openness.z);
-      const g = (0.06 + 1.3 * enc ** 1.5 * (1 + a.bass)) * bc.pressure * prof.energy * (sup ? 0.3 : 1);
+      const g = (0.06 + 1.6 * enc ** 1.5 * (1 + a.bass)) * bc.pressure * prof.energy * (sup ? 0.3 : 1);
       this.mixer.play(pressure, {
         at,
         gain: g,
         rate: 1 / (1 + 0.8 * enc * (1 - leak)),
         lp: 260,
         peak: [a.roomMode, 4 + 10 * a.bass, 1.5 + 8 * a.bass * (1 - leak)],
-        send: 0.25,
+        room: 0.25,
+        bus: 'shot',
         prio: 4,
       });
     }
@@ -409,9 +445,13 @@ export class AudioEngine {
         lp: 2200,
         pan,
         send: 0.5,
+        bus: 'shot',
         prio: 2,
       });
     }
+
+    // 7. Mic AGC: the bed (ambience, foley, wind) ducks and breathes back over ~1 s.
+    this.mixer.duck((sup ? 0.35 : 1) * Math.min(1.2, prof.energy) * (0.8 + 0.3 * enc), at);
 
     // Hearing exposure (no-protection mode): indoor shots hurt more.
     if (this.mixer.mode === 'noprotect' && !sup) {
@@ -537,20 +577,20 @@ export class AudioEngine {
     const at = e.at ?? this.now();
     const cls = STEP_CLASS[e.surface] ?? 'concrete';
     const step = this.pick(KEYS.step(cls));
-    const j = jitter(this.rng, 0.05, 2);
+    const j = jitter(this.rng, 0.02, 1.5);
     const pan = e.foot === 'L' ? -0.12 : 0.12;
     if (step)
       this.mixer.play(step, {
         at,
-        gain: (0.16 + 0.07 * e.speed) * j.gain,
+        gain: (0.12 + 0.05 * e.speed) * j.gain,
         rate: j.rate,
         pan,
-        send: 0.18,
+        room: 0.06,
         prio: 1,
       });
     if (e.scuff > 0.22) {
       const s = this.pick(`scuff.${cls}`);
-      if (s) this.mixer.play(s, { at: at + 0.02, gain: 0.25 * e.scuff, pan, send: 0.15, prio: 1 });
+      if (s) this.mixer.play(s, { at: at + 0.02, gain: 0.2 * e.scuff, pan, room: 0.05, prio: 1 });
     }
     // Heel strike through the chest rig → mic thump (harder when running).
     const t = this.pick('thump');
@@ -580,10 +620,10 @@ export class AudioEngine {
     this.mixer.play(b, {
       at: at ?? this.now(),
       gain: 0.3 * AudioEngine.dist(sp.d, 1.5) * (soft ? 0.6 : 1),
-      rate: (kind === 'pistol' ? 1.2 : 1) * (0.94 + this.rng() * 0.12),
+      rate: (kind === 'pistol' ? 1.2 : 1) * (0.97 + this.rng() * 0.06),
       lp: soft ? 3500 : sp.lp,
       pan: sp.pan,
-      send: 0.25,
+      room: 0.1,
       prio: 0,
     });
   }
@@ -609,46 +649,48 @@ export class AudioEngine {
     if (b)
       this.mixer.play(b, {
         at: (e.at ?? this.now()) + 0.32, // falls from hip height
-        gain: 0.45,
-        rate: (e.polymer ? 0.92 : 1.08) * (0.95 + this.rng() * 0.1),
-        lp: e.polymer ? 6000 : undefined,
+        gain: 0.4,
+        rate: 0.99 + this.rng() * 0.02,
+        lp: e.polymer ? 7000 : undefined,
         pan: (this.rng() - 0.5) * 0.3,
-        send: 0.3,
+        room: 0.08,
         prio: 2,
       });
   }
 
+  /** Last time each foley key fired: a duplicate within 60 ms is dropped (no phasing double-hits). */
+  private lastFoley = new Map<string, number>();
+
   weaponBeat(e: Pick<GameEvents['weaponBeat'], 'weaponId' | 'beat' | 'stressed'> & { at?: number }) {
     const at = e.at ?? this.now();
     const fam = WEAPON_SOUNDS[e.weaponId]?.family ?? 'rifle';
-    const keys = [KEYS.foley(fam, e.beat), KEYS.foley('rifle', e.beat)];
-    if (e.beat === 'magRelease' || e.beat === 'magCheck' || e.beat === 'boltRelease') keys.push(KEYS.click);
-    keys.push('click.synth');
+    const keys = [KEYS.foley(fam, e.beat)];
+    if (fam === 'rifle' || e.beat === 'magRelease' || e.beat === 'boltRelease')
+      keys.push(KEYS.foley('rifle', e.beat));
+    keys.push(KEYS.click, 'click.synth');
+    const tag = `${e.weaponId}.${e.beat}`;
+    if (at - (this.lastFoley.get(tag) ?? -1) < 0.06) return;
+    this.lastFoley.set(tag, at);
     const b = this.pickFirst(keys);
-    const j = jitter(this.rng, 0.03, 1.5);
-    const hard = e.stressed ? 1.45 : 1;
+    const j = jitter(this.rng, 0.01, 1);
     if (b)
       this.mixer.play(b, {
         at,
-        gain: 0.5 * hard * j.gain,
-        rate: j.rate * (e.stressed ? 1.06 : 1),
+        gain: 0.45 * (e.stressed ? 1.35 : 1) * j.gain,
+        rate: j.rate,
         pan: 0.08,
-        send: 0.15,
+        room: 0.05,
         prio: 3,
       });
-    if (e.stressed && (e.beat === 'magOut' || e.beat === 'magIn')) {
-      const r = this.pick('rattle');
-      if (r) this.mixer.play(r, { at: at + 0.03, gain: 0.18, send: 0.1, prio: 1 });
-    }
     if (e.beat === 'magCheck') {
       const c = this.pick(KEYS.cloth);
-      if (c) this.mixer.play(c, { at: at + 0.05, gain: 0.18, send: 0.05, prio: 1 });
+      if (c) this.mixer.play(c, { at: at + 0.05, gain: 0.15, room: 0.03, prio: 1 });
     }
   }
 
   dryFire(_weaponId: string, at = this.now()) {
-    const b = this.pickFirst([KEYS.click, 'click.synth']);
-    if (b) this.mixer.play(b, { at, gain: 0.45, rate: 1.25 + this.rng() * 0.08, send: 0.12, prio: 3 });
+    const b = this.pickFirst([KEYS.foley('any', 'dryFire'), KEYS.click, 'click.synth']);
+    if (b) this.mixer.play(b, { at, gain: 0.45, rate: 0.995 + this.rng() * 0.01, room: 0.04, prio: 3 });
   }
 
   camHand(active: boolean) {

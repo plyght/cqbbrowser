@@ -40,37 +40,65 @@
       "brass-conc-5"
     ],
     "foley.rifle.magRelease": [
-      "rl-r-release-0"
+      "rl-r-release-0",
+      "rl-r-release-1"
     ],
     "foley.rifle.magOut": [
-      "rl-r-out-0"
+      "rl-r-out-0",
+      "rl-r-out-1",
+      "rl-r-out-q-0"
     ],
     "foley.rifle.magIn": [
-      "rl-r-in-0"
+      "rl-r-in-0",
+      "rl-r-in-1",
+      "rl-r-in-q-0"
     ],
     "foley.rifle.magSeat": [
-      "rl-r-seat-0"
+      "rl-r-seat-0",
+      "rl-r-seat-1",
+      "rl-r-seat-q-0"
     ],
     "foley.rifle.magCheck": [
-      "rl-r-check-0"
+      "rl-r-check-0",
+      "rl-r-check-1"
     ],
     "foley.rifle.boltRelease": [
-      "rl-r-bolt-0"
+      "rl-r-bolt-0",
+      "rl-r-bolt-1",
+      "rl-r-bolt-q-0"
+    ],
+    "foley.pistol.magRelease": [
+      "rl-p-release-0",
+      "rl-p-release-t-0",
+      "rl-p-release-t-1"
     ],
     "foley.pistol.magOut": [
       "rl-p-out-0",
       "rl-p-out-1",
-      "rl-p-out-2"
+      "rl-p-out-2",
+      "rl-p-out-g-0"
     ],
     "foley.pistol.magIn": [
       "rl-p-in-0",
-      "rl-p-in-1",
-      "rl-p-in-2"
+      "rl-p-in-g3-0"
     ],
     "foley.pistol.magSeat": [
       "rl-p-seat-0",
-      "rl-p-seat-1",
-      "rl-p-seat-2"
+      "rl-p-seat-t-0",
+      "rl-p-seat-t-1"
+    ],
+    "foley.pistol.boltRelease": [
+      "rl-p-slide-0",
+      "rl-p-slide-1",
+      "rl-p-slide-2",
+      "rl-p-slide-3",
+      "rl-p-slide-g-0"
+    ],
+    "foley.pistol.magCheck": [
+      "rl-p-check-0"
+    ],
+    "foley.any.dryFire": [
+      "dry-0"
     ],
     "foley.any.click": [
       "click-0",
@@ -110,13 +138,6 @@
       "step-grass-3",
       "step-grass-4"
     ],
-    "step.dirt": [
-      "step-dirt-0",
-      "step-dirt-1",
-      "step-dirt-2",
-      "step-dirt-3",
-      "step-dirt-4"
-    ],
     "step.gravel": [
       "step-gravel-0",
       "step-gravel-1",
@@ -132,7 +153,8 @@
       "mag-hard-1",
       "mag-hard-2",
       "mag-hard-3",
-      "mag-hard-4"
+      "mag-hard-4",
+      "mag-hard-mag"
     ],
     "mag.metal": [
       "mag-metal-0",
@@ -147,13 +169,6 @@
       "mag-wood-2",
       "mag-wood-3",
       "mag-wood-4"
-    ],
-    "mag.soft": [
-      "mag-soft-0",
-      "mag-soft-1",
-      "mag-soft-2",
-      "mag-soft-3",
-      "mag-soft-4"
     ],
     "amb.outdoor": [
       "amb-outdoor-1",
