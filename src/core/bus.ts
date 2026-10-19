@@ -87,6 +87,7 @@ export interface GameEvents {
 type Handler<T> = (e: T) => void;
 
 export class Bus {
+  private reported = new WeakSet<object>();
   private handlers = new Map<keyof GameEvents, Set<Handler<never>>>();
 
   on<K extends keyof GameEvents>(type: K, fn: Handler<GameEvents[K]>): () => void {
@@ -99,7 +100,18 @@ export class Bus {
   emit<K extends keyof GameEvents>(type: K, e: GameEvents[K]): void {
     const set = this.handlers.get(type);
     if (!set) return;
-    for (const fn of set) (fn as Handler<GameEvents[K]>)(e);
+    // One broken listener (audio, fx, haptics…) must never stop the others — or the code that emitted the
+    // event, e.g. the weapon's fire path. Log each failing handler once and keep going.
+    for (const fn of set) {
+      try {
+        (fn as Handler<GameEvents[K]>)(e);
+      } catch (err) {
+        if (!this.reported.has(fn)) {
+          this.reported.add(fn);
+          console.error(`[bus] '${String(type)}' listener threw`, err);
+        }
+      }
+    }
   }
 }
 
