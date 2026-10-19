@@ -1,3 +1,4 @@
+import { CylinderGeometry } from 'three';
 import type {
   BarrelPart,
   GripPart,
@@ -51,26 +52,43 @@ function lower(c: Ctx) {
     [0.089, 0.003],
     [0.083, -0.011],
     [0.07, -0.0195],
-    [0.035, -0.0195],
-    [0.034, -0.041],
-    [0.027, -0.0465],
-    [-0.028, -0.0465],
-    [-0.034, -0.042],
-    [-0.035, -0.024],
-    [-0.0355, -0.012],
+    [-0.0362, -0.0195],
+    [-0.0365, -0.012],
     [-0.1, -0.012],
     [-0.106, -0.006],
     [-0.113, -0.001],
     [-0.113, 0.0125],
   ];
-  const guardHole: P2[] = [
-    [0.028, -0.021],
-    [0.028, -0.04],
-    [-0.027, -0.04],
-    [-0.029, -0.021],
-  ];
-  s.add(profile(shape(body, [guardHole]), 0.0225, 0.0012), fin);
-  // Magwell: flared walls, slightly wider than the receiver.
+  s.add(profile(shape(body), 0.0225, 0.0012), fin);
+  // Trigger guard: separate, narrower loop with the "enhanced" drop at the rear.
+  const guard = shape(
+    [
+      [0.0365, -0.017],
+      [0.0365, -0.029],
+      [0.031, -0.039],
+      [0.02, -0.0505],
+      [0.009, -0.048],
+      [-0.022, -0.0465],
+      [-0.031, -0.0415],
+      [-0.0362, -0.031],
+      [-0.0362, -0.017],
+    ],
+    [
+      [
+        [0.031, -0.0205],
+        [0.031, -0.029],
+        [0.0265, -0.0365],
+        [0.018, -0.0448],
+        [0.009, -0.0428],
+        [-0.021, -0.0415],
+        [-0.0275, -0.038],
+        [-0.031, -0.03],
+        [-0.031, -0.0205],
+      ],
+    ],
+  );
+  s.add(profile(guard, 0.0108, 0.0012), fin);
+  // Magwell: flared walls, slightly wider than the receiver, with the flare lip.
   const well: P2[] = [
     [-0.0355, 0.0],
     [-0.0355, -0.051],
@@ -80,29 +98,69 @@ function lower(c: Ctx) {
     [-0.1005, 0.0],
   ];
   s.add(profile(shape(well), 0.0268, 0.0018), fin);
-  // Magwell flare lip and the front "fence" in front of the mag release.
-  s.add(boxZ(0.0285, 0.004, -0.037, -0.101, 0, -0.057, 0.0015), fin);
-  s.add(boxZ(0.006, 0.014, -0.028, -0.036, 0.0128, -0.007, 0.001), fin);
-  // Takedown/pivot pins.
+  s.add(boxZ(0.0288, 0.0042, -0.037, -0.101, 0, -0.057, 0.0016), fin);
+  // Mag-release fence (right) and bolt-catch ears (left).
+  const fence: P2[] = [
+    [-0.024, 0.002],
+    [-0.024, -0.017],
+    [-0.038, -0.017],
+    [-0.038, -0.012],
+    [-0.0275, -0.012],
+    [-0.0275, 0.002],
+  ];
+  s.add(profile(shape(fence), 0.0034, 0.0008, 0.0124), fin);
+  s.add(
+    profile(
+      shape([
+        [-0.035, 0.0105],
+        [-0.051, 0.0105],
+        [-0.051, 0.006],
+        [-0.035, 0.006],
+      ]),
+      0.0034,
+      0.0008,
+      -0.0124,
+    ),
+    fin,
+  );
+  s.add(
+    profile(
+      shape([
+        [-0.035, -0.012],
+        [-0.051, -0.012],
+        [-0.051, -0.016],
+        [-0.035, -0.016],
+      ]),
+      0.0034,
+      0.0008,
+      -0.0124,
+    ),
+    fin,
+  );
+  // Takedown + pivot pins through both sides (heads proud, detent dot).
   for (const [z, y] of [
     [0.077, 0.006],
     [-0.106, 0.004],
-  ])
+  ]) {
     s.add(
-      xform(
-        lathe(
-          [
-            [0, 0.0],
-            [0.0029, 0.0],
-            [0.0029, -0.0262],
-            [0, -0.0262],
-          ],
-          10,
-        ),
-        { rot: [0, Math.PI / 2, 0], pos: [-0.0131, y, z] },
-      ),
-      M.steel,
+      new CylinderGeometry(0.0032, 0.0032, 0.0246, 14).rotateZ(Math.PI / 2).translate(0, y, z),
+      M.phosphate,
     );
+    for (const x of [-0.0124, 0.0124])
+      s.add(
+        cylZ(0.0011, 0.0004, -0.0004, 0, 0, 8)
+          .rotateY(Math.PI / 2)
+          .translate(x * 1.003, y, z),
+        M.dark,
+      );
+  }
+  // Pistol-grip screw boss and the receiver's rear "tang" detail.
+  s.add(
+    cylZ(0.0026, 0, -0.001, 0, 0, 8)
+      .rotateX(Math.PI / 2)
+      .translate(0, -0.0195, 0.06),
+    M.dark,
+  );
   // Trigger.
   const trig = c.part('trigger', [0, -0.012, 0.004]);
   trig.add(
@@ -122,32 +180,49 @@ function lower(c: Ctx) {
     ),
     M.phosphate,
   );
-  // Safety selector (left), mag release (right), bolt catch (left).
-  const saf = c.part('safety', [-0.0125, 0.0005, 0.046]);
-  saf.add(
-    lathe(
-      [
-        [0, 0],
-        [0.0052, 0],
-        [0.0052, -0.002],
-        [0, -0.002],
-      ].map(([r, z]) => [r, z] as P2),
-      14,
-    )
-      .rotateY(Math.PI / 2)
-      .translate(-0.0118, 0.0005, 0.046),
-    M.phosphate,
-  );
-  saf.add(rbox(0.0022, 0.0045, 0.016, -0.0138, 0.0015, 0.039, 0.0009), M.phosphate);
+  // Selector: detent disc + forward-pointing lever (left), short ambi lever (right).
+  const SP: P2 = [0.046, 0.0005];
+  const saf = c.part('safety', [0, SP[1], SP[0]]);
+  const lever = (len: number): P2[] => [
+    [SP[0] + 0.004, SP[1] + 0.0028],
+    [SP[0] - len, SP[1] + 0.0042],
+    [SP[0] - len - 0.0035, SP[1] + 0.0012],
+    [SP[0] - len - 0.0035, SP[1] - 0.0016],
+    [SP[0] - len, SP[1] - 0.004],
+    [SP[0] + 0.004, SP[1] - 0.0028],
+  ];
+  for (const sx of [-1, 1]) {
+    saf.add(
+      cylZ(0.0056, 0.0009, -0.0009, 0, 0, 16)
+        .rotateY(Math.PI / 2)
+        .translate(sx * 0.0122, SP[1], SP[0]),
+      M.phosphate,
+    );
+    saf.add(profile(shape(lever(sx < 0 ? 0.017 : 0.01)), 0.0022, 0.0006, sx * 0.0137), M.phosphate);
+  }
+  // Mag release button (right).
   const rel = c.part('magRelease', [0.012, -0.007, -0.031]);
   rel.add(
-    cylZ(0.0045, 0.0, -0.0034, 0, 0, 14)
+    cylZ(0.0044, 0.0, -0.0036, 0, 0, 14)
       .rotateY(Math.PI / 2)
-      .translate(0.0125, -0.007, -0.031),
+      .translate(0.0122, -0.0068, -0.0315),
     M.phosphate,
   );
-  const bc = c.part('boltCatch', [-0.0125, 0.004, -0.04]);
-  bc.add(rbox(0.0028, 0.016, 0.009, -0.0128, 0.001, -0.043, 0.001), M.phosphate);
+  // Bolt release paddle (left): upper striker + lower paddle, ribbed.
+  const bc = c.part('boltCatch', [-0.0135, 0.004, -0.043]);
+  const paddle: P2[] = [
+    [-0.0385, 0.0098],
+    [-0.0475, 0.0098],
+    [-0.0488, 0.004],
+    [-0.0466, -0.004],
+    [-0.0498, -0.0135],
+    [-0.0445, -0.0178],
+    [-0.0392, -0.011],
+    [-0.0392, 0.003],
+  ];
+  bc.add(profile(shape(paddle), 0.0026, 0.0007, -0.0151), M.phosphate);
+  for (let i = 0; i < 3; i++)
+    bc.add(boxZ(0.0012, 0.0008, -0.0405, -0.048, -0.0165, -0.0085 - i * 0.0026, 0.0002), M.phosphate);
   c.socket('magwell', [0, c.r.platform.frame.magTopY - 0.045, c.r.platform.frame.magwellZ]);
 }
 
@@ -174,37 +249,65 @@ function upper(c: Ctx) {
   s.add(cylZ(0.0158, -0.088, -0.1048, B, 0, 20), fin);
   const rail = c.r.platform.frame.receiverRail!;
   topRail(c, rail.z0, -0.104, rail.y);
-  // Forward assist (right rear), brass deflector, dust cover + hinge rod.
+  // Forward assist: tapered housing angled out to the rear, plunger with a grooved face.
+  const a = 0.42;
   const fa = lathe(
     [
-      [0, 0.0],
-      [0.0062, 0.0],
-      [0.0062, -0.006],
-      [0.0052, -0.007],
-      [0.0052, -0.03],
-      [0, -0.03],
+      [0, -0.002],
+      [0.0082, -0.002],
+      [0.0074, 0.018],
+      [0.0078, 0.0185],
+      [0.0078, 0.0245],
+      [0.0072, 0.0255],
+      [0, 0.0255],
+    ],
+    18,
+  );
+  s.add(xform(fa, { rot: [0, a, 0], pos: [0.0085, B + 0.0065, 0.058] }), fin);
+  const groove = lathe(
+    [
+      [0.0045, 0.0257],
+      [0.0062, 0.0257],
+      [0.0062, 0.0259],
+      [0.0045, 0.0259],
     ],
     16,
   );
-  s.add(xform(fa, { rot: [0, 0.42, 0], pos: [0.019, B + 0.006, 0.083] }), fin);
-  s.add(
-    xform(rbox(0.007, 0.014, 0.014, 0, 0, 0, 0.002), { rot: [0, 0.35, 0], pos: [0.0145, B + 0.008, 0.008] }),
-    fin,
-  );
-  const dc = c.part('dustCover', [0.0128, B - 0.0075, -0.035]);
-  dc.add(boxZ(0.0012, 0.017, -0.004, -0.066, 0.0129, B + 0.001, 0.0005), M.phosphate);
-  dc.add(boxZ(0.0016, 0.0028, -0.006, -0.064, 0.0139, B + 0.006, 0.0006), M.phosphate);
-  s.add(cylZ(0.0011, -0.002, -0.068, B - 0.0075, 0.0128, 8), M.steel);
-  // Ejection port cut-out read: dark seam above/below the cover.
-  s.add(boxZ(0.0006, 0.0018, -0.002, -0.068, 0.0124, B + 0.0102, 0), M.dark);
+  s.add(xform(groove, { rot: [0, a, 0], pos: [0.0085, B + 0.0065, 0.058] }), M.dark);
+  // Brass deflector: wedge behind the port.
+  const defl = shape([
+    [0.0118, B - 0.001],
+    [0.0192, B + 0.0055],
+    [0.0192, B + 0.0095],
+    [0.0118, B + 0.019],
+  ]);
+  s.add(sweep(defl, 0.021, 0.003, 0.0012), fin);
+  // Ejection port: dark opening, bolt carrier visible inside (bolt part), dust cover hanging open.
+  s.add(boxZ(0.0006, 0.0172, -0.002, -0.068, 0.01245, B + 0.0016, 0), M.dark);
+  const bolt = c.part('bolt', [0, B, 0.0]);
+  bolt.add(boxZ(0.0016, 0.0118, -0.004, -0.058, 0.0121, B + 0.002, 0.0006), M.phosphate);
+  bolt.add(boxZ(0.0014, 0.0068, -0.056, -0.066, 0.0122, B + 0.0005, 0.0005), M.phosphate);
+  for (let i = 0; i < 6; i++) {
+    const z = -0.008 - i * 0.0024;
+    bolt.add(boxZ(0.0005, 0.007, z, z - 0.0009, 0.01292, B + 0.003, 0), M.dark);
+  }
+  const hinge: [number, number] = [0.0129, B - 0.0072];
+  const dc = c.part('dustCover', [hinge[0], hinge[1], -0.035]);
+  const cover = boxZ(0.0012, 0.0168, -0.003, -0.067, 0, 0.0084, 0.0005);
+  const rib = boxZ(0.0015, 0.0026, -0.006, -0.064, 0.0012, 0.0128, 0.0006);
+  const latch = boxZ(0.0016, 0.004, -0.06, -0.066, 0.0012, 0.0155, 0.0006);
+  for (const g of [cover, rib, latch]) {
+    g.rotateZ(-1.95);
+    g.translate(hinge[0], hinge[1], 0);
+    dc.add(g, M.phosphate);
+  }
+  s.add(cylZ(0.0011, -0.001, -0.069, hinge[1], hinge[0], 8), M.steel);
   // Charging handle (rear, top) with latch.
   const ch = c.part('chargingHandle', [0, top - 0.004, 0.085]);
   ch.add(boxZ(0.011, 0.0055, 0.098, 0.07, 0, top - 0.004, 0.0012), fin);
-  // T-handle wings + ambi latch.
   ch.add(rbox(0.04, 0.0066, 0.0075, 0, top - 0.004, 0.0935, 0.0022), fin);
   ch.add(rbox(0.013, 0.0064, 0.011, -0.0165, top - 0.0042, 0.0895, 0.002), fin);
   c.socket('chargingHandle', [0, top - 0.002, 0.096]);
-  c.pivot('bolt', [0, B, 0.05]);
   c.socket('ejectionPort', [0.013, B + 0.002, -0.035]);
 }
 
@@ -396,7 +499,7 @@ function grip(c: Ctx) {
     swell: g.style === 'ergo' ? 0.004 : 0.0015,
     beaver: g.style === 'a2' ? 0.004 : 0.008,
   });
-  c.s.add(profile(shape(pts), g.style === 'a2' ? 0.0255 : 0.028, 0.0055), c.M.polymer);
+  c.s.add(profile(shape(pts), g.style === 'a2' ? 0.0255 : 0.028, 0.0055), c.M.polymerGrip);
   const mid = 0.045;
   c.socket(
     'gripRight',
@@ -415,8 +518,8 @@ function magazine(c: Ctx) {
     len,
     depthTop: 0.0605,
     depthBottom: 0.0615,
-    curve: (m.capacity <= 20 ? 0.006 : 0.024) * (len / 0.19),
-    straight: m.capacity <= 20 ? 0.6 : 0.38,
+    straight: m.capacity <= 20 ? 0.55 : 0.3,
+    radius: m.capacity <= 20 ? 0.45 : 0.3,
   };
   buildBoxMag(c, col, o, metal ? 0.0222 : 0.0248, magMaterial(c, m), {
     ribs: metal ? [0.22, 0.78] : [],

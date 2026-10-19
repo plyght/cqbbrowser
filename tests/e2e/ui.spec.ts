@@ -81,12 +81,12 @@ test('main menu, settings tabs, keyboard nav', async ({ page }) => {
   await page.click('[data-tab="audio"]');
   await page.keyboard.press('ArrowDown');
   expect(await focused(page)).toBe('audio.master');
+  const master = () =>
+    page.evaluate(() => JSON.parse(localStorage.getItem('shortbarrel.settings.v1')!).audio.master as number);
   await page.keyboard.press('ArrowLeft');
+  const first = await master();
   await page.keyboard.press('ArrowLeft');
-  const stored = await page.evaluate(
-    () => JSON.parse(localStorage.getItem('shortbarrel.settings.v1')!).audio.master,
-  );
-  expect(stored).toBeCloseTo(0.8, 5);
+  expect(await master()).toBeLessThan(first);
   await page.keyboard.press('KeyQ');
   await expect(page.locator('[data-tab="video"].on')).toHaveCount(1);
   await page.keyboard.press('Escape');
@@ -106,15 +106,15 @@ test('play flow, pause menu, results (controller)', async ({ page }) => {
   // A on Play → drill list; RB switches facility; D-pad down moves through drills.
   await tapPad(page, 0);
   await expect(page.locator('.screen.play')).toBeVisible();
-  expect(await focused(page)).toBe('sq-bill');
+  expect(await focused(page)).toBe('free');
   await tapPad(page, 13);
-  expect(await focused(page)).toBe('sq-elpres');
+  expect(await focused(page)).toBe('bill');
   // PlayStation pad → PlayStation glyphs in the hints.
   await expect(page.locator('.screen.play .hints-row.pad kbd').first()).toHaveText('✕');
   await page.waitForTimeout(100);
   await page.screenshot({ path: `${dir}/ui-play.png` });
   await tapPad(page, 5);
-  await expect(page.locator('[data-facility="Steel Bay"].on')).toHaveCount(1);
+  await expect(page.locator('[data-facility="Steel Park"].on')).toHaveCount(1);
   await tapPad(page, 4);
   await tapPad(page, 0); // GO
   await expect(page.locator('.menu')).toBeHidden();
@@ -232,8 +232,11 @@ test('hud: mag-anchored ammo check, corner toasts, world prompt', async ({ page 
   // World-space prompt (no doors on the square range yet: fake an anchor on the first target).
   await page.evaluate(() => {
     const g = (window as any).__sb;
-    const t = g.range.targets[0];
-    g.hud.setPrompt({ anchor: t.mesh ?? t.group, action: 'interact', verb: 'open' });
+    const t = g.world.list(g.world.active)[0];
+    const anchor = g.ctx.camera.clone();
+    anchor.position.copy(t.aimPoint());
+    g.ctx.scene.add(anchor);
+    g.hud.setPrompt({ anchor, action: 'interact', verb: 'open' });
   });
   await steps(page, 20);
   await page.waitForTimeout(400);

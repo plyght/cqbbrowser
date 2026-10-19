@@ -83,47 +83,57 @@ export function gripProfile(
 export interface MagShapeOpts {
   /** Rear-top corner (z, y). */
   top: P2;
+  /** Length along the rear edge (m). */
   len: number;
   depthTop: number;
   depthBottom: number;
-  /** Forward (−z) offset at the bottom. */
-  curve: number;
-  /** Fraction of length that stays straight before curving. */
+  /** Fraction of the length that stays straight before curving. */
   straight: number;
-  power?: number;
+  /** Radius of the forward curve after the straight section (Infinity = straight mag). */
+  radius: number;
+  /** Initial forward lean of the rear edge (rad). */
+  tilt?: number;
 }
 
-function magEdge(o: MagShapeOpts, t: number) {
-  const k = Math.max(0, (t - o.straight) / (1 - o.straight));
-  return -o.curve * Math.pow(k, o.power ?? 2);
+/** Rear-edge point, tangent angle and forward normal at fraction t of the mag length. */
+function magFrame(o: MagShapeOpts, t: number): { p: P2; phi: number; n: P2 } {
+  const s = t * o.len;
+  const t0 = o.tilt ?? 0;
+  const s0 = o.straight * o.len;
+  const sl = Math.min(s, s0);
+  let z = o.top[0] - Math.sin(t0) * sl;
+  let y = o.top[1] - Math.cos(t0) * sl;
+  let phi = t0;
+  if (s > s0 && Number.isFinite(o.radius)) {
+    phi = t0 + (s - s0) / o.radius;
+    z += o.radius * (Math.cos(phi) - Math.cos(t0));
+    y -= o.radius * (Math.sin(phi) - Math.sin(t0));
+  } else if (s > s0) {
+    z -= Math.sin(t0) * (s - s0);
+    y -= Math.cos(t0) * (s - s0);
+  }
+  return { p: [z, y], phi, n: [-Math.cos(phi), Math.sin(phi)] };
 }
 
-export function magOutline(o: MagShapeOpts, steps = 10): { pts: P2[]; bottomAngle: number; bottom: P2 } {
+export function magOutline(o: MagShapeOpts, steps = 12): { pts: P2[]; bottomAngle: number; bottom: P2 } {
   const rear: P2[] = [];
   const front: P2[] = [];
-  let tz = 0,
-    ty = -1;
+  let phi = 0;
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    const y = o.top[1] - t * o.len;
-    const dz = magEdge(o, t);
-    // Tangent of the rear edge; the front edge sits along its perpendicular so the base is square to the curve.
-    const d2 = magEdge(o, Math.min(1, t + 0.02)) - magEdge(o, Math.max(0, t - 0.02));
-    const span = (Math.min(1, t + 0.02) - Math.max(0, t - 0.02)) * o.len;
-    const n = Math.hypot(d2, span);
-    tz = d2 / n;
-    ty = -span / n;
+    const f = magFrame(o, t);
+    phi = f.phi;
     const depth = o.depthTop + (o.depthBottom - o.depthTop) * t;
-    const k = i === 0 ? 0 : 1;
-    rear.push([o.top[0] + dz, y]);
-    front.push([o.top[0] + dz + depth * (k ? ty : -1), y + depth * (k ? -tz : 0)]);
+    rear.push(f.p);
+    // Top edge stays horizontal (it sits in the magwell); below that the front follows the normal.
+    const n = i === 0 ? ([-1, 0] as P2) : f.n;
+    front.push([f.p[0] + n[0] * depth, f.p[1] + n[1] * depth]);
   }
-  const bottomAngle = Math.atan2(-tz, -ty);
   const b0 = rear[steps],
     b1 = front[steps];
   return {
     pts: [...rear, ...front.reverse()],
-    bottomAngle,
+    bottomAngle: phi,
     bottom: [(b0[0] + b1[0]) / 2, (b0[1] + b1[1]) / 2],
   };
 }
@@ -134,17 +144,12 @@ export function magBand(o: MagShapeOpts, at: number, w: number, t0: number, t1: 
   const b: P2[] = [];
   for (let i = 0; i <= steps; i++) {
     const t = t0 + ((t1 - t0) * i) / steps;
-    const y = o.top[1] - t * o.len;
-    const d2 = magEdge(o, Math.min(1, t + 0.02)) - magEdge(o, Math.max(0, t - 0.02));
-    const span = (Math.min(1, t + 0.02) - Math.max(0, t - 0.02)) * o.len;
-    const n = Math.hypot(d2, span);
-    const pz = -span / n,
-      py = -d2 / n;
+    const f = magFrame(o, t);
     const depth = o.depthTop + (o.depthBottom - o.depthTop) * t;
-    const z = o.top[0] + magEdge(o, t) + pz * depth * at;
-    const yy = y + py * depth * at;
-    a.push([z - (pz * w) / 2, yy - (py * w) / 2]);
-    b.push([z + (pz * w) / 2, yy + (py * w) / 2]);
+    const z = f.p[0] + f.n[0] * depth * at;
+    const y = f.p[1] + f.n[1] * depth * at;
+    a.push([z - (f.n[0] * w) / 2, y - (f.n[1] * w) / 2]);
+    b.push([z + (f.n[0] * w) / 2, y + (f.n[1] * w) / 2]);
   }
   return [...a, ...b.reverse()];
 }
@@ -424,6 +429,9 @@ export function bufferTube(c: Ctx, z0: number, z1: number) {
     M.phosphate,
   );
   c.s.add(rbox(0.03, 0.036, 0.0025, 0, B - 0.004, z0 + 0.001, 0.002), M.phosphate);
+  // QD sling cup on the end plate (left).
+  c.s.add(cylZ(0.0062, z0 + 0.0065, z0 - 0.0005, B - 0.012, -0.0135, 14), M.phosphate);
+  c.s.add(cylZ(0.0036, z0 + 0.0068, z0 + 0.006, B - 0.012, -0.0135, 10), M.dark);
   // Keyway rib along the bottom (stock lock).
   c.s.add(boxZ(0.0075, 0.005, z0 + 0.008, z1 + 0.004, 0, B - 0.0148, 0.0008), M.finish.black);
 }
