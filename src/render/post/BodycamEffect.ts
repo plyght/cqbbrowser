@@ -279,10 +279,11 @@ export class BodycamEffect extends Effect {
     );
     (u.get('uGrade')!.value as Vector4).set(1, 0.55 * I, 0.018 * I, 0.15 * I);
     (u.get('uBlur')!.value as Vector4).set(1, EV_REF, 2.4, 0);
+    // Fixed-focus wide lens: only what's right on the lens (a forearm crossing it) defocuses; the gun stays legible.
     (u.get('uNear')!.value as Vector4).set(
-      0.6,
-      0.22,
-      clamp(p.nearBlur * I * (1 - 0.9 * this.ads), 0, 1),
+      0.26,
+      0.08,
+      clamp(0.7 * p.nearBlur * I * (1 - 0.9 * this.ads), 0, 1),
       0.012,
     );
     // Grain re-seeds at the camera's ~30 fps cadence.
