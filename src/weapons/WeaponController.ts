@@ -56,6 +56,7 @@ import {
 import { recoilFor, type RecoilFeel, type RecoilProfile } from '../anim/handling/recoil';
 import { FOV_SPRING } from '../anim/handling/characterise';
 import { WeaponRigidBody, gainsFor } from '../anim/handling/sim';
+import { ArmsRig } from '../anim/rig/ArmsRig';
 
 /** Kept for HUD/tests: what the hands are busy with. */
 export type ReloadState = { kind: 'idle' | 'reload' | 'check' | 'camFix' | 'switch' };
@@ -104,6 +105,8 @@ interface Equipped {
   sightLocal: Vector3[];
   /** Recoil instability → how soon grip readjusts happen. */
   adjustAfter: number;
+  /** ArmsRig: inverse of this weapon's idle gun frame in rig space (root = handling pose × this). */
+  rigRefInv: Matrix4 | null;
 }
 
 const DEFAULT_LEFT: HandKey = { t: 1, at: 'handguard', pose: 'support' };
@@ -210,8 +213,14 @@ export class WeaponController implements System {
     this.equipped = this.loadout[0];
     this.rifle = this.loadout.find((x) => x.cls === 'rifle');
     this.pistol = this.loadout.find((x) => x.cls === 'pistol');
-    this.view.add(this.equipped.model.root);
+    this.mount(this.equipped);
     ctx.scene.add(this.view, ...this.body.objects);
+    // Authored arms rig (src/anim/rig); the procedural arms + beat graph stay as the fallback until it loads
+    // (and with `?procarms`).
+    if (typeof location !== 'undefined' && !location.search.includes('procarms'))
+      ArmsRig.load()
+        .then((rig) => this.useRig(rig))
+        .catch((err) => console.warn('ArmsRig unavailable, procedural arms', err));
     this.drops = new DroppedMags(ctx);
     this.scope = new ScopeOverlay(ctx.scene);
     if (GripOverlay.enabled()) this.gripOverlay = new GripOverlay(ctx.scene);
@@ -232,7 +241,7 @@ export class WeaponController implements System {
   private make(def: WeaponDef): Equipped {
     const cls: WeaponClass = def.slot === 'sidearm' ? 'pistol' : 'rifle';
     const cfg = CFG[cls];
-    const model = buildModel(def.model);
+    const model = buildModel(def.model, { detailParts: true });
     const root = model.root;
     root.updateMatrixWorld(true);
     const inv = new Matrix4().copy(root.matrixWorld).invert();
@@ -275,15 +284,160 @@ export class WeaponController implements System {
       recoilProfile: rec.profile,
       feel: rec.feel,
       adjustAfter: Math.max(1, Math.round(5 - instability * 2)),
+      rigRefInv: null,
     };
   }
 
   private get busy(): boolean {
+    if (this.rig) return this.planKind === 'reload' || this.planKind === 'check';
     return this.beats.active && this.planKind !== 'micro';
+  }
+
+  // ---------------------------------------------------------------- authored arms rig
+
+  /** The authored arms rig once loaded (null = procedural fallback). */
+  rig: ArmsRig | null = null;
+
+  private useRig(rig: ArmsRig) {
+    this.rig = rig;
+    this.stopPlan();
+    this.switching = null;
+    this.ctx.scene.add(rig.root);
+    this.body.left.mesh.visible = this.body.right.mesh.visible = false;
+    for (const m of rig.meshes) m.frustumCulled = false;
+    this.view.remove(this.equipped.model.root);
+    this.mount(this.equipped);
+  }
+
+  /** Put a weapon in the hands: under the rig (measuring its idle gun frame once) or on the procedural view. */
+  private mount(e: Equipped) {
+    const rig = this.rig;
+    if (!rig) {
+      this.view.add(e.model.root);
+      return;
+    }
+    rig.attachWeapon(e.model, e.def.id);
+    this.measureRigRef(e);
+  }
+
+  private unmount(e: Equipped) {
+    if (this.rig) {
+      if (this.rig.weaponModel === e.model) this.rig.detachWeapon();
+    } else this.view.remove(e.model.root);
+  }
+
+  /** Idle gun frame in rig space → the rig root follows the handling sim so the idle gun sits on our hold. */
+  private measureRigRef(e: Equipped) {
+    const rig = this.rig!;
+    if (e.rigRefInv) return;
+    const keepP = rig.root.position.clone();
+    const keepQ = rig.root.quaternion.clone();
+    rig.root.position.set(0, 0, 0);
+    rig.root.quaternion.identity();
+    rig.root.updateMatrixWorld(true);
+    rig.play('idle', { fade: 0 });
+    rig.update(0);
+    e.model.root.updateMatrixWorld(true);
+    e.rigRefInv = new Matrix4().copy(e.model.root.matrixWorld).invert();
+    rig.root.position.copy(keepP);
+    rig.root.quaternion.copy(keepQ);
+    rig.root.updateMatrixWorld(true);
+  }
+
+  /** World matrix of the drawn weapon frame (grip origin, -z muzzle): the rig's gun, else the handling view. */
+  private get gunMatrix(): Matrix4 {
+    return this.rig ? this.equipped.model.root.matrixWorld : this.view.matrixWorld;
+  }
+
+  private readonly gunQ = new Quaternion();
+  private get gunQuat(): Quaternion {
+    return this.rig ? this.equipped.model.root.getWorldQuaternion(this.gunQ) : this.view.quaternion;
+  }
+
+  /** Rig events → `weaponBeat` (audio / haptics) + inventory + contact jolts. */
+  private lastRigBeat = '';
+  private lastRigBeatT = -1;
+  private onRigEvent = (beat: string) => {
+    const e = this.equipped;
+    if (beat === 'fire') return;
+    // Clip markers can double up on adjacent frames: one foley hit per contact.
+    const now = this.ctx.time;
+    if (beat === this.lastRigBeat && now - this.lastRigBeatT < 0.08) return;
+    this.lastRigBeat = beat;
+    this.lastRigBeatT = now;
+    if (beat === 'swapMid') return this.onRigSwapMid();
+    this.emitBeat(beat, this.player.stress > 0.45);
+    const lib = LIBRARIES[e.cls];
+    switch (beat) {
+      case 'magOut':
+        if (this.planKind === 'reload' && !this.swapped) {
+          const retain = this.reloadVariant === 'tactical';
+          if (!retain && e.mag?.obj.visible) this.spawnDrop();
+          e.mags.swap(retain);
+          this.swapped = true;
+        }
+        break;
+      case 'magSeat': {
+        const k = lib.magSeat.calm[0].kick;
+        if (k) this.applyKick(k, 1);
+        break;
+      }
+      case 'boltRelease':
+      case 'chargingHandle':
+      case 'slideRelease': {
+        if (this.planKind === 'reload') {
+          e.mags.chamber();
+          e.boltLocked = false;
+        }
+        const k = (lib[beat] ?? lib.slideRelease ?? lib.boltRelease)?.calm[0].kick;
+        if (k) this.applyKick(k, 1);
+        break;
+      }
+    }
+  };
+
+  private onRigSwapMid() {
+    const s = this.switching;
+    const next = s ? this.loadout[s.to] : undefined;
+    if (!s || !next) return;
+    if (next !== this.equipped) {
+      this.equipped = next;
+      this.aimIndex = 0;
+      this.simReset = true;
+      this.measureRigRef(next);
+      this.emitBeat('swapMid', false);
+    }
+    s.phase = 'in';
+    this.emitBeat(next.cls === 'pistol' ? 'draw' : 'unsling', false);
+  }
+
+  /** Root = handling pose × inverse idle gun frame; then the rig samples, places the gun and IKs the hands. */
+  private updateRig(dt: number) {
+    const rig = this.rig!;
+    const e = this.equipped;
+    if (rig.weaponModel !== e.model && !this.switching) this.mount(e);
+    if (e.rigRefInv) {
+      _m.copy(this.view.matrixWorld).multiply(e.rigRefInv);
+      _m.decompose(rig.root.position, rig.root.quaternion, _v);
+    }
+    rig.root.updateMatrixWorld(true);
+    rig.update(dt);
+    // Plans finish when the rig goes back to idle.
+    if ((this.planKind === 'reload' || this.planKind === 'check') && !rig.busy) {
+      if (this.planKind === 'reload') {
+        if (!this.swapped) e.mags.swap(this.reloadVariant === 'tactical');
+        if (!e.mags.chambered) e.mags.chamber();
+        e.boltLocked = false;
+      }
+      this.planKind = null;
+      this.checking = false;
+    }
+    if (this.switching && this.switching.phase === 'in' && rig.action !== 'swapIn') this.switching = null;
   }
 
   /** Start a sling/holster → draw switch (or reverse one in progress). */
   equip(i: number) {
+    if (this.rig) return this.equipRig(i);
     const s = this.switching;
     if (s) {
       // Switch pressed again mid-swap: reverse.
@@ -309,10 +463,35 @@ export class WeaponController implements System {
     this.emitBeat(this.equipped.cls === 'pistol' ? 'holster' : 'sling', false);
   }
 
+  /** Rig switch: swapOut → swapMid → swapIn; switching again mid-swap retargets (reverses). */
+  private equipRig(i: number) {
+    const rig = this.rig!;
+    const s = this.switching;
+    if (s) {
+      const back = s.phase === 'out' ? this.loadout.indexOf(this.equipped) : s.from;
+      s.from = this.loadout.indexOf(this.equipped);
+      s.to = back;
+      s.phase = 'out';
+      const t = this.loadout[back];
+      rig.swapTo(t.model, t.def.id, { onEvent: this.onRigEvent });
+      return;
+    }
+    const next = this.loadout[i];
+    if (!next || next === this.equipped || this.planKind === 'reload') return;
+    if (this.planKind === 'check') this.planKind = null;
+    this.checking = false;
+    this.switching = { phase: 'out', w: 0, to: i, from: this.loadout.indexOf(this.equipped), hurry: false };
+    this.emitBeat(this.equipped.cls === 'pistol' ? 'holster' : 'sling', false);
+    rig.swapTo(next.model, next.def.id, { onEvent: this.onRigEvent });
+  }
+
   /** Can the trigger break during a switch? Not on the way out; once the draw is ~80% done. */
   private get switchAllowsFire(): boolean {
     const s = this.switching;
-    return !s || (s.phase === 'in' && s.w <= 0.2);
+    if (!s) return true;
+    if (this.rig)
+      return s.phase === 'in' && (this.rig.progress >= 0.8 || (s.hurry && this.rig.progress >= 0.45));
+    return s.phase === 'in' && s.w <= 0.2;
   }
 
   /** Swap a loadout slot for a build preset (e.g. 'sb16_lpvo'); equips it if that slot is in hand. */
@@ -325,9 +504,9 @@ export class WeaponController implements System {
     this.rifle = this.loadout.find((x) => x.cls === 'rifle');
     this.pistol = this.loadout.find((x) => x.cls === 'pistol');
     if (wasEquipped) {
-      this.view.remove(this.equipped.model.root);
+      this.unmount(this.equipped);
       this.equipped = next;
-      this.view.add(next.model.root);
+      this.mount(next);
       this.aimIndex = 0;
       this.stopPlan();
     }
@@ -341,13 +520,13 @@ export class WeaponController implements System {
     if (!defs.length) return;
     this.stopPlan();
     this.switching = null;
-    this.view.remove(this.equipped.model.root);
+    this.unmount(this.equipped);
     for (const w of this.loadout) w.model.dispose();
     this.loadout = defs.map((d) => this.make(d));
     this.rifle = this.loadout.find((x) => x.cls === 'rifle');
     this.pistol = this.loadout.find((x) => x.cls === 'pistol');
     this.equipped = this.loadout[0];
-    this.view.add(this.equipped.model.root);
+    this.mount(this.equipped);
     this.aimIndex = 0;
     this.simReset = true;
   }
@@ -365,9 +544,9 @@ export class WeaponController implements System {
   equipNow(i: number) {
     const next = this.loadout[i];
     if (!next || next === this.equipped) return;
-    this.view.remove(this.equipped.model.root);
+    this.unmount(this.equipped);
     this.equipped = next;
-    this.view.add(next.model.root);
+    this.mount(next);
     this.aimIndex = 0;
     this.simReset = true;
     this.stopPlan();
@@ -451,8 +630,13 @@ export class WeaponController implements System {
     this.fovPunch.step(0, dt);
     this.simulate(dt, wantYaw + nX + this.climbYaw, wantPitch + nY + breathY + this.climbPitch);
     this.updatePlan(dt);
-    this.updateParts(dt);
-    this.updateHands(dt);
+    if (this.rig) {
+      this.updateRig(dt);
+      this.body.update(p);
+    } else {
+      this.updateParts(dt);
+      this.updateHands(dt);
+    }
     this.updateAdsCamera();
     this.updateFire(dt, f.down.has('fire'));
     this.drops.update();
@@ -633,11 +817,11 @@ export class WeaponController implements System {
       const eye = this.eyeDistance(sl);
       this.eyeWorld.copy(this.equipped.sightLocal[i]);
       this.eyeWorld.z += eye;
-      this.eyeWorld.applyMatrix4(this.view.matrixWorld);
+      this.eyeWorld.applyMatrix4(this.gunMatrix);
       if (k > 1e-4) {
         cam.position.lerp(this.eyeWorld, k);
         // The camera rides the weapon (it rolls with an offset-dot cant; recoil moves sight + view together).
-        cam.quaternion.slerp(this.view.quaternion, k);
+        cam.quaternion.slerp(this.gunQuat, k);
         cam.updateMatrixWorld();
         const mag = Math.max(1, sl.mode.magnification[0]);
         const adsFov = clamp((2 * Math.atan(Math.tan((75 * Math.PI) / 360) / mag) * 180) / Math.PI, 18, 75);
@@ -671,8 +855,8 @@ export class WeaponController implements System {
     const sl = this.sightLine;
     if (!sl) return o;
     _v3.copy(this.equipped.sightLocal[Math.min(this.aimIndex, this.equipped.sightLocal.length - 1)]);
-    _v3.applyMatrix4(this.view.matrixWorld);
-    _v2.set(0, 0, -1).applyQuaternion(this.view.quaternion);
+    _v3.applyMatrix4(this.gunMatrix);
+    _v2.set(0, 0, -1).applyQuaternion(this.gunQuat);
     _v3.addScaledVector(_v2, WeaponController.ZERO);
     o.dir.copy(_v3).sub(o.origin).normalize();
     return o;
@@ -683,8 +867,8 @@ export class WeaponController implements System {
   /** Muzzle ray in world space. Returns a reused object: copy it if you keep it. */
   muzzleWorld(): { origin: Vector3; dir: Vector3 } {
     const o = this.muzzleOut;
-    o.origin.copy(this.equipped.muzzleLocal).applyMatrix4(this.view.matrixWorld);
-    o.dir.set(0, 0, -1).applyQuaternion(this.view.quaternion).normalize();
+    o.origin.copy(this.equipped.muzzleLocal).applyMatrix4(this.gunMatrix);
+    o.dir.set(0, 0, -1).applyQuaternion(this.gunQuat).normalize();
     return o;
   }
 
@@ -698,7 +882,8 @@ export class WeaponController implements System {
     // Firing during a mag check aborts it cleanly: fast reinsert + seat, then the gun is back up.
     if (down && !this.triggerHeld && this.planKind === 'check') this.abortCheck();
     const canFire =
-      !this.beats.active &&
+      !this.busy &&
+      !(this.beats.active && !this.rig) &&
       this.switchAllowsFire &&
       this.flinch < 0.5 &&
       this.throwDip < 0.5 &&
@@ -780,6 +965,7 @@ export class WeaponController implements System {
       f.camShove,
     );
     this.fovPunch.impulse(f.fov * (1 - this.adsBlend * 0.5));
+    this.rig?.play(e.mags.empty ? 'shootLast' : 'shoot');
     // Muzzle rise that moves the view itself; stacks over a string (ramp), part returns on its own.
     this.player.viewRecoil(
       f.view * ramp * (0.85 + this.rand() * 0.3),
@@ -795,7 +981,7 @@ export class WeaponController implements System {
     this.shotsInString = 0;
     this.newDrift(0.6);
     const need = e.adjustAfter - (this.fatigue > 0.4 ? 1 : 0);
-    if (this.lastString >= need && !this.beats.active && !this.switching)
+    if (this.lastString >= need && !this.beats.active && !this.switching && !this.rig)
       this.startPlan('micro', ['gripAdjust']);
   }
 
@@ -803,6 +989,7 @@ export class WeaponController implements System {
 
   private onReloadIntent(intent: string) {
     if (this.switching) return;
+    if (this.rig) return this.onReloadIntentRig(intent);
     if (intent === 'checkStart') {
       if (this.beats.active && this.planKind !== 'micro') return;
       this.startPlan('check', CHECK_NAMES);
@@ -822,6 +1009,42 @@ export class WeaponController implements System {
           this.reloadVariant = 'speed';
         }
       } else if (!this.beats.active || this.planKind === 'micro') this.startReload('speed');
+    }
+  }
+
+  /** Rig path: tactical → reloadTactical, speed → reloadTactical faster + dump, empty → reloadEmpty, hold → magCheck. */
+  private onReloadIntentRig(intent: string) {
+    const rig = this.rig!;
+    const e = this.equipped;
+    if (intent === 'checkStart') {
+      if (this.busy) return;
+      this.planKind = 'check';
+      this.checking = true;
+      this.idleTime = 0;
+      this.emitBeat('magCheck', false);
+      rig.play('magCheck', { hold: true, onEvent: this.onRigEvent });
+    } else if (intent === 'checkEnd') {
+      rig.releaseHold();
+      this.checking = false;
+    } else if (intent === 'tactical' || intent === 'speedUpgrade') {
+      if (intent === 'speedUpgrade' && this.planKind === 'reload') {
+        // Double tap before the old mag is out: it goes on the floor instead of the pouch.
+        if (!this.swapped) this.reloadVariant = 'speed';
+        return;
+      }
+      if (this.busy || !e.mags.hasSpare()) return;
+      if (e.mags.inGun && e.mags.inGun.rounds >= e.mags.capacity && e.mags.chambered) return;
+      const empty = e.mags.empty || !e.mags.chambered;
+      this.reloadVariant = empty || intent === 'speedUpgrade' ? 'speed' : 'tactical';
+      this.swapped = false;
+      this.planKind = 'reload';
+      this.idleTime = 0;
+      const stressed = this.player.stress > 0.45;
+      rig.play(empty ? 'reloadEmpty' : 'reloadTactical', {
+        onEvent: this.onRigEvent,
+        speed: (this.reloadVariant === 'speed' ? 1.18 : 1) * (stressed ? 1.12 : 1),
+      });
+      this.newDrift(1);
     }
   }
 
@@ -860,6 +1083,11 @@ export class WeaponController implements System {
 
   /** Fire pressed mid mag-check: release the hold so the plan runs its (fast) reinsert + seat. */
   private abortCheck() {
+    if (this.rig) {
+      this.rig.releaseHold();
+      this.checking = false;
+      return;
+    }
     this.beats.holding = false;
     this.checking = false;
     const cur = this.beats.current?.name;
@@ -925,7 +1153,10 @@ export class WeaponController implements System {
     const p = this.player;
     if (this.beats.active || this.switching) return;
     const auto = p.knock > 0.035 && this.idleTime > 1.2 && !p.aiming && p.speed < 2.5 && this.sinceShot > 1.5;
-    if (manual || auto) this.startPlan('camFix', CAM_FIX_NAMES);
+    if (!(manual || auto)) return;
+    // Rig: no camera-fix clip yet → straighten the mount without the reach.
+    if (this.rig) this.player.fixMount();
+    else this.startPlan('camFix', CAM_FIX_NAMES);
   }
 
   private sink: BeatSink = {
@@ -1066,6 +1297,10 @@ export class WeaponController implements System {
 
   private updateSwitch(dt: number) {
     const s = this.switching;
+    if (this.rig) {
+      this.switchW = 0;
+      return;
+    }
     if (!s) {
       this.switchW = 0;
       return;
