@@ -86,7 +86,7 @@ export class Game {
     this.weapons = new WeaponController(this.ctx, this.player, ['sb16', 'p17']);
     this.systems.push(this.player, this.weapons, this.range);
     this.aimAssist.provider = this.aimAssistProvider();
-    this.audio = new AudioEngine(bus, this.ctx.camera);
+    this.audio = new AudioEngine(bus, this.ctx.camera, { physics, exclude: () => this.player.rigidBody });
     this.hud = new Hud(ui);
     this.menu = new Menu(ui);
     this.menu.onPlay = () => this.enter(canvas);
@@ -188,7 +188,7 @@ export class Game {
     }
     const alpha = this.acc / Physics.STEP;
     for (const s of this.systems) s.update?.(dt, alpha);
-    this.audio.update();
+    this.audio.update(dt);
     this.hud.update(this.weapons);
     this.renderer.render(dt);
   }

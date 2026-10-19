@@ -1,0 +1,39 @@
+# Asset attribution
+
+Every external asset shipped in the repo. While the repo is public, only CC0 or in-house generated assets are
+allowed. No Sonniss files until the repo is private (`public/assets/audio/pro/` is gitignored).
+
+## Audio — `open` set (`public/assets/audio/open/`)
+
+Built by `bun tools/audio/process.ts` from the list in `tools/audio/sources.ts` (trimmed, faded, normalised,
+encoded to Opus `.webm` + AAC `.m4a`). Each Freesound licence is re-checked on the sound's page by
+`tools/audio/freesound.ts` before download (HQ preview files). Anything not listed here is procedural
+(`src/audio/synth.ts`, `src/audio/ir.ts`): steel modal synthesis, pressure layer, mechanical layers, IRs, wind,
+body thumps, tinnitus, beeps, scuffs and fallbacks.
+
+| Source                                                                                                                                                                                       | Author               | Licence | Output files                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ------- | ----------------------------------------------------------------------------- |
+| [AR15 rifle shot](https://freesound.org/people/michorvath/sounds/427596/)                                                                                                                    | michorvath           | CC0 1.0 | rep-ar15-0                                                                    |
+| [AR15 pistol shot](https://freesound.org/people/michorvath/sounds/427598/)                                                                                                                   | michorvath           | CC0 1.0 | rep-ar15p-0                                                                   |
+| [Rifle Gun Shot AK47. close recording in a shooting range.](https://freesound.org/people/felix.blume/sounds/136399/)                                                                         | felix.blume          | CC0 1.0 | rep-ak-0 … rep-ak-4                                                           |
+| [ak 47 - single shot.mp3](https://freesound.org/people/ninebilly/sounds/520934/)                                                                                                             | ninebilly            | CC0 1.0 | rep-ak-5                                                                      |
+| [Single Pistol Gunshot 3.wav](https://freesound.org/people/morganpurkis/sounds/385811/)                                                                                                      | morganpurkis         | CC0 1.0 | rep-p9-0                                                                      |
+| [Single Pistol Gunshot 4.2.wav](https://freesound.org/people/morganpurkis/sounds/391846/)                                                                                                    | morganpurkis         | CC0 1.0 | rep-p9-1                                                                      |
+| [Single Pistol Gunshot 2.wav](https://freesound.org/people/morganpurkis/sounds/371440/)                                                                                                      | morganpurkis         | CC0 1.0 | rep-p9-2                                                                      |
+| [Silenced Gunshot.wav](https://freesound.org/people/morganpurkis/sounds/369781/)                                                                                                             | morganpurkis         | CC0 1.0 | rep-sup-0                                                                     |
+| [Silenced Gunshot 2.wav](https://freesound.org/people/morganpurkis/sounds/380185/)                                                                                                           | morganpurkis         | CC0 1.0 | rep-sup-1                                                                     |
+| [Silenced Gunshot 3.wav](https://freesound.org/people/morganpurkis/sounds/381569/)                                                                                                           | morganpurkis         | CC0 1.0 | rep-sup-2                                                                     |
+| [Silenced Gunshot 4.wav](https://freesound.org/people/morganpurkis/sounds/396015/)                                                                                                           | morganpurkis         | CC0 1.0 | rep-sup-3                                                                     |
+| [Brass bullet shell casing drop onto concrete, multiple takes](https://freesound.org/people/GrayJoy/sounds/210102/)                                                                          | GrayJoy              | CC0 1.0 | brass-conc-0 … brass-conc-5                                                   |
+| [An M16 Rifle being reloaded while empty; full sequence](https://freesound.org/people/ser%C3%B8ut%C5%8Dnin--depriv%C9%99d/sounds/725397/)                                                    | serøutōnin--deprivəd | CC0 1.0 | rl-r-release-0, rl-r-out-0, rl-r-in-0, rl-r-seat-0, rl-r-check-0, rl-r-bolt-0 |
+| [A Glock handgun having its magazine removed and re-inserted // 3 takes](https://freesound.org/people/ser%C3%B8ut%C5%8Dnin--depriv%C9%99d/sounds/854460/)                                    | serøutōnin--deprivəd | CC0 1.0 | rl-p-out-0…2, rl-p-in-0…2, rl-p-seat-0…2                                      |
+| [Hiking Boot Footsteps on Gravel](https://freesound.org/people/Fission9/sounds/521588/)                                                                                                      | Fission9             | CC0 1.0 | step-gravel-0 … step-gravel-3                                                 |
+| [Footsteps On Tile](https://freesound.org/people/IENBA/sounds/834027/)                                                                                                                       | IENBA                | CC0 1.0 | step-tile-0, step-tile-1                                                      |
+| [Typical spring birdsong](https://freesound.org/people/rubindaniel/sounds/844820/)                                                                                                           | rubindaniel          | CC0 1.0 | amb-outdoor-1                                                                 |
+| [Early Spring Atmos Outside atmosphere Birds Air Distant Traffic Town 01](https://freesound.org/people/DeeryJ/sounds/788065/)                                                                | DeeryJ               | CC0 1.0 | amb-outdoor-0                                                                 |
+| [Kenney Impact Sounds 1.0](https://kenney.nl/assets/impact-sounds) (footstep_concrete/wood/carpet/grass/snow, impactGeneric_light, impactMetal_light, impactPlank_medium, impactSoft_medium) | Kenney               | CC0 1.0 | step-conc/wood/carpet/grass/dirt-0…4, mag-hard/metal/wood/soft-0…4            |
+| [Kenney RPG Audio](https://kenney.nl/assets/rpg-audio) (metalClick, metalLatch, cloth1–4)                                                                                                    | Kenney               | CC0 1.0 | click-0, click-1, cloth-0 … cloth-3                                           |
+
+The Free Firearm Sound Library (CC0, [OpenGameArt](https://opengameart.org/content/the-free-firearm-sound-library))
+was the first choice for reports, but opengameart.org returned HTTP 500 for every request during the build; the
+Freesound CC0 recordings above stand in. Swapping in that library later is a `sources.ts` data change.
