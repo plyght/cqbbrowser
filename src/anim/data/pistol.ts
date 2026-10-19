@@ -169,6 +169,7 @@ export const PISTOL_BEATS: BeatLibrary = {
         left: [hk(0.5, 'well', [0, 0.002, 0], 'magGrab', 'out'), hk(1, 'well', [0, -0.006, 0], 'flat')],
         weapon: [pk(0.55, add(WP, [0, 0.01, 0]), add(WR, [0.04, 0, 0])), pk(1, WP, WR)],
         events: [{ t: 0.5, ev: 'magToWell' }],
+        kick: { at: 'well', j: [0, 0.7, 0.05], cam: 0.04 },
       },
       {
         id: 'slap',
@@ -182,6 +183,7 @@ export const PISTOL_BEATS: BeatLibrary = {
         ],
         weapon: [pk(0.87, add(WP, [0, 0.014, 0]), add(WR, [0.05, 0, 0])), pk(1, WP, WR)],
         events: [{ t: 0.35, ev: 'magToWell' }],
+        kick: { at: 'well', j: [0, 0.9, 0.05], cam: 0.05 },
       },
     ],
   },
@@ -205,6 +207,8 @@ export const PISTOL_BEATS: BeatLibrary = {
           ],
         },
         events: [{ t: 0.8, ev: 'chamber' }],
+        // Bolt / slide slams home: a recoil-like jolt.
+        kick: { at: 'slide', j: [0, 0.15, -0.7], cam: 0.05 },
       },
       {
         id: 'thumb',
@@ -218,6 +222,8 @@ export const PISTOL_BEATS: BeatLibrary = {
           ],
         },
         events: [{ t: 0.4, ev: 'chamber' }],
+        // Bolt / slide slams home: a recoil-like jolt.
+        kick: { at: 'slide', j: [0, 0.15, -0.7], cam: 0.05 },
       },
     ],
   },
@@ -268,27 +274,48 @@ export const PISTOL_BEATS: BeatLibrary = {
       },
     ],
   },
-  checkPull: {
-    calm: [{ id: 'a', dur: 0.2, hit: 0.4, left: [hk(1, 'well', [0, -0.045, 0], 'magGrab', 'out')] }],
+  // Pistol mag check: drop the mag partway (thumb on the release), tilt the gun to read the witness holes, push it
+  // back up and slap it home (magSeat).
+  magCheckOut: {
+    calm: [
+      {
+        id: 'a',
+        dur: 0.24,
+        hit: 0.3,
+        left: [
+          hk(0.3, 'well', [0, -0.01, 0], 'magGrab', 'in'),
+          hk(1, 'well', [0, -0.05, 0.004], 'magGrab', 'out'),
+        ],
+        weapon: [pk(1, [-0.03, 0.13, 0.25], [0.5, 0.25, -1.05])],
+        kick: { at: 'well', j: [0, -0.2, 0] },
+      },
+    ],
   },
   checkHold: {
     calm: [
       {
         id: 'a',
-        dur: 0.5,
+        dur: 0.6,
         hold: true,
-        left: [hk(0.5, 'well', [0.003, -0.048, 0.003], 'magGrab'), hk(1, 'well', [0, -0.045, 0], 'magGrab')],
+        left: [
+          hk(0.5, 'well', [0.003, -0.053, 0.006], 'magGrab'),
+          hk(1, 'well', [0, -0.05, 0.004], 'magGrab'),
+        ],
+        weapon: [
+          pk(0.5, [-0.03, 0.134, 0.25], [0.52, 0.26, -1.07]),
+          pk(1, [-0.03, 0.13, 0.25], [0.5, 0.25, -1.05]),
+        ],
       },
     ],
   },
-  checkSeat: {
+  magCheckIn: {
     calm: [
       {
         id: 'a',
         dur: 0.2,
-        hit: 0.6,
-        left: [hk(0.6, 'well', [0, 0.002, 0], 'magGrab', 'out'), hk(1, 'well', [0, -0.004, 0], 'flat')],
-        events: [{ t: 0.6, ev: 'magToWell' }],
+        hit: 0.8,
+        left: [hk(0.8, 'well', [0, -0.012, 0], 'magGrab', 'in'), hk(1, 'well', [0, -0.012, 0], 'magGrab')],
+        weapon: [pk(1, WP, WR)],
       },
     ],
   },

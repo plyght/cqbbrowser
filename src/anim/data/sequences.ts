@@ -26,7 +26,17 @@ export function reloadNames(
 }
 
 /** Mag check while the reload button is held. */
-export const CHECK_NAMES = ['magCheck', 'checkPull', 'checkHold', 'checkSeat', 'handReturn'];
+export const CHECK_NAMES = ['magCheck', 'magCheckOut', 'checkHold', 'magCheckIn', 'magSeat', 'handReturn'];
+
+/**
+ * Fire pressed during a mag check: the remaining beats become a fast reinsert. Before the mag is out the hand just
+ * lets go; once it's out it goes straight back in and is seated. Null = nothing to change (already seating).
+ */
+export function checkAbortTail(current: string): string[] | null {
+  if (current === 'magCheck') return ['checkRelease', 'handReturn'];
+  if (current === 'magCheckOut' || current === 'checkHold') return ['magCheckIn', 'magSeat', 'handReturn'];
+  return null;
+}
 export const CAM_FIX_NAMES = ['camReach', 'camAdjust', 'camLetGo'];
 
 /**

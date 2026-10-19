@@ -11,6 +11,12 @@ const WP: V3 = [-0.05, 0.13, -0.1];
 const WR: V3 = [0.36, 0.34, -0.7];
 const WP2: V3 = [-0.04, 0.12, -0.09];
 const WR2: V3 = [0.3, 0.28, -0.58];
+/** Mag-check weapon pose (cant toward the support hand, in toward the chest cam). */
+const CP: V3 = [-0.06, 0.1, -0.1];
+const CR: V3 = [0.28, 0.26, -0.75];
+/** Mag held out for the check: below the well, tilted so the top round faces the chest cam (mag frame). */
+const SHOW_P: V3 = [-0.03, -0.17, 0.07];
+const SHOW_R: V3 = [0.2, -0.95, 0.35];
 
 export const RIFLE_BEATS: BeatLibrary = {
   ...COMMON_BEATS,
@@ -37,22 +43,32 @@ export const RIFLE_BEATS: BeatLibrary = {
       },
     ],
   },
+  // Decisive strip: the mag leaves straight down the well axis, then swings clear.
   magOut: {
     calm: [
       {
         id: 'a',
-        dur: 0.22,
-        hit: 0.15,
-        left: [hk(1, 'well', [-0.02, -0.16, 0.03], 'magGrab', 'out')],
+        dur: 0.2,
+        hit: 0.12,
+        left: [
+          hk(0.45, 'well', [0, -0.09, 0], 'magGrab', 'snap'),
+          hk(1, 'well', [-0.02, -0.16, 0.03], 'magGrab', 'out'),
+        ],
+        kick: { at: 'well', j: [0, -0.5, 0] },
       },
       {
         id: 'b',
-        dur: 0.24,
+        dur: 0.22,
         hit: 0.12,
-        left: [hk(0.55, 'well', [0, -0.09, 0], 'magGrab'), hk(1, 'well', [-0.04, -0.17, 0.05], 'magGrab')],
+        left: [
+          hk(0.5, 'well', [0, -0.1, 0], 'magGrab', 'snap'),
+          hk(1, 'well', [-0.04, -0.17, 0.05], 'magGrab'),
+        ],
+        kick: { at: 'well', j: [0, -0.45, 0] },
       },
     ],
   },
+
   magStow: {
     calm: [
       {
@@ -214,35 +230,49 @@ export const RIFLE_BEATS: BeatLibrary = {
       },
     ],
   },
+  // Seat: anticipation dip, a fast drive up into the well (contact = the click + jolt), follow-through, tug test.
   magSeat: {
     calm: [
       {
-        id: 'push-tug',
-        dur: 0.24,
-        hit: 0.45,
-        left: [
-          hk(0.45, 'well', [0, 0.004, 0], 'magGrab', 'out'),
-          hk(0.7, 'well', [0, -0.006, 0], 'magGrab'),
-          hk(1, 'well', [0, 0, 0], 'magGrab'),
-        ],
-        weapon: [pk(0.5, add(WP, [0, 0.012, 0]), add(WR, [0.05, 0, 0])), pk(1, WP, WR)],
-        events: [{ t: 0.45, ev: 'magToWell' }],
-      },
-      {
         id: 'slap',
         dur: 0.32,
-        hit: 0.35,
+        hit: 0.3,
         left: [
-          hk(0.35, 'well', [0, 0.002, 0], 'magGrab', 'out'),
-          hk(0.55, 'well', [0, -0.08, 0.01], 'flat'),
-          hk(0.8, 'well', [0, -0.03, 0], 'flat', 'in'),
-          hk(1, 'well', [0, -0.05, 0], 'flat'),
+          hk(0.18, 'well', [0, -0.052, 0.006], 'magGrab', 'out'),
+          hk(0.3, 'well', [0, 0.003, 0], 'magGrab', 'in'),
+          hk(0.5, 'well', [0, -0.05, 0.012], 'flat', 'out'),
+          hk(0.78, 'well', [0, 0, 0], 'magGrab', 'io'),
+          hk(1, 'well', [0, -0.007, 0], 'magGrab'),
         ],
-        weapon: [pk(0.82, add(WP, [0, 0.015, 0]), add(WR, [0.06, 0, 0])), pk(1, WP, WR)],
-        events: [{ t: 0.35, ev: 'magToWell' }],
+        weapon: [
+          pk(0.28, WP, WR),
+          pk(0.42, add(WP, [0, 0.022, 0.004]), add(WR, [0.09, 0, 0.05]), 'out'),
+          pk(1, WP, WR),
+        ],
+        events: [{ t: 0.3, ev: 'magToWell' }],
+        kick: { at: 'well', j: [0, 1.9, 0.25], cam: 0.1 },
+      },
+      {
+        id: 'push-tug',
+        dur: 0.27,
+        hit: 0.4,
+        left: [
+          hk(0.2, 'well', [0, -0.046, 0], 'magGrab', 'out'),
+          hk(0.4, 'well', [0, 0.004, 0], 'magGrab', 'in'),
+          hk(0.68, 'well', [0, -0.008, 0], 'magGrab', 'out'),
+          hk(1, 'well', [0, 0, 0], 'magGrab'),
+        ],
+        weapon: [
+          pk(0.38, WP, WR),
+          pk(0.52, add(WP, [0, 0.014, 0]), add(WR, [0.06, 0, 0.03]), 'out'),
+          pk(1, WP, WR),
+        ],
+        events: [{ t: 0.4, ev: 'magToWell' }],
+        kick: { at: 'well', j: [0, 1.2, 0.15], cam: 0.06 },
       },
     ],
   },
+
   boltRelease: {
     calm: [
       {
@@ -256,6 +286,8 @@ export const RIFLE_BEATS: BeatLibrary = {
         ],
         weapon: [pk(0.72, add(WP, [0.012, 0, 0]), add(WR, [0, -0.04, -0.06])), pk(1, WP, WR)],
         events: [{ t: 0.7, ev: 'chamber' }],
+        // Bolt / slide slams home: a recoil-like jolt.
+        kick: { at: 'bore', j: [0, 0.2, -1.1], cam: 0.08 },
       },
       {
         id: 'swipe',
@@ -267,6 +299,8 @@ export const RIFLE_BEATS: BeatLibrary = {
           hk(1, 'boltCatch', [-0.025, 0.02, 0.02], 'relaxed'),
         ],
         events: [{ t: 0.6, ev: 'chamber' }],
+        // Bolt / slide slams home: a recoil-like jolt.
+        kick: { at: 'bore', j: [0, 0.2, -1.1], cam: 0.08 },
       },
     ],
   },
@@ -291,6 +325,8 @@ export const RIFLE_BEATS: BeatLibrary = {
           ],
         },
         events: [{ t: 0.84, ev: 'chamber' }],
+        // Bolt / slide slams home: a recoil-like jolt.
+        kick: { at: 'bore', j: [0, 0.2, -1.1], cam: 0.08 },
       },
       {
         id: 'blade',
@@ -311,6 +347,8 @@ export const RIFLE_BEATS: BeatLibrary = {
           ],
         },
         events: [{ t: 0.82, ev: 'chamber' }],
+        // Bolt / slide slams home: a recoil-like jolt.
+        kick: { at: 'bore', j: [0, 0.2, -1.1], cam: 0.08 },
       },
     ],
   },
@@ -348,43 +386,66 @@ export const RIFLE_BEATS: BeatLibrary = {
       },
     ],
   },
-  // Mag check: pull the mag a little and tilt it into the chest cam's view.
+  // Mag check (hold reload): the gun cants so the well faces the support hand, the mag comes straight out down the
+  // well axis, tilts its feed lips / top round toward the chest cam, holds while the button is held, then goes
+  // back in along the axis and is seated with a slap + tug (magSeat).
   magCheck: {
     calm: [
       {
         id: 'a',
-        dur: 0.32,
-        left: [hk(0.6, 'well', [-0.03, -0.06, -0.02], 'relaxed'), hk(1, 'well', [0, 0, 0], 'magGrab', 'out')],
-        weapon: [pk(1, [-0.1, 0.13, -0.25], [0.22, 0.3, -1.1])],
-        events: [{ t: 1, ev: 'magToHand' }],
+        dur: 0.3,
+        hit: 0.9,
+        left: [
+          hk(0.55, 'well', [-0.03, -0.07, -0.03], 'relaxed'),
+          hk(0.9, 'well', [0, 0, 0], 'magGrab', 'out'),
+        ],
+        weapon: [pk(0.9, CP, CR)],
+        events: [{ t: 0.9, ev: 'magToHand' }],
       },
     ],
   },
-  checkPull: {
-    calm: [{ id: 'a', dur: 0.2, hit: 0.4, left: [hk(1, 'well', [0, -0.04, 0], 'magGrab', 'out')] }],
+  magCheckOut: {
+    calm: [
+      {
+        id: 'a',
+        dur: 0.36,
+        hit: 0.42,
+        left: [
+          hk(0.18, 'well', [0, -0.012, 0], 'magGrab', 'in'),
+          hk(0.42, 'well', [0, -0.1, 0], 'magGrab', 'lin'),
+          hk(1, 'well', SHOW_P, 'magGrab', 'io', SHOW_R),
+        ],
+        weapon: [pk(1, CP, CR)],
+        kick: { at: 'well', j: [0, -0.35, 0] },
+      },
+    ],
   },
   checkHold: {
     calm: [
       {
         id: 'a',
-        dur: 0.5,
+        dur: 0.6,
         hold: true,
-        left: [hk(0.5, 'well', [0.003, -0.043, 0.004], 'magGrab'), hk(1, 'well', [0, -0.04, 0], 'magGrab')],
-        weapon: [
-          pk(0.5, [-0.1, 0.135, -0.245], [0.24, 0.31, -1.13]),
-          pk(1, [-0.1, 0.13, -0.25], [0.22, 0.3, -1.1]),
+        left: [
+          hk(0.5, 'well', add(SHOW_P, [0.003, 0.004, 0.002]), 'magGrab', 'io', add(SHOW_R, [0.04, 0.03, 0])),
+          hk(1, 'well', SHOW_P, 'magGrab', 'io', SHOW_R),
         ],
+        weapon: [pk(0.5, add(CP, [0, 0.004, 0.003]), add(CR, [0.02, 0.01, -0.02])), pk(1, CP, CR)],
       },
     ],
   },
-  checkSeat: {
+  magCheckIn: {
     calm: [
       {
         id: 'a',
-        dur: 0.22,
-        hit: 0.6,
-        left: [hk(0.6, 'well', [0, 0.003, 0], 'magGrab', 'out'), hk(1, 'well', [0, -0.004, 0], 'magGrab')],
-        events: [{ t: 0.6, ev: 'magToWell' }],
+        dur: 0.3,
+        hit: 0.82,
+        left: [
+          hk(0.5, 'well', [0, -0.105, 0], 'magGrab', 'io'),
+          hk(0.82, 'well', [0, -0.03, 0], 'magGrab', 'in'),
+          hk(1, 'well', [0, -0.03, 0], 'magGrab'),
+        ],
+        weapon: [pk(1, WP, WR)],
       },
     ],
   },

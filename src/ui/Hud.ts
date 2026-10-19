@@ -218,7 +218,11 @@ export class Hud {
     const m = e.mags;
     const showMag = !hard && (this.mode === 'arcade' || w.checking);
     this.mag.classList.toggle('arcade', this.mode === 'arcade' && !w.checking);
-    const magObj = e.model.root.getObjectByName('magwell') ?? e.model.root.getObjectByName('mag');
+    // During a mag check the readout floats at the magazine itself (it leaves the well).
+    const magObj =
+      (w.checking ? e.mag?.obj : undefined) ??
+      e.model.root.getObjectByName('magwell') ??
+      e.model.root.getObjectByName('mag');
     let target: { x: number; y: number } | null = null;
     if (showMag && (!magObj || magObj.visible)) {
       const s = { x: 0, y: 0 };
