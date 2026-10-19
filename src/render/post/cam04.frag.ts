@@ -107,14 +107,18 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     // Cap the smear length (keeps taps from separating into ghost copies).
     duv *= min(1.0, 90.0 / max(px, 1e-3));
     px = min(px, 90.0);
-    if (px > 1.5) {
+    // The gun and hands move *with* the camera, so they must not get camera-rotation blur: fade the smear
+    // out for anything within ~1.2 m of the lens (viewmodel), full strength beyond ~2 m.
+    float zv = -getViewZ(readDepth(uvG));
+    float mbMask = smoothstep(1.2, 2.0, zv);
+    if (px > 1.5 && mbMask > 0.01) {
       vec3 acc = vec3(0.0);
       float jit = cHash(uv * resolution + uNoise.z) - 0.5;
       for (int i = 0; i < MB_TAPS; i++) {
         float t = (float(i) + 0.5 + jit) / float(MB_TAPS) - 0.5;
         acc += texture2D(tMip0, uvG + duv * t).rgb;
       }
-      float m = smoothstep(1.5, 7.0, px);
+      float m = smoothstep(1.5, 7.0, px) * mbMask;
       col = mix(col, acc / float(MB_TAPS), m);
       wide = mix(wide, acc / float(MB_TAPS), m);
       soft = max(soft, m);
@@ -148,7 +152,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 #endif
 
   // Edge softness: cheap lens falls apart toward the image circle.
-  float edge = smoothstep(0.55, 1.0, rOut / uLens.w) * uLens2.z;
+  float edge = smoothstep(0.75, 1.0, rOut / uLens.w) * uLens2.z;
   if (edge > 0.001) {
     vec3 e = texture2D(tMip1, uvG).rgb;
     col = mix(col, e, edge);

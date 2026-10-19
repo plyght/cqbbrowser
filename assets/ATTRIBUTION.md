@@ -33,9 +33,10 @@ Mono.
 
 ## Textures, models, HDRIs
 
-| Path                            | Source                                                                         | License | Set  |
-| ------------------------------- | ------------------------------------------------------------------------------ | ------- | ---- |
-| `public/assets/textures/*.webp` | https://polyhaven.com (per-texture sources in "Textures" detail section below) | CC0-1.0 | open |
+| Path                            | Source                                                                                                                                                                                                                      | License | Set  |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---- |
+| `public/assets/models/hands/*`  | Godot XR Tools hand models by DigitalN8m4r3 (Miodrag Sejic), made with MakeHuman CE — https://github.com/GodotVR/godot-xr-tools/tree/master/addons/godot-xr-tools/hands (glTF → GLB via gltf-transform, textures → 1K WebP) | CC0-1.0 | open |
+| `public/assets/textures/*.webp` | https://polyhaven.com (per-texture sources in "Textures" detail section below)                                                                                                                                              | CC0-1.0 | open |
 
 ## Audio (open set)
 
