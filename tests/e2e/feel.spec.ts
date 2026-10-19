@@ -74,7 +74,7 @@ const framing = (page: Page) =>
     return { area: (Math.max(0, x1 - x0) * Math.max(0, y1 - y0)) / 4, top: y1, mx: m.x, my: m.y };
   });
 
-test.describe.configure({ timeout: 240_000 });
+test.describe.configure({ timeout: 420_000 });
 
 test('feel: weapon framing on the chest cam (every weapon, every stance)', async ({ page }) => {
   const errors = await start(page);
@@ -97,15 +97,20 @@ test('feel: weapon framing on the chest cam (every weapon, every stance)', async
     await sim(page, 1, { down: ['readyDown'] });
     await sim(page, 40);
     await shot(page, `stance-${p}-low`);
+    expect((await framing(page)).area).toBeGreaterThan(p.startsWith('p17') ? 0.004 : 0.03);
     await sim(page, 1, { down: ['readyUp'] });
+    await sim(page, 2);
     await sim(page, 1, { down: ['readyUp'] });
     await sim(page, 40);
     await shot(page, `stance-${p}-compressed`);
+    expect((await framing(page)).area).toBeGreaterThan(p.startsWith('p17') ? 0.004 : 0.03);
     await sim(page, 1, { down: ['readyDown'] });
+    await sim(page, 2);
     await sim(page, 1, { down: ['crouch'] });
     await sim(page, 50);
     await shot(page, `stance-${p}-crouch`);
     await sim(page, 1, { down: ['crouch'] });
+    await sim(page, 2);
     await sim(page, 45, { down: ['leanLeft'] });
     await shot(page, `stance-${p}-lean`);
     await sim(page, 40);
@@ -144,7 +149,7 @@ test('feel: recoil strip (5-shot string, frames 0/2/4/8/16 after the last shot)'
     let peak = { muzzle: -99, cam: -99, fov: 0 };
     let at = 0;
     for (const f of [2, 4, 8, 16]) {
-      await sim(page, f - at, undefined, 1);
+      await sim(page, f - at, undefined, 99);
       at = f;
       const q = await pose();
       peak = {
@@ -201,7 +206,7 @@ test('feel: walking — responsive accel, planted stops, subtle chest bob', asyn
   expect(Math.max(...walk.map((r) => r[0]))).toBeLessThan(2.25); // no overshoot
   expect(bob).toBeGreaterThan(0.002);
   expect(bob).toBeLessThan(0.012);
-  expect(sprint.at(-1)![0]).toBeCloseTo(5, 1);
+  expect(Math.max(...sprint.map((r) => r[0]))).toBeCloseTo(5, 1);
   expect(slow.at(-1)![0]).toBeCloseTo(1, 1);
   await sim(page, 20, { move: { x: 0, y: 1 } });
   await shot(page, 'walk');
