@@ -37,7 +37,9 @@ import {
 } from './manifest';
 import { Mixer } from './Mixer';
 import { clamp, jitter, mulberry32, type Rng } from './rng';
-import { audioSettings, type AudioSettings, type ListeningMode } from './settings';
+import { registerSettings } from '../ui/settingsSchema';
+import { settings as store } from '../settings/Settings';
+import { AUDIO_SETTING_ENTRIES, audioSettings, type AudioSettings, type ListeningMode } from './settings';
 import * as synth from './synth';
 import { BANK } from './acoustics';
 
@@ -54,6 +56,8 @@ export interface AudioDeps {
   /** Skip persisted settings (offline renders). */
   settings?: Partial<AudioSettings>;
 }
+
+registerSettings(AUDIO_SETTING_ENTRIES);
 
 /** Rays cast per frame — 24 rays complete in 6 frames (100 ms at 60 fps). */
 const RAYS_PER_FRAME = 4;
@@ -140,6 +144,10 @@ export class AudioEngine {
       reg(`mech.${m}`, () => n(4, () => synth.mechanical(m, r, rng)));
     reg('pressure', () => [synth.pressurePulse(r)]);
     reg('crack', () => n(4, () => synth.crack(r, rng)));
+    reg('blast.body', () => n(4, () => synth.blastBody(r, rng)));
+    reg('hit.paper', () => n(4, () => synth.paperHit(r, rng)));
+    reg('hit.noshoot', () => n(3, () => synth.noShootHit(r, rng)));
+    reg('ui.tick', () => [synth.uiTick(r)]);
     reg('shot.thump', () => n(3, () => synth.shotThump(r, rng)));
     reg('steel.fall', () => n(3, () => synth.steelFallClank(r, rng)));
     reg('ricochet', () => n(4, () => synth.whizz(r, rng)));
@@ -280,12 +288,14 @@ export class AudioEngine {
     bus.on('camHand', (e) => this.camHand(e.active));
     bus.on('timerBeep', (e) => this.beep(e.kind));
     bus.on('impact', (e) => this.impact(e));
+    bus.on('targetHit', (e) => this.targetHit(e));
   }
 
   applySettings(s: AudioSettings) {
     this.settings = s;
     this.mixer.setLevels(s.master, s.sfx, s.ambience);
-    this.mixer.setArtifactLevel(s.micArtifacts);
+    // The settings screen's "Mic artifacts" slider writes `mic`; older saves use `micArtifacts`.
+    this.mixer.setArtifactLevel((s.mic as number | undefined) ?? s.micArtifacts);
     if (this.mixer.mode !== s.mode) this.mixer.setMode(s.mode);
   }
 
@@ -363,10 +373,11 @@ export class AudioEngine {
     if (mech) {
       const mj = jitter(this.rng, 0.03, 1.5);
       this.mixer.play(mech, {
-        at,
-        gain: (sup ? 0.5 : 0.3) * mj.gain,
+        at: at + 0.004,
+        gain: (sup ? 0.75 : 0.6) * mj.gain,
         rate: mj.rate,
-        room: 0.08,
+        hp: 350,
+        room: 0.03,
         bus: 'shot',
         prio: 3,
       });
@@ -385,9 +396,35 @@ export class AudioEngine {
         gain: (sup ? 0.6 : 1.9) * bc.gain * energy * j.gain,
         rate,
         presenceDb: sup ? 0 : bc.presenceDb,
-        send: sup ? 0.45 : 1,
+        send: sup ? 0.3 : 0.55,
         bus: 'shot',
         prio: 5,
+      });
+
+    // 2a. A second, different recording under the first: fills out the texture (no two shots identical),
+    // darker so it adds density rather than more crack.
+    const second = this.pickFirst(this.secondaryReports(prof.family, prof.report));
+    if (second && second !== report)
+      this.mixer.play(second, {
+        at: at + 0.0007,
+        gain: (sup ? 0.3 : 0.75) * bc.gain * energy,
+        rate: rate * 0.985,
+        lp: sup ? 2500 : 6500,
+        send: 0.25,
+        bus: 'shot',
+        prio: 4,
+      });
+
+    // 2d. Blast body: the 150–600 Hz "meat" between crack and thump.
+    const body = this.pick('blast.body');
+    if (body)
+      this.mixer.play(body, {
+        at,
+        gain: (sup ? 0.35 : 1.0) * energy * (1 + 0.4 * enc),
+        rate: prof.pitch * (0.97 + this.rng() * 0.06),
+        send: 0.2,
+        bus: 'shot',
+        prio: 4,
       });
 
     if (!sup) {
@@ -399,7 +436,7 @@ export class AudioEngine {
           at,
           gain: (0.9 + 0.6 * bc.harshness) * energy,
           rate: 0.97 + this.rng() * 0.06,
-          send: 0.3,
+          send: 0.1,
           bus: 'shot',
           prio: 5,
         });
@@ -426,7 +463,7 @@ export class AudioEngine {
         rate: 1 / (1 + 0.8 * enc * (1 - leak)),
         lp: 260,
         peak: [a.roomMode, 4 + 10 * a.bass, 1.5 + 8 * a.bass * (1 - leak)],
-        room: 0.25,
+        room: 0.1,
         bus: 'shot',
         prio: 4,
       });
@@ -445,7 +482,7 @@ export class AudioEngine {
         rate: rate * 0.97,
         lp: 2200,
         pan,
-        send: 0.5,
+        send: 0.3,
         bus: 'shot',
         prio: 2,
       });
@@ -462,6 +499,18 @@ export class AudioEngine {
 
     // Brass fallback until a physics brass system emits `brass` events.
     if (!this.brassSeen && !this.deps.ctx) this.autoBrass(e.weaponId, e.caliber, at);
+  }
+
+  /** Report pools to layer under the primary (a different recording of a similar gun). */
+  private secondaryReports(family: 'rifle' | 'pistol', primary: string) {
+    const pool =
+      family === 'pistol'
+        ? ['pistol9']
+        : primary === 'suppressed'
+          ? ['suppressed']
+          : ['rifle556.long', 'rifle762.short', 'rifle556.short'].filter((k) => k !== primary);
+    const i = Math.floor(this.rng() * pool.length);
+    return [...pool.slice(i), ...pool.slice(0, i)].map(KEYS.report);
   }
 
   /** A shot far away (neighbour bays): through air and berms, mostly echo. */
@@ -509,14 +558,16 @@ export class AudioEngine {
     const list = this.steelBuffers(e.size, e.thicknessMm, mount);
     const b = list[Math.floor(this.rng() * list.length)];
     const hit = clamp(0.35 + e.energy / 1600, 0.35, 1.3);
-    const dist = AudioEngine.dist(sp.d, 6);
+    // Floor so a 50 m plate still rings clearly over the shot that hit it.
+    const dist = Math.max(0.28, AudioEngine.dist(sp.d, 6));
     this.mixer.play(b, {
       at,
       gain: hit * dist * 1.1,
       rate: 1 + (this.rng() - 0.5) * 0.012,
       lp: Math.min(sp.lp, 5000 + e.energy * 6),
       pan: sp.pan,
-      send: 0.8,
+      send: 0.4,
+      bus: 'shot',
       prio: 3,
     });
     if (this.rng() < 0.4) {
@@ -553,6 +604,44 @@ export class AudioEngine {
       });
   }
 
+  /** Hit-confirm tick: the audio setting, or always with the Arcade realism preset. */
+  private hitTickOn() {
+    if (this.settings.hitTick) return true;
+    if (this.deps.settings) return false;
+    return store.ns('gameplay', { realism: 'standard' }).get().realism === 'arcade';
+  }
+
+  /**
+   * Target hit feedback (diegetic): paper "thwap" from the target, delayed by the speed of sound; no-shoots
+   * sound deader/lower. Steel already rings via steelHit. Rides the shot path so the post-shot AGC duck can't
+   * swallow it, with a distance floor so a 25 m hit is still clearly there.
+   */
+  targetHit(
+    e: Partial<GameEvents['targetHit']> & Pick<GameEvents['targetHit'], 'kind' | 'point'> & { at?: number },
+  ) {
+    const at0 = e.at ?? this.now();
+    const sp = this.spatial(e.point);
+    if (e.kind === 'paper') {
+      const b = this.pick(e.noShoot ? 'hit.noshoot' : 'hit.paper');
+      if (b)
+        this.mixer.play(b, {
+          at: at0 + sp.d / SPEED_OF_SOUND,
+          gain: 0.5 * Math.max(0.3, AudioEngine.dist(sp.d, 5)),
+          rate: 0.98 + this.rng() * 0.04,
+          lp: sp.lp,
+          pan: sp.pan,
+          send: 0.15,
+          bus: 'shot',
+          prio: 3,
+        });
+    }
+    if (this.hitTickOn()) {
+      const t = this.pick('ui.tick');
+      if (t)
+        this.mixer.play(t, { at: at0 + 0.03, gain: 0.25, rate: e.noShoot ? 0.7 : 1, bus: 'ui', prio: 4 });
+    }
+  }
+
   /** Paper "thup" + berm dirt for non-steel impacts (only near the listener's line of fire matters). */
   private impact(e: GameEvents['impact']) {
     if (e.surface === 'steel_target') return;
@@ -586,12 +675,12 @@ export class AudioEngine {
         gain: (0.12 + 0.05 * e.speed) * j.gain,
         rate: j.rate,
         pan,
-        room: 0.06,
+        room: 0.02,
         prio: 1,
       });
     if (e.scuff > 0.22) {
       const s = this.pick(`scuff.${cls}`);
-      if (s) this.mixer.play(s, { at: at + 0.02, gain: 0.2 * e.scuff, pan, room: 0.05, prio: 1 });
+      if (s) this.mixer.play(s, { at: at + 0.02, gain: 0.2 * e.scuff, pan, room: 0.015, prio: 1 });
     }
     // Heel strike through the chest rig → mic thump (harder when running).
     const t = this.pick('thump');
@@ -624,7 +713,7 @@ export class AudioEngine {
       rate: (kind === 'pistol' ? 1.2 : 1) * (0.97 + this.rng() * 0.06),
       lp: soft ? 3500 : sp.lp,
       pan: sp.pan,
-      room: 0.1,
+      room: 0.04,
       prio: 0,
     });
   }
@@ -654,7 +743,7 @@ export class AudioEngine {
         rate: 0.99 + this.rng() * 0.02,
         lp: e.polymer ? 7000 : undefined,
         pan: (this.rng() - 0.5) * 0.3,
-        room: 0.08,
+        room: 0.03,
         prio: 2,
       });
   }
@@ -680,18 +769,18 @@ export class AudioEngine {
         gain: 0.45 * (e.stressed ? 1.35 : 1) * j.gain,
         rate: j.rate,
         pan: 0.08,
-        room: 0.05,
+        room: 0.02,
         prio: 3,
       });
     if (e.beat === 'magCheck') {
       const c = this.pick(KEYS.cloth);
-      if (c) this.mixer.play(c, { at: at + 0.05, gain: 0.15, room: 0.03, prio: 1 });
+      if (c) this.mixer.play(c, { at: at + 0.05, gain: 0.15, room: 0.01, prio: 1 });
     }
   }
 
   dryFire(_weaponId: string, at = this.now()) {
     const b = this.pickFirst([KEYS.foley('any', 'dryFire'), KEYS.click, 'click.synth']);
-    if (b) this.mixer.play(b, { at, gain: 0.45, rate: 0.995 + this.rng() * 0.01, room: 0.04, prio: 3 });
+    if (b) this.mixer.play(b, { at, gain: 0.45, rate: 0.995 + this.rng() * 0.01, room: 0.015, prio: 3 });
   }
 
   camHand(active: boolean) {

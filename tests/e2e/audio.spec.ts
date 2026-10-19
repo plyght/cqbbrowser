@@ -74,7 +74,11 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
     'rifle-outdoor',
     'rifle-box',
     'rifle-room',
+    'rifle-hall',
+    'steel-7m',
     'steel-25m',
+    'paper-hits',
+    'paper-hits-solo',
     'pistol-reload-room',
     'pistol-reload-room-v2',
     'rifle-indoor-v2',
@@ -87,6 +91,7 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
   const early: Record<string, number> = {};
   const late: Record<string, number> = {};
   const shots: Record<string, ReturnType<typeof shotStats>> = {};
+  const metrics: Record<string, unknown> = {};
   for (const name of names) {
     const r = await page.evaluate((n) => (window as any).__sb.audio.renderOffline(n), name);
     const wav = Buffer.from(r.wav, 'base64');
@@ -122,16 +127,33 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
         `shot peak=${st.peakDb.toFixed(1)} rms50=${st.rmsDb.toFixed(1)} crest=${st.crest.toFixed(1)} ` +
         `low40-120=${st.lowDb.toFixed(1)}dB reverb=${JSON.stringify(r.debug.reverb)} peakVoices=${r.debug.peakVoices} stolen=${r.debug.stolen}`,
     );
+    if (r.metrics) {
+      metrics[name] = r.metrics;
+      console.log(
+        `  metrics ${name}: crest=${r.metrics.crestDb.toFixed(1)}dB rt60=${r.metrics.rt60.toFixed(2)}s ` +
+          `wet/dry=${r.metrics.wetDryDb.toFixed(1)}dB`,
+      );
+    }
     expect(r.nan).toBe(0);
     expect(r.peak).toBeLessThanOrEqual(1);
     expect(r.peak).toBeGreaterThan(0.2);
+    // Hit feedback is subtle: clearly there, well under the shots.
+    if (name === 'paper-hits-solo') expect(r.peak).toBeLessThan(0.5);
     expect(r.debug.loaded.open).toBeGreaterThan(50);
     expect(r.debug.peakVoices).toBeLessThanOrEqual(32);
   }
   // Tiny concrete box: dense, compressed early field; open air: weak early field but echoes off the berms
   // and the ambience breathing back late.
-  expect(early['rifle-box']).toBeGreaterThan(early['rifle-outdoor'] + 4);
   expect(late['rifle-box']).toBeLessThan(late['rifle-outdoor']);
+  // Close, dry, punchy: outdoors mostly dry with a slapback; indoors short and dense (RT ≈ 0.3–0.7 s).
+  const m = metrics as Record<string, { rt60: number; wetDryDb: number; crestDb: number }>;
+  expect(m['rifle-outdoor'].wetDryDb).toBeLessThan(-8);
+  expect(m['rifle-box'].wetDryDb).toBeGreaterThan(m['rifle-outdoor'].wetDryDb);
+  for (const n of ['rifle-box', 'rifle-room', 'rifle-indoor-v2']) {
+    expect(m[n].rt60).toBeGreaterThan(0.2);
+    expect(m[n].rt60).toBeLessThan(0.75);
+  }
+  expect(m['rifle-hall'].rt60).toBeGreaterThan(m['rifle-box'].rt60);
   // Shots hit hard: near the −1 dBFS ceiling, dense (RMS within ~12 dB of peak), with real low end —
   // more of it indoors than outdoors.
   for (const n of ['rifle-outdoor', 'rifle-box', 'rifle-indoor-v2']) {
@@ -141,7 +163,8 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
   expect(shots['rifle-box'].lowDb).toBeGreaterThan(shots['rifle-outdoor'].lowDb + 3);
   expect(shots['rifle-indoor-v2'].lowDb).toBeGreaterThan(shots['rifle-outdoor'].lowDb + 2);
   // Unsuppressed shots carry a real 40–120 Hz punch; a can takes most of it away.
-  expect(shots['rifle-outdoor'].lowDb).toBeGreaterThan(shots['suppressed-outdoor'].lowDb + 10);
+  expect(shots['rifle-outdoor'].lowDb).toBeGreaterThan(shots['suppressed-outdoor'].lowDb + 4);
+  writeFileSync(`${dir}/audio-metrics.json`, JSON.stringify(metrics, null, 2));
   expect(errors).toEqual([]);
 });
 

@@ -228,6 +228,74 @@ export function crack(rate: number, rng: Rng) {
   return normalisePeak(out, 0.95);
 }
 
+/**
+ * Round through a cardboard/paper target: a dry "thwap" (stiff sheet snapping: band-limited noise, ~25 ms) with
+ * a hollow cardboard knock under it.
+ */
+export function paperHit(rate: number, rng: Rng) {
+  const out = alloc(0.09, rate);
+  burst(out, rate, rng, { dur: 0.004, gain: 0.8, hp: 1800, attack: 0.0001 });
+  burst(out, rate, rng, { dur: 0.028, gain: 0.9, lp: 3800, hp: 700, attack: 0.0003 });
+  modal(
+    out,
+    rate,
+    [
+      [190 + rng() * 40, 0.55, 0.05],
+      [430 + rng() * 60, 0.3, 0.035],
+    ],
+    0.001,
+    rng,
+  );
+  return normalisePeak(out, 0.9);
+}
+
+/** No-shoot hit: the same paper punch but deader and lower (a different card stock / backer). */
+export function noShootHit(rate: number, rng: Rng) {
+  const out = alloc(0.12, rate);
+  burst(out, rate, rng, { dur: 0.035, gain: 0.8, lp: 1600, hp: 300, attack: 0.0004 });
+  modal(
+    out,
+    rate,
+    [
+      [118 + rng() * 15, 0.7, 0.08],
+      [265 + rng() * 20, 0.35, 0.05],
+    ],
+    0.001,
+    rng,
+  );
+  return normalisePeak(out, 0.9);
+}
+
+/** Optional hit-confirm tick (UI, not diegetic): short soft sine blip. */
+export function uiTick(rate: number, freq = 1750) {
+  const out = alloc(0.05, rate);
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate;
+    out[i] = Math.sin(TAU * freq * t) * Math.min(1, t / 0.002) * Math.exp(-t / 0.012);
+  }
+  return normalisePeak(out, 0.6);
+}
+
+/**
+ * Low-mid "meat" of a close blast (150–600 Hz): a short dense noise body with two damped resonances, so the
+ * report isn't just crack + sub. ~70 ms.
+ */
+export function blastBody(rate: number, rng: Rng) {
+  const out = alloc(0.11, rate);
+  burst(out, rate, rng, { dur: 0.07, gain: 1, lp: 650, hp: 140, attack: 0.0008 });
+  modal(
+    out,
+    rate,
+    [
+      [210 + rng() * 40, 0.5, 0.06],
+      [380 + rng() * 60, 0.35, 0.045],
+    ],
+    0.0005,
+    rng,
+  );
+  return normalisePeak(out, 0.9);
+}
+
 export type MechKind = 'ar' | 'ak' | 'pistol';
 
 /** Close, dry mechanical layer: bolt carrier / slide clacks, buffer spring twang. */
