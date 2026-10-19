@@ -516,7 +516,11 @@ export class WeaponCollision {
   }
 
   /** Union SDF at a weapon-frame point; `skip` excludes a group (e.g. the held mag), `only` keeps one. */
+  /** SDF evaluations so far (profiling). */
+  queries = 0;
+
   sdf(p: Vector3, skip?: Group | null, only?: Group | null, maxD = Infinity): number {
+    this.queries++;
     let best = maxD;
     this.hit = null;
     this.hitGroup = null;

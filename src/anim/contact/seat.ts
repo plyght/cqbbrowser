@@ -59,7 +59,7 @@ function samples(h: HandProxy): Pt[] {
       out.push({
         p: ph.a.clone().lerp(ph.b, i / 3),
         r: ph.r,
-        w: ph.j === 0 ? (ph.finger === 0 && i < 2 ? 1 : 0.5) : 0.1,
+        w: ph.j === 0 ? (ph.finger === 0 ? 1.5 : 0.5) : 0.1,
         palm: false,
         contact: false,
         wrapper: false,
@@ -77,10 +77,29 @@ function seatMatrix(x: number[], c: Vector3, out: Matrix4) {
   return out;
 }
 
-function cost(col: WeaponCollision, pts: Pt[], x: number[], c: Vector3): number {
-  seatMatrix(x, c, _mi).invert();
-  let s = 0,
-    palmGap = Infinity;
+/** Palm seat target: backstrap point + outward normal (weapon frame), palm contact point + palm normal. */
+export interface SeatAnchor {
+  b: Vector3;
+  nb: Vector3;
+  pc: Vector3;
+  pn: Vector3;
+}
+const _b = new Vector3();
+const _n = new Vector3();
+
+function cost(col: WeaponCollision, pts: Pt[], x: number[], c: Vector3, anchor?: SeatAnchor): number {
+  seatMatrix(x, c, _mi);
+  let s = 0;
+  if (anchor) {
+    // The palm sits on the backstrap (derived from the grip proxies), facing it.
+    _b.copy(anchor.b).applyMatrix4(_mi);
+    const dmm = _b.distanceTo(anchor.pc) * 1000;
+    s += 0.6 * dmm * dmm;
+    _n.copy(anchor.nb).transformDirection(_mi);
+    s += 400 * (1 + _n.dot(anchor.pn));
+  }
+  _mi.invert();
+  let palmGap = Infinity;
   for (const pt of pts) {
     _q.copy(pt.p).applyMatrix4(_mi);
     const d = col.sdf(_q, null, null, pt.r + 0.03) - pt.r;
@@ -94,29 +113,38 @@ function cost(col: WeaponCollision, pts: Pt[], x: number[], c: Vector3): number 
   }
   const g = Math.max(0, palmGap - 0.001) * 1000;
   s += 0.5 * g * g;
-  const t = Math.hypot(x[0], x[1], x[2]) * 100; // cm
   const a = Math.hypot(x[3], x[4], x[5]) * 10; // 0.1 rad
-  return s + 2 * t * t + 2 * a * a;
+  return s + 2 * a * a;
 }
 
-export function solveSeat(col: WeaponCollision, hand: HandProxy, pivot: Vector3, key: string): Matrix4 {
+export function solveSeat(
+  col: WeaponCollision,
+  hand: HandProxy,
+  pivot: Vector3,
+  key: string,
+  anchor?: SeatAnchor,
+): Matrix4 {
   const hit = SEATS.get(key);
   if (hit) return hit;
   const pts = samples(hand);
   // Samples the authored pose holds on (or in) a surface stay in contact: the seat moves the grip into the
   // authored wrap instead of pulling it out of the hand.
   for (const pt of pts) if (pt.wrapper && col.sdf(pt.p, null, null, 0.05) - pt.r < 0.012) pt.contact = true;
+  const lim = [0.04, 0.04, 0.04, 0.2, 0.12, 0.12];
   const x = [0, 0, 0, 0, 0, 0];
+  // Start with the backstrap under the palm.
+  if (anchor)
+    for (let k = 0; k < 3; k++)
+      x[k] = Math.max(-lim[k], Math.min(lim[k], anchor.pc.getComponent(k) - anchor.b.getComponent(k)));
   const steps = [0.006, 0.006, 0.006, 0.08, 0.05, 0.05];
-  const lim = [0.02, 0.04, 0.03, 0.1, 0.06, 0.06];
-  let best = cost(col, pts, x, pivot);
+  let best = cost(col, pts, x, pivot, anchor);
   for (let round = 0; round < 60; round++) {
     let improved = false;
     for (let k = 0; k < 6; k++)
       for (const sgn of [1, -1]) {
         const old = x[k];
         x[k] = Math.max(-lim[k], Math.min(lim[k], old + sgn * steps[k]));
-        const c = cost(col, pts, x, pivot);
+        const c = cost(col, pts, x, pivot, anchor);
         if (c < best - 1e-9) {
           best = c;
           improved = true;
@@ -133,7 +161,7 @@ export function solveSeat(col: WeaponCollision, hand: HandProxy, pivot: Vector3,
       key.slice(0, 6),
       x.map((v) => v.toFixed(3)).join(' '),
       'cost',
-      cost(col, pts, [0, 0, 0, 0, 0, 0], pivot).toFixed(0),
+      cost(col, pts, [0, 0, 0, 0, 0, 0], pivot, anchor).toFixed(0),
       '->',
       best.toFixed(0),
     );

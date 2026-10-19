@@ -744,6 +744,11 @@ export class ArmsRig {
   // ------------------------------------------------------------------------------------------ contact layer API
 
   /** 0..1: the gun rides the firing hand (1) or the rig (0) this frame. */
+  /** 0..1 trigger channel this frame (the shot layer pulls it). */
+  get triggerPull(): number {
+    return this.layer ? Math.max(0, Math.min(1, this.pose[this.layout.ch.trigger])) : 0;
+  }
+
   get gunOnHand(): number {
     return this.layer ? Math.max(0, Math.min(1, this.pose[this.layout.gunW])) : 1;
   }
@@ -785,15 +790,16 @@ export class ArmsRig {
   }
 
   /**
-   * Two-bone arm solve putting `side`'s wrist on `target` (world), keeping the hand's world rotation and the
-   * current elbow bend plane. Allocation-free.
+   * Two-bone arm solve putting `side`'s wrist on `target` (world), keeping the hand's world rotation (optionally
+   * turned by `turn`, world) and the current elbow bend plane. Allocation-free.
    */
-  reachHand(side: 'L' | 'R', target: Vector3): void {
+  reachHand(side: 'L' | 'R', target: Vector3, turn?: Quaternion): void {
     const hand = side === 'L' ? this.bones.handL : this.bones.handR;
     const fore = side === 'L' ? this.bones.foreArmL : this.bones.foreArmR;
     const arm = side === 'L' ? this.bones.armL : this.bones.armR;
     const r = this.reach;
     hand.getWorldQuaternion(r.hq);
+    if (turn) r.hq.premultiply(turn);
     arm.getWorldPosition(r.sh);
     fore.getWorldPosition(r.el);
     hand.getWorldPosition(r.wr);

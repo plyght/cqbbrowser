@@ -2,7 +2,7 @@ import { Matrix4, Quaternion, Vector3, type Bone } from 'three';
 import type { WeaponModel } from '../../weapons/models';
 import type { ArmsRig } from '../rig/ArmsRig';
 import { HandProxy, PALM, WRIST, type Side } from './handProxy';
-import { solveSeat } from './seat';
+import { solveSeat, type SeatAnchor } from './seat';
 import { WeaponCollision, collect, type Group } from './weaponCollision';
 
 /**
@@ -29,11 +29,11 @@ export interface Baked {
   dR: Float32Array;
   dL: Float32Array;
 }
-const BAKED = new Map<string, Baked>();
+const BAKED = new Map<string, Baked | null>();
 
 export const CONTACT = {
   /** Clearance the solver aims for (sampling margin), m. */
-  clear: 0.001,
+  clear: 0.0015,
   /** Wrap: curl a finger to contact when its gap is under `wrapIn`, release above `wrapOut`. */
   wrapIn: 0.012,
   wrapOut: 0.016,
@@ -60,6 +60,10 @@ interface ChainState {
   open: Float32Array; // eased opening per joint (rad)
   curl: Float32Array; // eased curl per joint (rad)
   wrap: boolean;
+  /** Index trigger curl (eased). */
+  trig: number;
+  /** Best-effort clearance when no opening clears (−1 = not stuck). */
+  stuck: number;
   intent: boolean;
 }
 
@@ -68,6 +72,7 @@ interface HandState {
   chains: ChainState[];
   push: Vector3; // eased translation (weapon frame)
   dir: number; // last separation direction (warm start)
+  dist?: number;
 }
 
 /** Critically damped ease of `x` toward `target` (scalar), time constant `tau`. */
@@ -82,6 +87,7 @@ const _d = new Vector3();
 const _ax = new Vector3();
 const _t = new Vector3();
 const _q = new Quaternion();
+const _m = new Matrix4();
 const _qw = new Quaternion();
 const _qb = new Quaternion();
 const _qp = new Quaternion();
@@ -127,8 +133,13 @@ export class HandContact {
   /** Baked grip of the current weapon (see `bakeGrip`). */
   bake: Baked | null = null;
   private baseD = [0, 0, 0];
-  private gunHint = { dir: 0 };
-  private heldHint = { dir: 0 };
+  private frame = 0;
+  /** Set by solveOpen's best-effort scan: the least penetration it reached (else NaN). */
+  private stuckGap = NaN;
+  /** Each hand's min finger clearance after its last finger solve (cheap residual check). */
+  private minGap = { R: 0, L: 0 };
+  private gunHint: { dir: number; dist?: number } = { dir: 0 };
+  private heldHint: { dir: number; dist?: number } = { dir: 0 };
 
   constructor(readonly rig: ArmsRig) {
     const bone = (n: string) => {
@@ -142,6 +153,8 @@ export class HandContact {
         open: new Float32Array(3),
         curl: new Float32Array(3),
         wrap: false,
+        trig: 0,
+        stuck: -1,
         intent: false,
       })),
       push: new Vector3(),
@@ -153,13 +166,70 @@ export class HandContact {
       if (!this.enabled || !this.seats || !this.ensure()) return null;
       const key = id + JSON.stringify(model.build);
       const hit = BAKED.get(key);
-      if (hit) {
+      if (hit !== undefined) {
         this.bake = hit;
-        return hit.seat;
+        return hit?.seat ?? null;
       }
-      this.bake = this.bakeGrip(model, key);
-      return this.bake.seat;
+      // Regression gate: the solved hold must score better than the raw clip (penetration + contact gaps at
+      // idle), else this weapon runs raw — logged, never shipped worse.
+      const raw = this.holdScore();
+      const baked = this.bakeGrip(model, key);
+      this.bake = baked;
+      for (let i = 0; i < 4; i++) {
+        rig.setGripSeat(baked.seat);
+        rig.update(0);
+        this.apply(1 / 60);
+      }
+      const solved = this.holdScore();
+      this.gate.set(key, { raw, solved });
+      if (solved > raw) {
+        console.warn(
+          `HandContact: ${id} solved hold (${solved.toFixed(1)}) worse than raw (${raw.toFixed(1)}) — raw`,
+        );
+        BAKED.set(key, null);
+        this.bake = null;
+        return null;
+      }
+      return baked.seat;
     };
+  }
+
+  /** Per weapon build: idle hold score raw vs solved (lower is better; see `holdScore`). */
+  readonly gate = new Map<string, { raw: number; solved: number }>();
+
+  /**
+   * Hold quality at the current pose, mm: worst penetration of either hand (×2) + firing palm gap to the
+   * grip + mean firing middle/ring/pinky gap (each clamped to 30 mm).
+   */
+  holdScore(): number {
+    this.sync();
+    const col = this.col!;
+    let pen = 0;
+    for (const side of ['R', 'L'] as const) {
+      const h = this.hands[side].proxy;
+      this.selectHand(h);
+      pen = Math.max(pen, this.bodyPen(h, null, null, null, _pos));
+      for (const ph of h.phalanges) pen = Math.max(pen, this.capsulePen(ph.a, ph.b, ph.r, null, 5));
+      col.unselect();
+    }
+    const R = this.hands.R.proxy;
+    this.selectHand(R);
+    let palm = Infinity;
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 3; j++) {
+        _p.set((j - 1) * (R.palmHalf.x - PALM.halfN), 0, (i - 1) * (R.palmHalf.z - PALM.halfN)).applyMatrix4(
+          R.palm,
+        );
+        palm = Math.min(palm, col.sdf(_p, null, null, 0.05) - PALM.halfN);
+      }
+    let fing = 0;
+    for (let f = 2; f < 5; f++) {
+      let g = Infinity;
+      for (const ph of R.chains[f]) g = Math.min(g, -this.capsulePen(ph.a, ph.b, ph.r, null, 5));
+      fing += Math.min(0.03, Math.max(0, g)) / 3;
+    }
+    col.unselect();
+    return (2 * Math.max(0, pen) + Math.min(0.03, Math.max(0, palm)) + fing) * 1000;
   }
 
   /** Solve a per-weapon grip seat on attach (see seat.ts). */
@@ -228,7 +298,8 @@ export class HandContact {
     if (!this.sync()) return;
     // Wrap intent from the authored pose (before any correction moves the hands): fingers the clip puts on
     // (or into) a surface mean to hold it, so they re-close to contact after the hand is pushed out.
-    for (const side of ['R', 'L'] as const) {
+    // Re-evaluated every 4th frame (intent changes slowly; hysteresis covers the lag).
+    for (const side of this.frame++ % 4 === 0 ? (['R', 'L'] as const) : ([] as const)) {
       const h = this.hands[side].proxy;
       this.selectHand(h);
       for (let fi = 0; fi < 5; fi++) {
@@ -258,7 +329,8 @@ export class HandContact {
     this.fingers('R', dt);
     // Firing-hand residual (e.g. the thumb against a stock during an inspect): the gun gives way (on the hand)
     // or the hand backs off by IK (off the grip), then the fingers re-solve.
-    for (let it = 0; it < 2; it++) {
+    for (let it = 0; it < 1; it++) {
+      if (this.minGap.R >= -0.001) break;
       const pen = this.fingerResidual('R', _pos);
       if (pen <= 0.001) break;
       this.col!.gradient(_pos, _g, this.col!.hand ?? null);
@@ -308,7 +380,8 @@ export class HandContact {
     this.fingers('L', dt);
     // Support-hand fingers that no joint motion clears (a tip deep in a surface): the hand backs off along the
     // surface normal by the residual (two-bone IK), then the fingers re-solve. Twice at most.
-    for (let it = 0; it < 2; it++) {
+    for (let it = 0; it < 1; it++) {
+      if (this.minGap.L >= -0.001) break;
       const pen = this.fingerResidual('L', _pos);
       if (pen <= 0.001) break;
       this.col!.gradient(_pos, _g, null);
@@ -335,7 +408,7 @@ export class HandContact {
     const gr = model.sockets.gripRight;
     const pivot = gr ? gr.getWorldPosition(new Vector3()).applyMatrix4(this.toWeapon) : new Vector3();
     this.col!.mute = this.col!.hand ?? null;
-    const seat = solveSeat(this.col!, this.hands.R.proxy, pivot, key);
+    const seat = solveSeat(this.col!, this.hands.R.proxy, pivot, key, this.backstrap() ?? undefined);
     this.col!.mute = null;
     const rig = this.rig;
     rig.setGripSeat(seat);
@@ -366,12 +439,42 @@ export class HandContact {
     return baked;
   }
 
+  /**
+   * Grip socket from the grip proxies themselves: the back face of the grip slice nearest the firing palm
+   * (backstrap, outward normal) and the palm's contact point / normal.
+   */
+  private backstrap(): SeatAnchor | null {
+    const col = this.col!;
+    const R = this.hands.R.proxy;
+    const pc = new Vector3().setFromMatrixPosition(R.palm).addScaledVector(R.normal, PALM.halfN + 0.0015);
+    let best: SeatAnchor | null = null,
+      bd = Infinity;
+    for (const g of col.groups) {
+      if (g.obj) continue;
+      for (const sh of g.shapes) {
+        if (sh.kind !== 'box' || sh.name !== 'grip') continue;
+        _m.copy(sh.inv).invert();
+        const nb = new Vector3().setFromMatrixColumn(_m, 2).normalize();
+        const b = new Vector3().setFromMatrixPosition(_m).addScaledVector(nb, sh.half.z);
+        const d = b.distanceTo(pc);
+        if (d < bd) {
+          bd = d;
+          best = { b, nb, pc, pn: R.normal.clone() };
+        }
+      }
+    }
+    return best;
+  }
+
   // ------------------------------------------------------------------------------------------ measurement
 
   /** Penetration (m, > 0 = inside) of a sphere at weapon-frame `p` with radius `r`. */
   pen(p: Vector3, r: number, skip: Group | null): number {
-    return r - this.col!.sdf(p, skip, null, r + 0.02);
+    return r - this.col!.sdf(p, skip, this.onlyGroup, r + 0.02);
   }
+
+  /** Restricts finger queries to one group (the trigger, for the index pad). */
+  private onlyGroup: Group | null = null;
 
   /** Deepest penetration of a capsule (sampled `n` points). Leaves the deepest point in `at`. */
   capsulePen(a: Vector3, b: Vector3, r: number, skip: Group | null, n = SEG_N, at?: Vector3): number {
@@ -422,7 +525,8 @@ export class HandContact {
       sph(h.chains[f][0].r);
     }
     const t = h.chains[0][0];
-    for (let i = 0; i < 3; i++) {
+    // Firing hand: the thenar moves with the thumb (its synergy), never the gun.
+    for (let i = 0; i < (h.side === 'L' ? 3 : 0); i++) {
       _p.lerpVectors(t.a, t.b, i * 0.2);
       sph(t.r);
     }
@@ -448,24 +552,58 @@ export class HandContact {
    * normal (the way a hand comes off a handguard or grip, never sideways through it), bisected to the
    * smallest clearing distance; else min-translation steps along the SDF gradient.
    */
+  /** Candidate separation direction k (0–4): off the palm, tilted toward wrist / fingers / sides. */
+  private palmDir(h: HandProxy, k: number, out: Vector3): Vector3 {
+    out.copy(h.normal).negate();
+    if (k === 1) out.addScaledVector(h.along, -0.6);
+    else if (k === 2) out.addScaledVector(h.along, 0.6);
+    else if (k === 3) out.addScaledVector(h.across, 0.6);
+    else if (k === 4) out.addScaledVector(h.across, -0.6);
+    return out.normalize();
+  }
+
   private separate(
     h: HandProxy,
     skip: Group | null,
     max: number,
     out: Vector3,
-    hint: { dir: number },
+    hint: { dir: number; dist?: number },
   ): Vector3 {
     out.set(0, 0, 0);
     const pen0 = this.bodyPen(h, skip, null, null, _pos);
-    if (pen0 <= 0) return out;
+    if (pen0 <= 0) {
+      hint.dist = 0;
+      return out;
+    }
+    // Warm start: last frame's direction and distance still clear, and 1.5 mm less doesn't → keep (2 evals).
+    const hd = hint.dist ?? 0;
+    if (hd > 0 && hint.dir < 5) {
+      this.palmDir(h, hint.dir, _ax);
+      _d.copy(_ax).multiplyScalar(hd);
+      const clears = this.bodyPen(h, skip, null, _d, _pos) <= 0;
+      if (clears) {
+        _d.copy(_ax).multiplyScalar(Math.max(0, hd - 0.0015));
+        if (this.bodyPen(h, skip, null, _d, _pos) > 0) return out.copy(_ax).multiplyScalar(hd);
+      }
+      // Same direction, re-bracketed: shrink toward 0 if it over-clears, grow toward `max` if it no longer does.
+      let lo = clears ? 0 : hd,
+        hi = clears ? hd : max;
+      _d.copy(_ax).multiplyScalar(hi);
+      if (clears || this.bodyPen(h, skip, null, _d, _pos) <= 0) {
+        for (let i = 0; i < 5; i++) {
+          const mid = (lo + hi) / 2;
+          _d.copy(_ax).multiplyScalar(mid);
+          if (this.bodyPen(h, skip, null, _d, _pos) <= 0) hi = mid;
+          else lo = mid;
+        }
+        hint.dist = hi + CONTACT.clear * 0.5;
+        return out.copy(_ax).multiplyScalar(hint.dist);
+      }
+    }
     // Candidate directions: straight off the palm, off the palm tilted toward the wrist / fingers / sides,
     // and the SDF gradient at the deepest sample. Shortest clearing distance wins.
     this.col!.gradient(_pos, _g, skip);
-    DIRS[0].copy(h.normal).negate();
-    DIRS[1].copy(h.normal).negate().addScaledVector(h.along, -0.6).normalize();
-    DIRS[2].copy(h.normal).negate().addScaledVector(h.along, 0.6).normalize();
-    DIRS[3].copy(h.normal).negate().addScaledVector(h.across, 0.6).normalize();
-    DIRS[4].copy(h.normal).negate().addScaledVector(h.across, -0.6).normalize();
+    for (let k = 0; k < 5; k++) this.palmDir(h, k, DIRS[k]);
     DIRS[5].copy(_g);
     let best = Infinity;
     for (let kk = 0; kk < DIRS.length; kk++) {
@@ -488,6 +626,7 @@ export class HandContact {
         best = hi;
         out.copy(dir).multiplyScalar(hi + CONTACT.clear);
         hint.dir = k;
+        hint.dist = hi + CONTACT.clear;
         if (kk === 0) break;
       }
     }
@@ -690,6 +829,8 @@ export class HandContact {
     if (hold) {
       const step = 0.03;
       const frozen = [false, false, false];
+      const start = [d[0], d[1], d[2]];
+      let touched = false;
       // Joint ranges relative to the clip (keeps every joint inside its anatomical range: no PIP kink).
       const lim = [-0.6, -1.2, -1.0];
       for (let it = 0; it < 80 && !(frozen[0] && frozen[1] && frozen[2]); it++) {
@@ -713,10 +854,13 @@ export class HandContact {
             d[2] = keep[2];
             d[j] += step;
             frozen[j] = true;
+            touched = true;
           } else moved = true;
         }
         if (!moved) break;
       }
+      // Nothing to wrap within the joint ranges: keep the clip's curl (never close a fist on air).
+      if (!touched || chainGap() > 0.003) for (let j = 0; j < 3; j++) d[j] = start[j];
     }
     // Trigger discipline: the firing index lies straight along the frame — the knuckle-led synergy closes it
     // onto the receiver side until it touches (≤ 1 mm), joints stay straight.
@@ -788,6 +932,7 @@ export class HandContact {
         out = o;
       }
     }
+    this.stuckGap = best;
     return out;
   }
 
@@ -814,6 +959,7 @@ export class HandContact {
     const w =
       side === 'R' ? this.rig.gunOnHand : Math.min(1, Math.max(0, this.rig.anchorWeight('L', 'grip')));
     this.selectHand(h);
+    let minG = Infinity;
     for (let fi = 0; fi < 5; fi++) {
       const cs = hs.chains[fi];
       // Baked grip pose blended in by the hold weight; the solve below is the residual on top of it.
@@ -823,31 +969,67 @@ export class HandContact {
       const maxO = fi === 0 ? 0.9 : CONTACT.maxOpen;
       // Wrap intent (from the authored pose; not the trigger finger, not the thumb).
       cs.wrap = fi !== 0 && !(firing && fi === 1) && cs.intent;
-      // 1. Open on penetration: hard (at once); releases ease out.
-      let open = 0;
-      if (this.synergy(h, fi, 0, 0, skip) < CONTACT.clear * 0.5)
-        open = this.solveOpen(h, fi, skip, maxO, cs.open[0]);
-      const prev = cs.open[0];
-      cs.open[0] =
-        open >= 0
-          ? Math.max(open, prev > 0 ? ease(prev, open, dt) : 0)
-          : Math.min(open, prev < 0 ? ease(prev, open, dt) : 0);
-      if (Math.abs(cs.open[0]) < 1e-5) cs.open[0] = 0;
-      // 2. Wrap: curl the middle/tip joints to the first touch (eased in), never into a surface.
-      const curlT = cs.wrap ? this.solveCurl(h, fi, cs.open[0], skip, CONTACT.touch) : 0;
-      cs.curl[0] = ease(cs.curl[0], curlT, dt);
-      if (cs.curl[0] > 1e-4 && this.synergy(h, fi, cs.open[0], -cs.curl[0], skip) < CONTACT.clear * 0.5)
-        cs.curl[0] = this.solveCurl(h, fi, cs.open[0], skip, CONTACT.clear * 0.5);
-      if (cs.curl[0] < 1e-5) cs.curl[0] = 0;
+      // Steady state (one evaluation): last frame's correction still clears and, when wrapping, still touches —
+      // keep it. Most hold frames end here.
+      const gPrev = this.synergy(h, fi, cs.open[0], -cs.curl[0], skip);
+      const idle = cs.open[0] === 0 && cs.curl[0] === 0;
+      // A finger nothing clears (best effort last frame) stays put while that is still as good as it gets.
+      const stuck = cs.stuck > -1 && gPrev >= cs.stuck - 0.0005 && gPrev < CONTACT.clear * 0.5;
+      const steady =
+        stuck ||
+        (gPrev >= CONTACT.clear * 0.5 &&
+          (cs.wrap ? gPrev <= CONTACT.touch + 0.002 || (idle && gPrev > CONTACT.wrapOut) : idle));
+      if (!steady) {
+        // 1. Open on penetration: hard (at once); releases ease out.
+        let open = 0;
+        this.stuckGap = NaN;
+        if (this.synergy(h, fi, 0, 0, skip) < CONTACT.clear * 0.5)
+          open = this.solveOpen(h, fi, skip, maxO, cs.open[0]);
+        cs.stuck = Number.isNaN(this.stuckGap) ? -1 : this.stuckGap;
+        const prev = cs.open[0];
+        cs.open[0] =
+          open >= 0
+            ? Math.max(open, prev > 0 ? ease(prev, open, dt) : 0)
+            : Math.min(open, prev < 0 ? ease(prev, open, dt) : 0);
+        if (Math.abs(cs.open[0]) < 1e-5) cs.open[0] = 0;
+        // 2. Wrap: curl the middle/tip joints to the first touch (eased in), never into a surface.
+        const curlT = cs.wrap ? this.solveCurl(h, fi, cs.open[0], skip, CONTACT.touch) : 0;
+        cs.curl[0] = ease(cs.curl[0], curlT, dt);
+        if (cs.curl[0] > 1e-4 && this.synergy(h, fi, cs.open[0], -cs.curl[0], skip) < CONTACT.clear * 0.5)
+          cs.curl[0] = this.solveCurl(h, fi, cs.open[0], skip, CONTACT.clear * 0.5);
+        if (cs.curl[0] < 1e-5) cs.curl[0] = 0;
+      }
+      // Index on the trigger while firing (fire state = the trigger channel): its pad curls onto the trigger
+      // blade (first touch), eased in/out; at rest it lies along the frame (baked).
+      if (firing && fi === 1) {
+        const pull = this.rig.triggerPull;
+        const trig = this.col!.groups.find((g) => g.part === 'trigger') ?? null;
+        let k = 0;
+        if (pull > 0.02 && trig) {
+          this.onlyGroup = trig;
+          k = this.solveCurl(h, fi, cs.open[0], null, CONTACT.touch);
+          this.onlyGroup = null;
+        }
+        cs.trig = ease(cs.trig, k * Math.min(1, pull * 4), dt);
+        if (
+          cs.trig > 1e-4 &&
+          this.synergy(h, fi, cs.open[0], -(cs.curl[0] + cs.trig), skip) >= CONTACT.clear * 0.5
+        )
+          cs.curl[0] = Math.max(cs.curl[0], cs.trig);
+      }
       if (
         cs.open[0] === 0 &&
         cs.curl[0] === 0 &&
         this.baseD[0] === 0 &&
         this.baseD[1] === 0 &&
         this.baseD[2] === 0
-      )
+      ) {
+        minG = Math.min(minG, gPrev);
         continue;
-      this.synergy(h, fi, cs.open[0], -cs.curl[0], skip);
+      }
+      // Steady: the pose from `gPrev` is the final one (no re-evaluation).
+      const reuse = steady && !(firing && fi === 1);
+      minG = Math.min(minG, reuse ? gPrev : this.synergy(h, fi, cs.open[0], -cs.curl[0], skip));
       const chain = h.chains[fi];
       for (let j = 0; j < 3; j++) {
         if (Math.abs(ANG[j]) < 1e-6) continue;
@@ -861,6 +1043,7 @@ export class HandContact {
     }
     this.col!.unselect();
     this.baseD.fill(0);
+    this.minGap[side] = minG;
   }
 
   /** Apply a weapon-frame rotation (about `_ax`, `ang`) to a bone's world orientation; update its subtree. */

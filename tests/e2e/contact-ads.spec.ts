@@ -63,15 +63,17 @@ test('ADS evidence sheets: first person + left + below/front, raw vs contact', a
   for (const w of WEAPONS) {
     await rigTile(p2, w, 'at=grip&az=90&el=5&dist=0.45', `${dir}/contact-ads-${w}-left.png`);
     await rigTile(p2, w, 'at=grip&az=-30&el=-45&dist=0.45', `${dir}/contact-ads-${w}-below.png`);
-    await p2.setViewportSize({ width: 1280, height: 1140 });
+    await rigTile(p2, w, 'at=support&az=60&el=25&dist=0.45', `${dir}/contact-ads-${w}-support.png`);
+    await p2.setViewportSize({ width: 1280, height: 1700 });
     await p2.setContent(
       `<body style="margin:0;background:#111;color:#fff;font:14px monospace">
-        <div style="padding:4px">${w} ADS — row 1: first person raw | contact · row 2: left raw | contact · row 3: below/front raw | contact</div>
+        <div style="padding:4px">${w} ADS — row 1: first person raw | contact · row 2: left raw | contact · row 3: below/front raw | contact · row 4: support hand raw | contact</div>
         <img src="${b64(`${dir}/contact-ads-${w}-fp-raw.png`)}" width="640"><img src="${b64(`${dir}/contact-ads-${w}-fp-contact.png`)}" width="640">
         <img src="${b64(`${dir}/contact-ads-${w}-left.png`)}" width="1280">
         <img src="${b64(`${dir}/contact-ads-${w}-below.png`)}" width="1280">
+        <img src="${b64(`${dir}/contact-ads-${w}-support.png`)}" width="1280">
       </body>`,
     );
-    await p2.screenshot({ path: `${dir}/contact-ads-${w}.png`, fullPage: true });
+    await p2.screenshot({ path: `${dir}/contact-ads-${w}-v2.png`, fullPage: true });
   }
 });
