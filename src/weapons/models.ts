@@ -4,14 +4,21 @@ import {
   Group,
   Mesh,
   MeshStandardMaterial,
+  Object3D,
   type BufferGeometry,
   type Material,
 } from 'three';
 
 /**
  * Placeholder procedural weapon models built from primitives with named parts
- * (`mag`, `bolt`, `slide`, `muzzle`, `sight`) so animation can address them.
+ * (`mag`, `bolt`, `slide`, `chargingHandle`, `muzzle`, `optic`) so animation can address them.
  * Coordinates: -z is forward (muzzle), origin at the grip/trigger, y up. Metres.
+ *
+ * Hand/handling sockets (empty Object3Ds, position only — orientation is ignored by the hand rig):
+ * - `gripRight`, `gripLeft`: grasp centres, i.e. the axis the closed hand wraps around (pistol grip centre,
+ *   handguard centreline where the support hand sits; on pistols `gripLeft` is the support hand's wrap point).
+ * - `magwell`: mouth of the well = top of the seated mag. `chargingHandle`: the T-handle. `boltCatch`: paddle.
+ * - `slideRear`: rear of the slide (overhand rack). `muzzle` / `optic` as named parts.
  */
 const mats = {
   black: new MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.55, metalness: 0.45 }),
@@ -44,6 +51,13 @@ function cyl(r: number, len: number, m: Material, x = 0, y = 0, z = 0, name?: st
   return mesh;
 }
 
+function socket(name: string, x: number, y: number, z: number): Object3D {
+  const o = new Object3D();
+  o.name = name;
+  o.position.set(x, y, z);
+  return o;
+}
+
 function group(name: string, ...children: Mesh[]): Group {
   const g = new Group();
   g.name = name;
@@ -74,10 +88,23 @@ function arBase(barrel: number, fde = false, suppressor = 0): WeaponModel {
   else root.add(cyl(0.012, 0.05, mats.black, 0, 0.03, -0.16 - barrel - 0.025, 'muzzle'));
   root.add(group('mag', box(0.026, 0.13, 0.065, mats.polymer, 0, -0.08, -0.06)));
   root.add(group('bolt', box(0.006, 0.012, 0.03, mats.steel, 0.028, 0.035, 0.0)));
+  const ch = group(
+    'chargingHandle',
+    box(0.034, 0.008, 0.016, mats.black, 0, 0, 0),
+    box(0.012, 0.01, 0.012, mats.black, -0.018, 0, 0.002),
+  );
+  ch.position.set(0, 0.052, 0.098);
+  root.add(ch);
+  root.add(
+    socket('gripRight', 0, -0.04, 0.042),
+    socket('gripLeft', 0, 0.03, -0.16 - barrel * 0.38),
+    socket('magwell', 0, -0.015, -0.06),
+    socket('boltCatch', -0.027, 0.005, -0.02),
+  );
   // Red dot
   root.add(
     group(
-      'sight',
+      'optic',
       box(0.032, 0.022, 0.05, mats.black, 0, 0.075, -0.04),
       box(0.028, 0.03, 0.004, mats.glass, 0, 0.092, -0.06),
     ),
@@ -98,7 +125,15 @@ function ak(): WeaponModel {
   mag.rotation.x = -0.35;
   root.add(group('mag', mag));
   root.add(group('bolt', box(0.012, 0.012, 0.03, mats.steel, 0.032, 0.04, -0.02)));
-  root.add(group('sight', box(0.01, 0.025, 0.01, mats.steel, 0, 0.06, -0.48)));
+  root.add(group('optic', box(0.01, 0.025, 0.01, mats.steel, 0, 0.06, -0.48)));
+  const ch = group('chargingHandle', box(0.02, 0.01, 0.01, mats.steel, 0.01, 0, 0));
+  ch.position.set(0.03, 0.045, 0.0);
+  root.add(ch);
+  root.add(
+    socket('gripRight', 0, -0.04, 0.052),
+    socket('gripLeft', 0, 0.02, -0.3),
+    socket('magwell', 0, -0.015, -0.07),
+  );
   return { root, muzzleZ: -0.55, sightY: 0.07 };
 }
 
@@ -113,6 +148,12 @@ function pistol(): WeaponModel {
   root.add(group('mag', box(0.024, 0.1, 0.04, mats.polymer, 0, -0.055, 0.005)));
   root.add(box(0.004, 0.006, 0.004, mats.steel, 0, 0.05, -0.16)); // front sight
   root.add(box(0.012, 0.004, 0.0005, mats.black, 0, 0.0001, -0.165, 'muzzle'));
+  root.add(
+    socket('gripRight', 0, -0.04, 0.012),
+    socket('gripLeft', -0.022, -0.052, 0.0),
+    socket('magwell', 0, -0.105, 0.005),
+    socket('slideRear', 0, 0.03, 0.022),
+  );
   return { root, muzzleZ: -0.165, sightY: 0.052 };
 }
 
