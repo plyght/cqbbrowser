@@ -443,6 +443,49 @@ export class WeaponCollision {
     }
   }
 
+  /**
+   * Hand↔hand: the firing hand as an obstacle group (15 phalanx capsules + the palm box, weapon frame), so the
+   * support hand yields to it. Created on first use; `setHand` refreshes it, `hand.enabled` toggles it.
+   */
+  hand?: Group;
+
+  setHand(
+    caps: { a: Vector3; b: Vector3; r: number }[],
+    palm: Matrix4,
+    palmInv: Matrix4,
+    half: Vector3,
+    r: number,
+  ) {
+    let g = this.hand;
+    if (!g) {
+      const shapes: Shape[] = caps.map((c, i) => capsule(`R.finger${i}`, c.a, c.b, c.r));
+      shapes.push(box('R.palm', palm, half, r));
+      g = {
+        name: 'hand',
+        shapes,
+        aabb: new Float64Array(shapes.length * 6),
+        toLocal: new Matrix4(),
+        enabled: true,
+        cand: new Int32Array(shapes.length),
+        nCand: 0,
+      };
+      this.groups.push(g);
+      this.hand = g;
+    }
+    for (let i = 0; i < caps.length; i++) {
+      const s = g.shapes[i] as Extract<Shape, { kind: 'capsule' }>;
+      s.a.copy(caps[i].a);
+      s.b.copy(caps[i].b);
+      s.r = caps[i].r;
+    }
+    const pb = g.shapes[caps.length] as Extract<Shape, { kind: 'box' }>;
+    pb.inv.copy(palmInv);
+    pb.half.copy(half);
+    pb.r = r;
+    g.shapes.forEach((s, i) => shapeAabb(s, g.aabb, i * 6));
+    void palm;
+  }
+
   private sel = false;
 
   /**
@@ -469,6 +512,7 @@ export class WeaponCollision {
 
   unselect() {
     this.sel = false;
+    this.mute = null;
   }
 
   /** Union SDF at a weapon-frame point; `skip` excludes a group (e.g. the held mag), `only` keeps one. */

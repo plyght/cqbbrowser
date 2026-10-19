@@ -92,9 +92,10 @@ export class ContactOverlay {
     this.hot.clear();
     this.worst = 0;
     let n = 0;
+    let skip: typeof col.hand | null = null;
     const put = (p: Vector3, r: number) => {
       if (n >= MAXS) return;
-      const d = col.sdf(p) - r;
+      const d = col.sdf(p, skip) - r;
       if (d < 0 && col.hit) this.hot.add(col.hit);
       this.worst = Math.max(this.worst, -d);
       _c.copy(d < -0.001 ? RED : d < 0.001 ? YELLOW : d < 0.003 ? GREEN : GREY);
@@ -105,6 +106,7 @@ export class ContactOverlay {
     };
     for (const s of ['R', 'L'] as const) {
       const h = c.hands[s].proxy;
+      skip = s === 'R' ? (col.hand ?? null) : null;
       for (const ph of h.phalanges) for (let i = 0; i < 3; i++) put(_p.lerpVectors(ph.a, ph.b, i / 2), ph.r);
       const r = PALM.halfN;
       const hx = h.palmHalf.x - r,

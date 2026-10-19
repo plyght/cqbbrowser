@@ -214,6 +214,7 @@ export class HandContact {
     this.toWeapon.copy(this.model!.root.matrixWorld).invert();
     this.hands.R.proxy.update(this.toWeapon);
     this.hands.L.proxy.update(this.toWeapon);
+    this.handShape();
     const ms = this.rig.magState(0);
     this.skipL = ms.held > 0.5 ? (col.mag ?? null) : null;
     return true;
@@ -251,6 +252,32 @@ export class HandContact {
     // 1. Firing palm → gun offset.
     if (onHand) this.firingPalm(dt);
     else this.gunOff.set(0, 0, 0);
+    // Firing-hand fingers first: the support hand then yields to the final firing hand (hand↔hand).
+    this.hands.L.proxy.update(this.toWeapon);
+    this.hands.R.proxy.update(this.toWeapon);
+    this.fingers('R', dt);
+    // Firing-hand residual (e.g. the thumb against a stock during an inspect): the gun gives way (on the hand)
+    // or the hand backs off by IK (off the grip), then the fingers re-solve.
+    for (let it = 0; it < 2; it++) {
+      const pen = this.fingerResidual('R', _pos);
+      if (pen <= 0.001) break;
+      this.col!.gradient(_pos, _g, this.col!.hand ?? null);
+      const amt = Math.min(pen + CONTACT.clear, 0.012);
+      if (onHand) {
+        _d.copy(_g).multiplyScalar(-amt);
+        rig.offsetGun(_d);
+        col.update();
+        this.toWeapon.copy(this.model!.root.matrixWorld).invert();
+        this.hands.L.proxy.update(this.toWeapon);
+      } else {
+        _d.copy(_g).transformDirection(this.model!.root.matrixWorld).multiplyScalar(amt);
+        rig.bones.handR.getWorldPosition(_p2).add(_d);
+        rig.reachHand('R', _p2);
+      }
+      this.hands.R.proxy.update(this.toWeapon);
+      this.fingers('R', 0);
+    }
+    this.handShape();
     // 2. Support hand: the baked hold offset (two-bone IK, weighted by the handguard contact), then the
     // residual push of both free hands.
     const bake = this.bake;
@@ -275,31 +302,9 @@ export class HandContact {
     if (this.skipL) this.pushHand('L', dt, true);
     else this.heldPush.set(0, 0, 0);
     lap(2);
-    // 4. Fingers.
+    // 4. Support-hand fingers (the firing hand is already final: hand↔hand obstacle).
     this.hands.L.proxy.update(this.toWeapon);
-    this.hands.R.proxy.update(this.toWeapon);
-    this.fingers('R', dt);
-    // Firing-hand residual (e.g. the thumb against a stock during an inspect): the gun gives way (on the hand)
-    // or the hand backs off by IK (off the grip), then the fingers re-solve.
-    for (let it = 0; it < 2; it++) {
-      const pen = this.fingerResidual('R', _pos);
-      if (pen <= 0.001) break;
-      this.col!.gradient(_pos, _g, null);
-      const amt = Math.min(pen + CONTACT.clear, 0.012);
-      if (onHand) {
-        _d.copy(_g).multiplyScalar(-amt);
-        rig.offsetGun(_d);
-        col.update();
-        this.toWeapon.copy(this.model!.root.matrixWorld).invert();
-        this.hands.L.proxy.update(this.toWeapon);
-      } else {
-        _d.copy(_g).transformDirection(this.model!.root.matrixWorld).multiplyScalar(amt);
-        rig.bones.handR.getWorldPosition(_p2).add(_d);
-        rig.reachHand('R', _p2);
-      }
-      this.hands.R.proxy.update(this.toWeapon);
-      this.fingers('R', 0);
-    }
+    this.handShape();
     this.fingers('L', dt);
     // Support-hand fingers that no joint motion clears (a tip deep in a surface): the hand backs off along the
     // surface normal by the residual (two-bone IK), then the fingers re-solve. Twice at most.
@@ -329,7 +334,9 @@ export class HandContact {
     this.sync();
     const gr = model.sockets.gripRight;
     const pivot = gr ? gr.getWorldPosition(new Vector3()).applyMatrix4(this.toWeapon) : new Vector3();
+    this.col!.mute = this.col!.hand ?? null;
     const seat = solveSeat(this.col!, this.hands.R.proxy, pivot, key);
+    this.col!.mute = null;
     const rig = this.rig;
     rig.setGripSeat(seat);
     rig.update(0);
@@ -351,7 +358,7 @@ export class HandContact {
       this.selectHand(h);
       for (let fi = 0; fi < 5; fi++) {
         const hold = fi !== 0 && !(side === 'R' && fi === 1) && this.synergy(h, fi, 0, 0, null) < 0.02;
-        this.bakeFinger(h, fi, hold, D, fi * 3);
+        this.bakeFinger(h, fi, hold, D, fi * 3, side === 'R' && fi === 1);
       }
       this.col!.unselect();
     }
@@ -426,6 +433,14 @@ export class HandContact {
   private selectHand(h: HandProxy, extra = 0) {
     _p.copy(h.origin).addScaledVector(h.along, 0.07);
     this.col!.select(_p, 0.13 + extra);
+    // The firing hand never collides with itself (it is an obstacle for the support hand only).
+    this.col!.mute = h.side === 'R' ? (this.col!.hand ?? null) : null;
+  }
+
+  /** Refresh the firing hand as the support hand's obstacle (hand↔hand). */
+  private handShape() {
+    const R = this.hands.R.proxy;
+    this.col!.setHand(R.phalanges, R.palm, R.palmInv, R.palmHalf, PALM.halfN);
   }
 
   /**
@@ -652,7 +667,7 @@ export class HandContact {
    * keep closing, so the finger wraps the surface instead of stopping at the first fingertip contact.
    * Writes the joint deltas (rad, + opens) to `out[o..o+2]`.
    */
-  private bakeFinger(h: HandProxy, fi: number, hold: boolean, out: Float32Array, o: number) {
+  private bakeFinger(h: HandProxy, fi: number, hold: boolean, out: Float32Array, o: number, rest = false) {
     const d = this.baseD;
     d.fill(0);
     const gapOf = (j: number) => {
@@ -675,6 +690,7 @@ export class HandContact {
     if (hold) {
       const step = 0.03;
       const frozen = [false, false, false];
+      // Joint ranges relative to the clip (keeps every joint inside its anatomical range: no PIP kink).
       const lim = [-0.6, -1.2, -1.0];
       for (let it = 0; it < 80 && !(frozen[0] && frozen[1] && frozen[2]); it++) {
         let moved = false;
@@ -700,6 +716,17 @@ export class HandContact {
           } else moved = true;
         }
         if (!moved) break;
+      }
+    }
+    // Trigger discipline: the firing index lies straight along the frame — the knuckle-led synergy closes it
+    // onto the receiver side until it touches (≤ 1 mm), joints stay straight.
+    if (rest) {
+      for (let it = 0; it < 30 && chainGap() > CONTACT.touch; it++) {
+        for (let j = 0; j < 3; j++) d[j] -= 0.02 * SO[j];
+        if (chainGap() < CONTACT.touch * 0.5 || d[0] < -0.6) {
+          for (let j = 0; j < 3; j++) d[j] += 0.02 * SO[j];
+          break;
+        }
       }
     }
     for (let j = 0; j < 3; j++) out[o + j] = d[j];

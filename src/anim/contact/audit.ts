@@ -38,6 +38,9 @@ export interface ClipRow {
   over1: number;
   /** Idle only: worst wrap gap of the firing hand's middle/ring/pinky on the grip, support hand gap (m). */
   gripGap?: number;
+  /** Idle: firing palm to the grip (backstrap), and each firing finger's gap (T, I, M, R, P), m. */
+  palmGap?: number;
+  fingerGaps?: number[];
   supportGap?: number;
   /** Mean solver cost (ms/frame) when resolving. */
   ms?: number;
@@ -74,10 +77,15 @@ export async function loadHeadlessRig(): Promise<ArmsRig> {
 const _p = new Vector3();
 
 /** Dense measurement of one hand against the collision set (contact must be `sync()`ed). */
-export function measureHand(c: HandContact, h: HandProxy): { pen: number; pair: string; gaps: number[] } {
+export function measureHand(
+  c: HandContact,
+  h: HandProxy,
+): { pen: number; pair: string; gaps: number[]; palmGap: number } {
   let pen = -Infinity;
   let pair = '';
   const col = c.col!;
+  // The firing hand is an obstacle only for the support hand (hand↔hand).
+  const skip = h.side === 'R' ? (col.hand ?? null) : null;
   const consider = (d: number, name: string) => {
     if (d > pen) {
       pen = d;
@@ -85,10 +93,11 @@ export function measureHand(c: HandContact, h: HandProxy): { pen: number; pair: 
     }
   };
   const gaps = [Infinity, Infinity, Infinity, Infinity, Infinity];
+  let palmGap = Infinity;
   for (const ph of h.phalanges) {
     for (let i = 0; i < 7; i++) {
       _p.lerpVectors(ph.a, ph.b, i / 6);
-      const d = ph.r - col.sdf(_p, null, null, 0.05);
+      const d = ph.r - col.sdf(_p, skip, null, 0.05);
       gaps[ph.finger] = Math.min(gaps[ph.finger], -d);
       consider(d, ph.name);
     }
@@ -99,13 +108,15 @@ export function measureHand(c: HandContact, h: HandProxy): { pen: number; pair: 
   for (let i = 0; i < 9; i++)
     for (let j = 0; j < 7; j++) {
       _p.set(-hx + (2 * hx * j) / 6, 0, -hz + (2 * hz * i) / 8).applyMatrix4(h.palm);
-      consider(r - col.sdf(_p, null, null, 0.05), `${h.side}.palm`);
+      const d = r - col.sdf(_p, skip, null, 0.05);
+      palmGap = Math.min(palmGap, -d);
+      consider(d, `${h.side}.palm`);
     }
   for (let i = 0; i < 5; i++) {
     _p.lerpVectors(h.wristA, h.wristB, i / 4);
-    consider(WRIST.r - col.sdf(_p, null, null, 0.05), `${h.side}.wrist`);
+    consider(WRIST.r - col.sdf(_p, skip, null, 0.05), `${h.side}.wrist`);
   }
-  return { pen, pair, gaps };
+  return { pen, pair, gaps, palmGap };
 }
 
 /** Play one action from rest at 60 Hz, calling `frame` after each update. */
@@ -142,6 +153,7 @@ export function auditWeapon(
   const rows: ClipRow[] = [];
   const pistol = !!model.parts.slide;
   for (const clip of clips) {
+    let fingerGaps: number[] = [];
     let n = 0,
       o2 = 0,
       o1 = 0,
@@ -149,6 +161,7 @@ export function auditWeapon(
       pair = '',
       ms = 0,
       gripGap = 0,
+      palmGap = 0,
       supportGap = 0;
     c.enabled = resolve;
     playClip(rig, clip, () => {
@@ -166,8 +179,11 @@ export function auditWeapon(
           pair = m.pair;
         }
         if (clip === 'idle') {
-          if (side === 'R') gripGap = Math.max(gripGap, m.gaps[2], m.gaps[3], m.gaps[4]);
-          else if (!pistol) supportGap = Math.max(supportGap, Math.min(...m.gaps, m.pen > -1 ? -m.pen : 1));
+          if (side === 'R') {
+            gripGap = Math.max(gripGap, m.gaps[2], m.gaps[3], m.gaps[4]);
+            palmGap = Math.max(palmGap, m.palmGap);
+            fingerGaps = m.gaps.slice();
+          } else if (!pistol) supportGap = Math.max(supportGap, Math.min(...m.gaps, m.pen > -1 ? -m.pen : 1));
         }
       }
       n++;
@@ -182,7 +198,9 @@ export function auditWeapon(
       pair: max > 0 ? pair : '',
       over2: o2 / n,
       over1: o1 / n,
-      ...(clip === 'idle' ? { gripGap, supportGap: pistol ? undefined : supportGap } : {}),
+      ...(clip === 'idle'
+        ? { gripGap, palmGap, fingerGaps, supportGap: pistol ? undefined : supportGap }
+        : {}),
       ...(resolve ? { ms: ms / n } : {}),
     });
   }
@@ -202,10 +220,14 @@ export function formatTable(rows: ClipRow[], title: string): string {
     );
   const idle = rows.filter((r) => r.clip === 'idle');
   if (idle.length) {
-    out.push('', '| weapon | idle grip-wrap gap mm (M/R/P worst) | support-hand gap mm |', '|---|---|---|');
+    out.push(
+      '',
+      '| weapon | idle firing palm gap mm | firing finger gaps T/I/M/R/P mm | support-hand gap mm |',
+      '|---|---|---|---|',
+    );
     for (const r of idle)
       out.push(
-        `| ${r.weapon} | ${((r.gripGap ?? 0) * 1000).toFixed(1)} | ${r.supportGap !== undefined ? (r.supportGap * 1000).toFixed(1) : 'n/a (pistol)'} |`,
+        `| ${r.weapon} | ${((r.palmGap ?? 0) * 1000).toFixed(1)} | ${(r.fingerGaps ?? []).map((g) => (g * 1000).toFixed(1)).join(' / ')} | ${r.supportGap !== undefined ? (r.supportGap * 1000).toFixed(1) : 'n/a (pistol)'} |`,
       );
   }
   return out.join('\n');
