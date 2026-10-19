@@ -1,4 +1,6 @@
 import type { Vector3 } from 'three';
+import type { RecoilProfile } from '../physics/ballistics/recoil';
+import type { WeaponDef } from '../weapons/defs';
 
 /** Surface/material tags shared by physics, decals, footsteps and audio. */
 export type Surface =
@@ -19,9 +21,37 @@ export type Surface =
 
 export interface GameEvents {
   /** A round left the muzzle. */
-  shot: { weaponId: string; origin: Vector3; dir: Vector3; suppressed: boolean; caliber: string };
-  /** A round hit something. */
-  impact: { point: Vector3; normal: Vector3; surface: Surface; targetId?: string; energy: number };
+  shot: {
+    weaponId: string;
+    origin: Vector3;
+    dir: Vector3;
+    suppressed: boolean;
+    caliber: string;
+    /** The exact build fired (defaults to `WEAPONS[weaponId]`). */
+    def?: WeaponDef;
+    /** `dir` is already the bore axis with the zero applied (else it's the sight line; ballistics tilts it). */
+    zeroed?: boolean;
+    // Filled in by Ballistics (first `shot` listener) for later listeners and the emitter:
+    /** Physical recoil impulse + time profile for this build (`physics/ballistics/recoil.ts`). */
+    recoil?: RecoilProfile;
+    /** Projectile is subsonic: no supersonic crack. */
+    subsonic?: boolean;
+    muzzleVelocity?: number;
+    ammo?: string;
+  };
+  /** A round hit something. `exit` marks the far side of a penetrated surface. */
+  impact: {
+    point: Vector3;
+    normal: Vector3;
+    surface: Surface;
+    targetId?: string;
+    energy: number;
+    speed?: number;
+    massKg?: number;
+    exit?: boolean;
+    /** Ricochet / dominant spall direction (unit) for fx and audio; no ricochet damage off steel. */
+    ricochet?: Vector3;
+  };
   /** Steel target struck; size in metres (plate diameter/width), thickness in mm. */
   steelHit: {
     point: Vector3;

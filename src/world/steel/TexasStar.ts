@@ -2,7 +2,7 @@ import { CylinderGeometry, Mesh, Quaternion, Vector3 } from 'three';
 import { RAPIER, type RayHit } from '../../physics/Physics';
 import { boxGeo, mergeAny } from '../geo';
 import { emitSteelHit, type Target, type TargetEnv } from '../targets';
-import { bulletMomentum, PLATE_ANY } from './momentum';
+import { hitImpulse, PLATE_ANY } from './momentum';
 import { mapDark, plateGeometry, shapes, type PaintCell } from './paint';
 import { STEEL_GROUPS, syncMesh, yawQuat, type PendingHit } from './common';
 
@@ -193,8 +193,8 @@ export class TexasStar implements Target {
 
   private process() {
     for (const h of this.pending) {
-      const p = bulletMomentum(h.energy, this.env.shots.massKg);
-      const k = p * 1.5;
+      const p = hitImpulse(h.energy, this.env.shots.massKg);
+      const k = p;
       this.body.applyImpulseAtPoint({ x: h.dir.x * k, y: h.dir.y * k, z: h.dir.z * k }, h.point, true);
       const plate = h.sub !== undefined && h.sub >= 0 ? this.plates[h.sub] : undefined;
       if (plate && !plate.off && p >= PLATE_ANY.threshold) this.detach(plate, h, p);

@@ -2,7 +2,7 @@ import { Mesh, Quaternion, Vector3, type Shape } from 'three';
 import { Spring } from '../../core/math';
 import { RAPIER, type RayHit } from '../../physics/Physics';
 import { emitSteelHit, type Target, type TargetEnv } from '../targets';
-import { bulletMomentum, knocksDown, POPPER_STANDARD, type Calibration } from './momentum';
+import { hitImpulse, knocksDown, POPPER_HEAVY, POPPER_STANDARD, type Calibration } from './momentum';
 import { plateGeometry, shapes, type PaintCell } from './paint';
 import { STEEL_GROUPS, syncMesh, twistAngle, yawQuat, type PendingHit } from './common';
 
@@ -124,7 +124,7 @@ export class Knockdown implements Target {
 
   private process() {
     for (const h of this.pending) {
-      const p = bulletMomentum(h.energy, this.env.shots.massKg);
+      const p = hitImpulse(h.energy, this.env.shots.massKg);
       const hitHeight = h.height ?? 0;
       if (!this.down && knocksDown(p, hitHeight, this.cal)) this.knock(h, p);
       else if (!this.down) this.wobble.impulse(-(0.25 + p * 0.12));
@@ -194,7 +194,7 @@ export function makePopper(
     kind: 'popper',
     shape: shapes.popper(1.07, 0.3),
     thicknessMm: heavy ? 13 : 10,
-    cal: cal ?? (heavy ? { calHeight: 0.62, threshold: 4.0 } : POPPER_STANDARD),
+    cal: cal ?? (heavy ? POPPER_HEAVY : POPPER_STANDARD),
     yaw,
     size: 0.3,
   });

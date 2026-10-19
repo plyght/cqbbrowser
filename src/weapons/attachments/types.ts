@@ -95,6 +95,8 @@ export interface BarrelPart extends PartBase {
   /** Integral-suppressor barrels carry their own can length (beyond the barrel). */
   integralCan?: number;
   threaded?: boolean;
+  /** Ported barrels (MP5SD-style) bleed gas before the muzzle: multiplies the interior-model velocity. */
+  velocityMul?: number;
 }
 
 export interface ProfilePart extends PartBase {
@@ -236,8 +238,11 @@ export interface PlatformDef {
   /** COM z of the base mass. */
   baseComZ: number;
   provides: Feature[];
-  /** Muzzle velocity by barrel length (inches → m/s), linearly interpolated. */
-  velocity: [number, number][];
+  /**
+   * @deprecated Velocity now comes from the cartridge's interior-ballistics model
+   * (`src/weapons/ammo/interior.ts`) and the barrel length; this table is ignored if present.
+   */
+  velocity?: [number, number][];
   baseAds: number;
   /** Mass of one cartridge (kg); loaded mag mass = mag mass + capacity × roundMass. */
   roundMass: number;
@@ -273,6 +278,8 @@ export interface BuildParams {
   stockFolded?: boolean;
   lightSide?: 'left' | 'right';
   offsetSide?: 'left' | 'right';
+  /** Load (`AmmoId`, e.g. 'm193'); falls back to the caliber's default if it doesn't chamber. */
+  ammo?: string;
 }
 
 export interface BuildError {

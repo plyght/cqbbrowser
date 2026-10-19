@@ -2,7 +2,7 @@ import { Mesh, Quaternion, Vector3 } from 'three';
 import { RAPIER, type RayHit } from '../../physics/Physics';
 import { boxGeo, mergeAny } from '../geo';
 import { emitSteelHit, type Target, type TargetEnv } from '../targets';
-import { bulletMomentum, flipSpeed } from './momentum';
+import { flipSpeed, hitImpulse, PADDLE_FLIP } from './momentum';
 import { mapDark, plateGeometry, shapes, type PaintCell } from './paint';
 import { STEEL_GROUPS, syncMesh, twistAngle, yawQuat, type PendingHit } from './common';
 
@@ -119,12 +119,12 @@ export class Paddle implements Target {
 
   private process() {
     for (const h of this.pending) {
-      const p = bulletMomentum(h.energy, this.env.shots.massKg);
+      const p = hitImpulse(h.energy, this.env.shots.massKg);
       const a = this.angle();
       const from = Math.sign(a) || this.side;
       const axis = new Vector3(0, 0, 1).applyQuaternion(this.frameQ);
       // Enough momentum swings it over the top; less just rattles it on its stop.
-      const omega = p >= 1.2 ? flipSpeed(Math.abs(a), ARM) : 1.2;
+      const omega = p >= PADDLE_FLIP ? flipSpeed(Math.abs(a), ARM) : 1.2;
       const s = -from * omega;
       this.body.setAngvel({ x: axis.x * s, y: axis.y * s, z: axis.z * s }, true);
       this.settled = false;
