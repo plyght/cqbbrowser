@@ -1,0 +1,162 @@
+import { h, hints, navButton, padGlyph } from './dom';
+import { facilities, getDrills, type DrillInfo, type Medal } from './drills';
+import type { Screen } from './FocusNav';
+import { fmtTime } from './nav';
+
+export function medalBadge(m: Medal | undefined, big = false) {
+  return h('span', {
+    class: `medal ${m ?? 'none'}${big ? ' lg' : ''}`,
+    title: m ? `${m} medal` : 'no medal',
+    text: m ? m[0].toUpperCase() : '–',
+  });
+}
+
+/** Play: facility tabs → drill list (best / medal / par) → GO. Two clicks from the main menu to the shot timer. */
+export class PlayScreen implements Screen {
+  readonly root = h('section', { class: 'screen play' });
+  facility = '';
+  selected: DrillInfo | null = null;
+  private tabBar = h('nav', { class: 'tabs' });
+  private list = h('div', { class: 'drill-list' });
+  private detail = h('aside', { class: 'drill-detail' });
+
+  constructor(
+    private onGo: (d: DrillInfo) => void,
+    private onBack: () => void,
+  ) {
+    this.root.append(
+      h(
+        'header',
+        { class: 'screen-head' },
+        h('div', { class: 'eyebrow', text: 'UMBRA CO. TRAINING CENTER' }),
+        h('h2', { text: 'Select drill' }),
+      ),
+      this.tabBar,
+      h('div', { class: 'play-cols' }, this.list, this.detail),
+      h(
+        'footer',
+        { class: 'screen-foot' },
+        navButton('Back', () => this.back(), { class: 'ghost' }),
+        hints([
+          { key: 'Enter', pad: [0], label: 'GO' },
+          { key: 'Q/E', pad: [4, 5], label: 'Facility' },
+          { key: 'Esc', pad: [1], label: 'Back' },
+        ]),
+      ),
+    );
+  }
+
+  enter() {
+    const facs = facilities(getDrills());
+    if (!facs.includes(this.facility)) this.facility = facs[0] ?? '';
+    this.render();
+  }
+
+  initialFocus() {
+    const id = this.selected?.facility === this.facility ? this.selected.id : undefined;
+    return (
+      (id && this.list.querySelector<HTMLElement>(`[data-drill="${id}"]`)) ||
+      this.list.querySelector<HTMLElement>('[data-drill]')
+    );
+  }
+
+  back() {
+    this.onBack();
+  }
+
+  start() {
+    if (this.selected) this.onGo(this.selected);
+  }
+
+  tab(dir: -1 | 1) {
+    const facs = facilities(getDrills());
+    const i = facs.indexOf(this.facility);
+    this.facility = facs[(i + dir + facs.length) % facs.length];
+    this.render();
+    this.initialFocus()?.focus({ preventScroll: true });
+  }
+
+  private render() {
+    const drills = getDrills();
+    this.tabBar.replaceChildren(
+      padGlyph(4, 'tab-glyph pad-only'),
+      ...facilities(drills).map((f) =>
+        navButton(
+          f,
+          () => {
+            this.facility = f;
+            this.render();
+          },
+          { class: `tab${f === this.facility ? ' on' : ''}`, 'data-facility': f },
+        ),
+      ),
+      padGlyph(5, 'tab-glyph pad-only'),
+    );
+    const mine = drills.filter((d) => d.facility === this.facility);
+    this.list.replaceChildren(
+      h(
+        'div',
+        { class: 'drill-row head' },
+        h('span', { text: 'Drill' }),
+        h('span', { text: 'Par' }),
+        h('span', { text: 'Best' }),
+        h('span', { text: '' }),
+      ),
+      ...mine.map((d, i) => {
+        const b = navButton(
+          h(
+            'span',
+            { class: 'drill-row' },
+            h(
+              'span',
+              { class: 'name' },
+              h('span', { class: 'idx', text: String(i + 1).padStart(2, '0') }),
+              d.name,
+            ),
+            h('span', { class: 'num', text: fmtTime(d.par) }),
+            h('span', { class: 'num', text: d.best !== undefined ? fmtTime(d.best) : '—' }),
+            medalBadge(d.medal),
+          ),
+          () => this.onGo(d),
+          { class: 'drill', 'data-drill': d.id, 'data-wrap': true },
+        );
+        b.addEventListener('focus', () => this.select(d));
+        return b;
+      }),
+    );
+    this.select(mine.find((d) => d.id === this.selected?.id) ?? mine[0] ?? null);
+  }
+
+  private select(d: DrillInfo | null) {
+    this.selected = d;
+    if (!d) {
+      this.detail.replaceChildren(h('p', { class: 'dim', text: 'No drills here yet.' }));
+      return;
+    }
+    const delta = d.best !== undefined ? d.best - d.par : undefined;
+    this.detail.replaceChildren(
+      h('div', { class: 'eyebrow', text: d.facility }),
+      h('h3', { text: d.name }),
+      h('p', { class: 'brief', text: d.brief ?? '' }),
+      h(
+        'dl',
+        { class: 'stats' },
+        h('dt', { text: 'Par' }),
+        h('dd', { text: fmtTime(d.par) }),
+        h('dt', { text: 'Best' }),
+        h('dd', { text: d.best !== undefined ? fmtTime(d.best) : 'No time' }),
+        h('dt', { text: 'vs par' }),
+        h('dd', {
+          class: delta === undefined ? '' : delta <= 0 ? 'good' : 'bad',
+          text: delta === undefined ? '—' : (delta <= 0 ? '−' : '+') + Math.abs(delta).toFixed(2),
+        }),
+        h('dt', { text: 'Medal' }),
+        h('dd', {}, medalBadge(d.medal), ' ', d.medal ? d.medal.toUpperCase() : 'NONE'),
+      ),
+      navButton(h('span', {}, 'GO ', h('span', { class: 'go-arrow', text: '▸' })), () => this.start(), {
+        class: 'go',
+        'data-role': 'go',
+      }),
+    );
+  }
+}

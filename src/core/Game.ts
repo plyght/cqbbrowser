@@ -1,4 +1,4 @@
-import { Box3, Vector3, type Object3D } from 'three';
+import { Vector3 } from 'three';
 import { AudioEngine } from '../audio/AudioEngine';
 import { AimAssist } from '../input/AimAssist';
 import { mouseSettings } from '../input/config';
@@ -13,9 +13,13 @@ import { Player } from '../player/Player';
 import { Renderer } from '../render/Renderer';
 import { Hud } from '../ui/Hud';
 import { Menu } from '../ui/Menu';
+import { setDrillSource, type RunResult } from '../ui/drills';
+import { toDrillInfo, toRunResult } from '../ui/drillAdapter';
+import { Magazines } from '../weapons/Magazines';
 import { Ballistics } from '../weapons/Ballistics';
 import { WeaponController } from '../weapons/WeaponController';
-import { Range } from '../world/Range';
+import { Drills } from '../drills/Drills';
+import { World } from '../world/World';
 import { bus } from './bus';
 import type { Context, System } from './Context';
 
@@ -41,7 +45,8 @@ export class Game {
   renderer!: Renderer;
   player!: Player;
   weapons!: WeaponController;
-  range!: Range;
+  world!: World;
+  drills!: Drills;
   audio!: AudioEngine;
   hud!: Hud;
   menu!: Menu;
@@ -81,15 +86,52 @@ export class Game {
     };
     this.player = new Player(this.ctx);
     const ballistics = new Ballistics(this.ctx, () => this.player.rigidBody);
-    this.range = new Range(this.ctx, ballistics);
-    this.player.teleport(this.range.spawn.clone(), this.range.spawnYaw);
+    this.world = new World(this.ctx, ballistics, this.player);
+    this.player.teleport(this.world.spawn, this.world.spawnYaw);
     this.weapons = new WeaponController(this.ctx, this.player, ['sb16', 'p17']);
-    this.systems.push(this.player, this.weapons, this.range);
+    this.drills = new Drills(this.ctx, this.world, this.player, () => this.paused);
+    this.systems.push(this.player, this.weapons, this.world, this.drills);
     this.aimAssist.provider = this.aimAssistProvider();
     this.audio = new AudioEngine(bus, this.ctx.camera, { physics, exclude: () => this.player.rigidBody });
     this.hud = new Hud(ui);
+    this.hud.bind({
+      camera: this.ctx.camera,
+      lens: this.renderer.bodycam.uniforms,
+      posture: () => this.player,
+      device: () => this.ctx.input.frame.activeDevice,
+      padType: () => this.gamepad.padType,
+    });
     this.menu = new Menu(ui);
+    this.menu.attachInput({
+      trackpad: this.trackpad,
+      gyro: this.gyro,
+      gyroSupported: Gyro.supported,
+      activeDevice: () => this.ctx.input.frame.activeDevice,
+      padType: () => this.gamepad.padType,
+    });
     this.menu.onPlay = () => this.enter(canvas);
+    setDrillSource(() => this.drills.list().map(toDrillInfo));
+    this.menu.onStartDrill = (d) => {
+      this.enter(canvas);
+      this.drills.start(d.id);
+    };
+    this.drills.onResult((r) =>
+      this.showResults(
+        toRunResult(
+          r,
+          this.drills.list().find((d) => d.id === r.drillId),
+        ),
+      ),
+    );
+    // Fresh mags at every drill standby.
+    bus.on('drillState', (e) => {
+      if (e.state !== 'standby') return;
+      for (const w of this.weapons.loadout) w.mags = new Magazines(w.def.magCapacity, w.def.spareMags);
+    });
+    this.menu.onRestart = () => {
+      this.resetDrill();
+      this.enter(canvas);
+    };
     canvas.addEventListener('click', () => {
       if (!this.paused && document.pointerLockElement !== canvas) this.lock(canvas);
     });
@@ -116,23 +158,15 @@ export class Game {
     }
   }
 
-  /**
-   * Aim assist: angle from the weapon aim ray to the nearest standing shootable target.
-   * TODO(world): replace the duck-typed mesh lookup with a `Target.aimPoint()` (and `noShoot`) contract.
-   */
+  /** Aim assist: angle from the weapon aim ray to the nearest standing shootable target in the active facility. */
   private aimAssistProvider() {
-    const box = new Box3();
     const p = new Vector3();
     return () => {
       const { origin, dir } = this.weapons.muzzleWorld();
       let best = Infinity;
-      for (const t of this.range.targets) {
-        const tt = t as typeof t & { noShoot?: boolean; aimPoint?: () => Vector3; mesh?: Object3D };
-        if (t.down || tt.noShoot) continue;
-        if (tt.aimPoint) p.copy(tt.aimPoint());
-        else if (tt.mesh) box.setFromObject(tt.mesh).getCenter(p);
-        else continue;
-        p.sub(origin);
+      for (const t of this.world.list(this.world.active)) {
+        if (t.down || t.noShoot) continue;
+        p.copy(t.aimPoint()).sub(origin);
         if (p.lengthSq() < 0.09) continue;
         best = Math.min(best, dir.angleTo(p));
       }
@@ -152,9 +186,20 @@ export class Game {
     this.menu.show(true);
   }
 
+  /** @deprecated alias for `world` (the old single-range facility). */
+  get range() {
+    return this.world;
+  }
+
+  /** End-of-run results screen (drills call this). */
+  showResults(r: RunResult) {
+    this.paused = true;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.menu.showResults(r);
+  }
+
   resetDrill() {
-    this.range.reset();
-    this.player.teleport(this.range.spawn.clone(), this.range.spawnYaw);
+    this.drills.restart();
   }
 
   /** When true the rAF loop only renders; tests drive `step()` explicitly. */
@@ -171,8 +216,8 @@ export class Game {
     this.step(dt);
   };
 
-  /** One render frame. Exposed for deterministic stepping in tests. */
-  step(dt: number) {
+  /** One frame. Exposed for deterministic stepping in tests; `render=false` skips drawing (fast sim). */
+  step(dt: number, render = true) {
     const ctx = this.ctx;
     ctx.time += dt;
     ctx.input.enabled = !this.paused;
@@ -190,6 +235,6 @@ export class Game {
     for (const s of this.systems) s.update?.(dt, alpha);
     this.audio.update(dt);
     this.hud.update(this.weapons);
-    this.renderer.render(dt);
+    if (render) this.renderer.render(dt);
   }
 }

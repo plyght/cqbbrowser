@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 400" width="320" height="400">
+<title>UMBRA CO. shoulder patch</title>
+<defs>
+<pattern id="twill" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+  <rect width="3" height="3" fill="#545539"/><rect width="3" height="1.1" fill="#000" opacity=".22"/>
+  <rect y="2" width="3" height=".5" fill="#fff" opacity=".05"/>
+</pattern>
+<pattern id="st-coyote-a" width="14" height="4.4" patternUnits="userSpaceOnUse" patternTransform="rotate(-24)">
+  <rect width="14" height="4.4" fill="#a28a5f"/>
+  <path d="M0 1.1H14M0 3.3000000000000003H14" stroke="#c1aa7c" stroke-width="1.1" stroke-linecap="round" stroke-dasharray="5.8 1.2" opacity=".55"/>
+  <path d="M3.5 3.3000000000000003H17.5" stroke="#a28a5f" stroke-width="1.1" stroke-dasharray="5.8 1.2" opacity=".6"/>
+  <path d="M0 0H14M0 2.2H14M0 4.4H14" stroke="#000" stroke-width=".45" opacity=".45"/>
+</pattern>
+<pattern id="st-coyote-b" width="18" height="4.4" patternUnits="userSpaceOnUse" patternTransform="rotate(8)">
+  <rect width="18" height="4.4" fill="#a28a5f"/>
+  <path d="M0 1.1H18M0 3.3000000000000003H18" stroke="#c1aa7c" stroke-width="1.1" stroke-linecap="round" stroke-dasharray="7.8 1.2" opacity=".55"/>
+  <path d="M4.5 3.3000000000000003H22.5" stroke="#a28a5f" stroke-width="1.1" stroke-dasharray="7.8 1.2" opacity=".6"/>
+  <path d="M0 0H18M0 2.2H18M0 4.4H18" stroke="#000" stroke-width=".45" opacity=".45"/>
+</pattern>
+<pattern id="st-coyote-c" width="10" height="4.4" patternUnits="userSpaceOnUse" patternTransform="rotate(62)">
+  <rect width="10" height="4.4" fill="#a28a5f"/>
+  <path d="M0 1.1H10M0 3.3000000000000003H10" stroke="#c1aa7c" stroke-width="1.1" stroke-linecap="round" stroke-dasharray="3.8 1.2" opacity=".55"/>
+  <path d="M2.5 3.3000000000000003H12.5" stroke="#a28a5f" stroke-width="1.1" stroke-dasharray="3.8 1.2" opacity=".6"/>
+  <path d="M0 0H10M0 2.2H10M0 4.4H10" stroke="#000" stroke-width=".45" opacity=".45"/>
+</pattern>
+<pattern id="st-olive" width="16" height="4.4" patternUnits="userSpaceOnUse" patternTransform="rotate(68)">
+  <rect width="16" height="4.4" fill="#3a3b2a"/>
+  <path d="M0 1.1H16M0 3.3000000000000003H16" stroke="#55573f" stroke-width="1.1" stroke-linecap="round" stroke-dasharray="6.8 1.2" opacity=".55"/>
+  <path d="M4 3.3000000000000003H20" stroke="#3a3b2a" stroke-width="1.1" stroke-dasharray="6.8 1.2" opacity=".6"/>
+  <path d="M0 0H16M0 2.2H16M0 4.4H16" stroke="#000" stroke-width=".45" opacity=".45"/>
+</pattern>
+<pattern id="st-black" width="12" height="4.4" patternUnits="userSpaceOnUse" patternTransform="rotate(-50)">
+  <rect width="12" height="4.4" fill="#1b1c17"/>
+  <path d="M0 1.1H12M0 3.3000000000000003H12" stroke="#3b3c33" stroke-width="1.1" stroke-linecap="round" stroke-dasharray="4.8 1.2" opacity=".55"/>
+  <path d="M3 3.3000000000000003H15" stroke="#1b1c17" stroke-width="1.1" stroke-dasharray="4.8 1.2" opacity=".6"/>
+  <path d="M0 0H12M0 2.2H12M0 4.4H12" stroke="#000" stroke-width=".45" opacity=".45"/>
+</pattern>
+<pattern id="st-black-tab" width="8" height="4.4" patternUnits="userSpaceOnUse" patternTransform="rotate(90)">
+  <rect width="8" height="4.4" fill="#1b1c17"/>
+  <path d="M0 1.1H8M0 3.3000000000000003H8" stroke="#45463b" stroke-width="1.1" stroke-linecap="round" stroke-dasharray="2.8 1.2" opacity=".55"/>
+  <path d="M2 3.3000000000000003H10" stroke="#1b1c17" stroke-width="1.1" stroke-dasharray="2.8 1.2" opacity=".6"/>
+  <path d="M0 0H8M0 2.2H8M0 4.4H8" stroke="#000" stroke-width=".45" opacity=".45"/>
+</pattern>
+<pattern id="merrow" width="1.6" height="12" patternUnits="userSpaceOnUse">
+  <rect width="1.6" height="12" fill="#202119"/><rect width=".8" height="12" fill="#5b5c4a"/>
+</pattern>
+<filter id="thread" x="-4%" y="-4%" width="108%" height="108%" color-interpolation-filters="sRGB">
+  <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="2" seed="4" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="1.3" xChannelSelector="R" yChannelSelector="G" result="fz"/>
+  <feGaussianBlur in="SourceAlpha" stdDeviation="1.5" result="b"/>
+  <feDiffuseLighting in="b" surfaceScale="2.6" diffuseConstant="1" lighting-color="#fff" result="diff">
+    <feDistantLight azimuth="235" elevation="52"/></feDiffuseLighting>
+  <feSpecularLighting in="b" surfaceScale="2.6" specularConstant=".55" specularExponent="16" lighting-color="#fff" result="spec">
+    <feDistantLight azimuth="235" elevation="40"/></feSpecularLighting>
+  <feComposite in="fz" in2="diff" operator="arithmetic" k1="1.32" result="lit"/>
+  <feComposite in="spec" in2="fz" operator="in" result="specIn"/>
+  <feComposite in="lit" in2="specIn" operator="arithmetic" k2="1" k3=".22"/>
+  <feComposite in2="fz" operator="in" result="out"/>
+  <feDropShadow dx=".6" dy=".9" stdDeviation=".5" flood-color="#000" flood-opacity=".55"/>
+</filter>
+<filter id="roll" x="-6%" y="-6%" width="112%" height="112%" color-interpolation-filters="sRGB">
+  <feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="9" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="1.6" xChannelSelector="R" yChannelSelector="G" result="fz"/>
+  <feGaussianBlur in="SourceAlpha" stdDeviation="2.6" result="b"/>
+  <feDiffuseLighting in="b" surfaceScale="5" diffuseConstant="1.05" lighting-color="#fff" result="diff">
+    <feDistantLight azimuth="235" elevation="48"/></feDiffuseLighting>
+  <feSpecularLighting in="b" surfaceScale="5" specularConstant=".5" specularExponent="12" lighting-color="#fff" result="spec">
+    <feDistantLight azimuth="235" elevation="38"/></feSpecularLighting>
+  <feComposite in="fz" in2="diff" operator="arithmetic" k1="1.45" result="lit"/>
+  <feComposite in="spec" in2="fz" operator="in" result="specIn"/>
+  <feComposite in="lit" in2="specIn" operator="arithmetic" k2="1" k3=".25"/>
+  <feComposite in2="fz" operator="in"/>
+</filter>
+<filter id="cloth" x="-8%" y="-8%" width="116%" height="116%" color-interpolation-filters="sRGB">
+  <feTurbulence type="fractalNoise" baseFrequency=".035" numOctaves="3" seed="2" result="lo"/>
+  <feColorMatrix in="lo" type="matrix" values="0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  .9 0 0 0 -.15" result="lo2"/>
+  <feComposite in="lo2" in2="SourceAlpha" operator="in" result="mott"/>
+  <feBlend in="SourceGraphic" in2="mott" mode="multiply" result="m"/>
+  <feComposite in="m" in2="SourceAlpha" operator="in" result="patch"/>
+  <feGaussianBlur in="SourceAlpha" stdDeviation="3.5"/>
+  <feOffset dx="2" dy="4" result="sh"/>
+  <feFlood flood-color="#000" flood-opacity=".6"/>
+  <feComposite in2="sh" operator="in" result="shadow"/>
+  <feMerge><feMergeNode in="shadow"/><feMergeNode in="patch"/></feMerge>
+</filter>
+<clipPath id="shield-clip"><path d="M40 121.45A232 232 0 0 1 280 121.45L280 262C280 322 214 360 160 388C106 360 40 322 40 262Z"/></clipPath>
+<clipPath id="skull-clip"><path d="M160 158C140 158 122 165 118 181C115 193 113 205 116 214C123 221 131 227 136 235L137 243C134 251 132 262 136 270C142 280 152 284 160 284C168 284 178 280 184 270C188 262 186 251 183 243L184 235C189 227 197 221 204 214C207 205 205 193 202 181C198 165 180 158 160 158Z"/></clipPath>
+<clipPath id="tab-clip"><path d="M27.43 59.83A292 292 0 0 1 292.57 59.83L272.59 99.03A248 248 0 0 0 47.41 99.03Z"/></clipPath>
+</defs>
+<g filter="url(#cloth)">
+  <g id="tab">
+    <path d="M27.43 59.83A292 292 0 0 1 292.57 59.83L272.59 99.03A248 248 0 0 0 47.41 99.03Z" fill="url(#twill)"/>
+    <g clip-path="url(#tab-clip)" filter="url(#thread)" fill="url(#st-black-tab)"><path transform="translate(104.57 67.00) rotate(-12.36)" d="M0 0.37Q-2.88 0.37-4.51-0.57Q-6.14-1.52-6.79-3.33Q-7.44-5.15-7.44-7.78L-7.44-25.11L-1.95-25.11L-1.95-6.94Q-1.95-6.17-1.83-5.39Q-1.71-4.62-1.29-4.12Q-0.87-3.63 0-3.63Q0.90-3.63 1.30-4.12Q1.70-4.62 1.81-5.39Q1.92-6.17 1.92-6.94L1.92-25.11L7.44-25.11L7.44-7.78Q7.44-5.15 6.77-3.33Q6.11-1.52 4.49-0.57Q2.88 0.37 0 0.37"/><path transform="translate(133.21 62.39) rotate(-5.94)" d="M-5.15 0L-9.14 0L-8.71-25.11L-2.76-25.11L0-10.51L2.98-25.11L8.71-25.11L9.14 0L5.21 0L4.74-16.71L1.83 0L-1.67 0L-4.77-16.83"/><path transform="translate(162.19 61.01) rotate(0.48)" d="M0.46 0L-7.25 0L-7.25-25.11L-0.71-25.11Q0.90-25.11 2.34-24.86Q3.78-24.61 4.90-23.92Q6.01-23.22 6.65-21.93Q7.29-20.65 7.29-18.54Q7.29-17.02 6.84-15.98Q6.39-14.94 5.56-14.32Q4.74-13.70 3.60-13.48Q5.05-13.30 6.04-12.54Q7.04-11.78 7.55-10.51Q8.06-9.24 8.06-7.44Q8.06-5.49 7.55-4.08Q7.04-2.67 6.08-1.77Q5.11-0.87 3.70-0.43Q2.29 0 0.46 0M-1.71-11.41L-1.71-3.87L-0.53-3.87Q1.30-3.87 2-4.80Q2.70-5.74 2.70-7.53Q2.70-8.96 2.39-9.80Q2.08-10.63 1.36-11.02Q0.65-11.41-0.56-11.41L-1.71-11.41M-1.71-21.39L-1.71-15.07L-0.62-15.07Q0.65-15.07 1.30-15.45Q1.95-15.84 2.19-16.59Q2.42-17.33 2.42-18.38Q2.42-19.37 2.06-20.04Q1.70-20.71 1.01-21.05Q0.31-21.39-0.74-21.39"/><path transform="translate(189.54 62.69) rotate(6.55)" d="M-1.89 0L-7.44 0L-7.44-25.11L-0.53-25.11Q2.01-25.11 3.88-24.55Q5.73-23.99 6.77-22.55Q7.81-21.11 7.81-18.48Q7.81-16.93 7.56-15.72Q7.32-14.51 6.65-13.62Q5.98-12.74 4.74-12.15L8.18 0L2.45 0L-0.31-11.25L-1.89-11.25L-1.89 0M-1.89-21.39L-1.89-14.45L-0.34-14.45Q0.84-14.45 1.49-14.86Q2.14-15.28 2.40-16.07Q2.67-16.86 2.67-17.98Q2.67-19.59 2.08-20.49Q1.49-21.39-0.09-21.39"/><path transform="translate(215.99 67.13) rotate(12.49)" d="M-2.65 0L-7.89 0L-3.15-25.11L3.18-25.11L7.86 0L2.74 0L1.91-5.30L-1.78-5.30L-2.65 0M0.05-18.41L-1.29-8.62L1.38-8.62"/></g>
+    <g filter="url(#roll)">
+  <path d="M27.43 59.83A292 292 0 0 1 292.57 59.83L272.59 99.03A248 248 0 0 0 47.41 99.03Z" fill="none" stroke="#202119" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M27.43 59.83A292 292 0 0 1 292.57 59.83L272.59 99.03A248 248 0 0 0 47.41 99.03Z" fill="none" stroke="#575848" stroke-width="11" stroke-dasharray=".8 1" stroke-linejoin="round"/>
+  <path d="M27.43 59.83A292 292 0 0 1 292.57 59.83L272.59 99.03A248 248 0 0 0 47.41 99.03Z" fill="none" stroke="#000" stroke-width="1" opacity=".55" transform="translate(0 0)"/>
+</g>
+  </g>
+  <g id="shield">
+    <path d="M40 121.45A232 232 0 0 1 280 121.45L280 262C280 322 214 360 160 388C106 360 40 322 40 262Z" fill="url(#twill)"/>
+    <g clip-path="url(#shield-clip)">
+      <g filter="url(#thread)">
+        <circle cx="160" cy="196" r="88" fill="none" stroke="url(#st-coyote-c)" stroke-width="8"/>
+        <circle cx="160" cy="196" r="78" fill="none" stroke="#1b1c17" stroke-width="2.4"/>
+      </g>
+      <g filter="url(#thread)">
+        <path d="M160 122C130 122 104 142 96 178C90 208 94 238 82 268C76 284 66 296 56 304L56 330L160 330L264 330L264 304C254 296 244 284 238 268C226 238 230 208 224 178C216 142 190 122 160 122Z" fill="url(#st-olive)" stroke="#1b1c17" stroke-width="3.2" stroke-linejoin="round"/>
+        <path d="M112 160C104 186 104 214 100 244M108 252C102 270 94 284 84 294M134 132C122 140 114 150 110 162M208 160C216 186 216 214 220 244M212 252C218 270 226 284 236 294M186 132C198 140 206 150 210 162" fill="none" stroke="#1b1c17" stroke-width="2.2" stroke-linecap="round"/>
+      </g>
+      <g filter="url(#thread)"><path d="M160 142C139 143 123 157 119 180C115 204 117 234 125 260C133 284 147 297 160 299C173 297 187 284 195 260C203 234 205 204 201 180C197 157 181 143 160 142Z" fill="url(#st-black)"/></g>
+      <g filter="url(#thread)">
+        <path d="M160 158C140 158 122 165 118 181C115 193 113 205 116 214C123 221 131 227 136 235L137 243C134 251 132 262 136 270C142 280 152 284 160 284C168 284 178 280 184 270C188 262 186 251 183 243L184 235C189 227 197 221 204 214C207 205 205 193 202 181C198 165 180 158 160 158Z" fill="url(#st-coyote-a)" stroke="#1b1c17" stroke-width="2.2" stroke-linejoin="round"/>
+      </g>
+      <g filter="url(#thread)" clip-path="url(#skull-clip)"><path d="M160 150L112 150L112 186C126 178 146 177 160 180C174 177 194 178 208 186L208 150L160 150Z" fill="url(#st-black)"/></g>
+      <g filter="url(#thread)" fill="url(#st-black)" stroke="#1b1c17" stroke-width="1.6" stroke-linejoin="round">
+        <path d="M121 187C132 186 144 189 154 195C158 199 157 206 153 212C147 219 135 220 127 214C120 208 119 197 121 187ZM199 187C188 186 176 189 166 195C162 199 163 206 167 212C173 219 185 220 193 214C200 208 201 197 199 187Z"/>
+        <path d="M160 219C157 225 153 231 151 237C154 241 158 240 160 236C162 240 166 241 169 237C167 231 163 225 160 219Z"/>
+        <path d="M160 252C150 252 143 251 137 249C139 255 150 256 160 256C170 256 181 255 183 249C177 251 170 252 160 252Z"/>
+        <path d="M141.5 242V266M147.5 242V266M153.8 242V266M160 242V266M166.2 242V266M172.5 242V266M178.5 242V266M138 254H182M117 214C124 216 130 222 135 231M203 214C196 216 190 222 185 231" fill="none" stroke-width="2" stroke-linecap="round"/>
+      </g>
+      <g filter="url(#thread)">
+        <path d="M30 300Q160 324 290 300L290 332Q160 356 30 332Z" fill="url(#st-coyote-b)" stroke="#1b1c17" stroke-width="2.4"/>
+        <g fill="#1b1c17"><path transform="translate(79.57 325.39) rotate(12.22)" d="M-0.41-10.35Q-0.09-10.35 0.44-10.32Q0.98-10.29 1.56-10.25Q1.76-10.22 1.95-10.21L3.17-10.21L3.12-9.90L2.85-7.84L2.70-7.84Q2.70-8.64 2.09-9.13Q1.47-9.63 0.40-9.63Q-0.49-9.63-1.01-9.29Q-1.53-8.95-1.57-8.41Q-1.62-7.89-1.22-7.60Q-0.82-7.31-0.28-7.06L2.43-5.80Q3.24-5.44 3.70-4.74Q4.17-4.05 4.10-2.99Q3.99-1.44 2.80-0.62Q1.60 0.20-0.46 0.20Q-1.30 0.20-1.98 0.07Q-2.66-0.06-3.15-0.27Q-3.63-0.48-3.89-0.74Q-4.05-1.10-4.02-1.62Q-3.99-2.15-3.83-2.66Q-3.66-3.18-3.43-3.48L-3.30-3.48Q-3.34-2.73-2.98-2.04Q-2.62-1.36-1.89-0.94Q-1.17-0.52-0.15-0.52Q0.89-0.52 1.39-0.96Q1.89-1.39 1.89-1.94Q1.89-2.41 1.54-2.78Q1.18-3.16 0.36-3.54L-2.01-4.64Q-3.01-5.10-3.47-5.92Q-3.92-6.73-3.79-7.76Q-3.69-8.60-3.26-9.18Q-2.82-9.76-2.10-10.06Q-1.38-10.35-0.41-10.35"/><path transform="translate(90.32 327.56) rotate(10.57)" d="M4.49-3.36L4.63-3.36L4.08 0L-4.40 0L-4.40-0.14L-4.21-0.14Q-3.84-0.14-3.57-0.41Q-3.30-0.68-3.28-1.06L-3.28-9.09Q-3.30-9.47-3.57-9.74Q-3.84-10.01-4.21-10.01L-4.40-10.01L-4.40-10.15L1.98-10.15Q2.30-10.15 2.65-10.19Q3.01-10.24 3.31-10.29Q3.62-10.35 3.75-10.41L3.75-7.42L3.60-7.42L3.60-7.54Q3.60-8.41 3.11-8.92Q2.69-9.34 1.98-9.41L-0.31-9.41L-0.31-5.37L1.27-5.37Q1.95-5.38 2.40-5.83Q2.85-6.28 2.83-6.96L2.83-7.02L2.98-7.02L2.98-2.99L2.83-2.99L2.83-3.06Q2.83-3.74 2.39-4.18Q1.95-4.63 1.27-4.64L-0.31-4.64L-0.31-0.74L1.47-0.74Q2.17-0.74 2.77-1.05Q3.37-1.36 3.82-1.95Q4.27-2.54 4.49-3.36"/><path transform="translate(103.59 329.79) rotate(8.54)" d="M0.19-3.70L4.65-10.35L4.79-10.35L6.10-1.06Q6.18-0.62 6.47-0.38Q6.77-0.14 7.16-0.14L7.39-0.14L7.39 0L2.25 0L2.25-0.13L2.48-0.13Q2.71-0.13 2.88-0.33Q3.04-0.52 3.04-0.75L3.04-0.77L2.49-4.99L0.03-1.33L-0.13-1.07Q-0.29-0.81-0.44-0.43Q-0.59-0.04-0.58 0.35L-0.71 0.35L-4.48-4.87L-4.99-0.81L-4.99-0.75Q-4.99-0.52-4.82-0.33Q-4.65-0.13-4.42-0.13L-4.19-0.13L-4.19 0L-7.38 0L-7.38-0.14L-7.15-0.14Q-6.76-0.14-6.45-0.38Q-6.15-0.62-6.09-1.06L-4.81-10.35L-4.68-10.35"/><path transform="translate(117.22 331.58) rotate(6.46)" d="M-3.50-1.06L-3.50-9.09Q-3.50-9.47-3.78-9.74Q-4.05-10.01-4.43-10.01L-4.60-10.01L-4.62-10.15L0.91-10.15Q2.36-10.15 3.21-9.77Q4.07-9.38 4.47-8.76Q4.86-8.13 4.91-7.38Q4.95-6.58 4.67-5.93Q4.39-5.28 3.87-4.84Q3.36-4.41 2.70-4.23Q2.05-4.05 1.34-4.17Q0.63-4.29-0.04-4.77L-0.04-4.92L0.11-4.94Q0.24-4.96 0.46-5.05Q0.67-5.13 0.91-5.31Q1.15-5.48 1.37-5.81Q1.59-6.13 1.70-6.63Q1.76-6.84 1.78-7.08Q1.81-7.31 1.79-7.50Q1.76-8.38 1.29-8.90Q0.82-9.43-0.02-9.43L-0.53-9.43L-0.53-1.06Q-0.51-0.68-0.25-0.41Q0.02-0.14 0.40-0.14L0.59-0.14L0.59 0L-4.62 0L-4.62-0.14L-4.43-0.14Q-4.05-0.14-3.78-0.41Q-3.52-0.68-3.50-1.06"/><path transform="translate(128.72 332.71) rotate(4.72)" d="M4.49-3.36L4.63-3.36L4.08 0L-4.40 0L-4.40-0.14L-4.21-0.14Q-3.84-0.14-3.57-0.41Q-3.30-0.68-3.28-1.06L-3.28-9.09Q-3.30-9.47-3.57-9.74Q-3.84-10.01-4.21-10.01L-4.40-10.01L-4.40-10.15L1.98-10.15Q2.30-10.15 2.65-10.19Q3.01-10.24 3.31-10.29Q3.62-10.35 3.75-10.41L3.75-7.42L3.60-7.42L3.60-7.54Q3.60-8.41 3.11-8.92Q2.69-9.34 1.98-9.41L-0.31-9.41L-0.31-5.37L1.27-5.37Q1.95-5.38 2.40-5.83Q2.85-6.28 2.83-6.96L2.83-7.02L2.98-7.02L2.98-2.99L2.83-2.99L2.83-3.06Q2.83-3.74 2.39-4.18Q1.95-4.63 1.27-4.64L-0.31-4.64L-0.31-0.74L1.47-0.74Q2.17-0.74 2.77-1.05Q3.37-1.36 3.82-1.95Q4.27-2.54 4.49-3.36"/><path transform="translate(140.88 333.52) rotate(2.88)" d="M-4.13-1.06L-4.13-9.09Q-4.14-9.47-4.41-9.74Q-4.68-10.01-5.05-10.01L-5.24-10.01L-5.24-10.15L0.43-10.15Q1.08-10.15 1.76-10.03Q2.44-9.92 3.01-9.62Q3.57-9.32 3.92-8.79Q4.27-8.25 4.27-7.41Q4.27-6.86 4.07-6.27Q3.86-5.68 3.36-5.24Q2.86-4.80 1.95-4.65Q2.56-4.48 3.01-4.06Q3.46-3.64 3.72-3.20Q3.75-3.16 3.86-2.96Q3.98-2.76 4.16-2.46Q4.34-2.16 4.55-1.84Q4.75-1.52 4.95-1.25Q5.29-0.80 5.53-0.57Q5.78-0.33 6.03-0.25Q6.29-0.16 6.63-0.14L6.63 0L4.82 0Q3.95 0 3.21-0.10Q2.47-0.20 1.89-0.55Q1.30-0.90 0.85-1.65Q0.69-1.91 0.59-2.18Q0.49-2.44 0.41-2.68Q0.34-2.93 0.29-3.15Q0.24-3.38 0.20-3.59Q0.15-3.80 0.09-3.99Q-0.05-4.51-0.25-4.70Q-0.46-4.89-0.66-4.96L-0.66-5.10L-0.43-5.10Q-0.02-5.10 0.30-5.29Q0.62-5.48 0.83-5.87Q1.05-6.26 1.12-6.89Q1.14-7 1.15-7.14Q1.17-7.28 1.15-7.48Q1.09-8.55 0.62-8.98Q0.15-9.40-0.50-9.40L-1.14-9.40L-1.14-1.06Q-1.14-0.68-0.86-0.41Q-0.59-0.14-0.21-0.14L-0.04-0.14L-0.04 0L-5.24 0L-5.24-0.14L-5.05-0.14Q-4.68-0.14-4.41-0.41Q-4.14-0.68-4.13-1.06"/><path transform="translate(150.03 333.87) rotate(1.50)" d=""/><path transform="translate(156.48 333.98) rotate(0.53)" d="M-1.48-1.06L-1.48-9.09Q-1.49-9.47-1.76-9.74Q-2.03-10.01-2.41-10.01L-2.60-10.01L-2.60-10.15L2.61-10.15L2.61-10.01L2.42-10.01Q2.04-10.01 1.78-9.74Q1.51-9.47 1.49-9.09L1.49-1.06Q1.51-0.68 1.78-0.41Q2.04-0.14 2.42-0.14L2.61-0.14L2.61 0L-2.60 0L-2.60-0.14L-2.41-0.14Q-2.03-0.14-1.76-0.41Q-1.49-0.68-1.48-1.06"/><path transform="translate(167.49 333.93) rotate(-1.13)" d="M-5.13-10.37L-4.98-10.37L1.96-4.19L1.96-9.12Q1.95-9.50 1.70-9.75Q1.44-10.01 1.07-10.01L0.79-10.01L0.79-10.15L6.10-10.15L6.10-10.01L5.84-10.01Q5.47-10.01 5.21-9.75Q4.95-9.50 4.94-9.12L4.94-1.65Q4.94-1.06 4.99-0.64Q5.04-0.22 5.08-0.01L5.13 0.20L5 0.20L-1.96-5.97L-1.95-1.03Q-1.95-0.67-1.69-0.41Q-1.43-0.14-1.07-0.14L-0.79-0.14L-0.79 0L-6.10 0L-6.10-0.14L-5.82-0.14Q-5.46-0.14-5.20-0.41Q-4.94-0.67-4.94-1.03L-4.94-8.55Q-4.94-9.41-5.02-9.89"/><path transform="translate(177.29 333.61) rotate(-2.61)" d=""/><path transform="translate(186.81 333.05) rotate(-4.05)" d="M-5.69-10.15L-0.72-10.15L-0.72-10.01L-0.95-10.01Q-1.27-10.01-1.49-9.80Q-1.72-9.60-1.72-9.28L-1.72-3.77Q-1.72-2.76-1.40-2.03Q-1.08-1.31-0.49-0.92Q0.09-0.54 0.92-0.54Q1.76-0.54 2.35-0.90Q2.94-1.26 3.26-1.94Q3.57-2.62 3.57-3.58L3.57-9.28Q3.57-9.60 3.35-9.80Q3.12-10.01 2.81-10.01L2.57-10.01L2.57-10.15L5.84-10.15L5.84-10.01L5.60-10.01Q5.29-10.01 5.06-9.80Q4.84-9.60 4.84-9.28L4.84-3.73Q4.84-2.51 4.33-1.62Q3.82-0.74 2.85-0.27Q1.88 0.20 0.49 0.20Q-1.28 0.20-2.44-0.27Q-3.59-0.74-4.14-1.62Q-4.69-2.49-4.69-3.71L-4.69-9.28Q-4.69-9.60-4.92-9.80Q-5.14-10.01-5.46-10.01L-5.69-10.01"/><path transform="translate(201.28 331.75) rotate(-6.24)" d="M0.19-3.70L4.65-10.35L4.79-10.35L6.10-1.06Q6.18-0.62 6.47-0.38Q6.77-0.14 7.16-0.14L7.39-0.14L7.39 0L2.25 0L2.25-0.13L2.48-0.13Q2.71-0.13 2.88-0.33Q3.04-0.52 3.04-0.75L3.04-0.77L2.49-4.99L0.03-1.33L-0.13-1.07Q-0.29-0.81-0.44-0.43Q-0.59-0.04-0.58 0.35L-0.71 0.35L-4.48-4.87L-4.99-0.81L-4.99-0.75Q-4.99-0.52-4.82-0.33Q-4.65-0.13-4.42-0.13L-4.19-0.13L-4.19 0L-7.38 0L-7.38-0.14L-7.15-0.14Q-6.76-0.14-6.45-0.38Q-6.15-0.62-6.09-1.06L-4.81-10.35L-4.68-10.35"/><path transform="translate(215.08 329.99) rotate(-8.33)" d="M-3.75-1.06L-3.75-9.09Q-3.76-9.47-4.03-9.74Q-4.30-10.01-4.68-10.01L-4.86-10.01L-4.86-10.15L0.18-10.15Q1.27-10.15 2.18-9.93Q3.10-9.71 3.65-9.17Q4.21-8.63 4.21-7.63Q4.21-6.93 3.94-6.47Q3.66-6 3.23-5.77Q2.81-5.54 2.31-5.52Q3.02-5.50 3.63-5.18Q4.23-4.86 4.59-4.28Q4.95-3.71 4.95-2.90Q4.95-1.90 4.36-1.25Q3.78-0.61 2.75-0.30Q1.73 0 0.41 0L-4.86 0L-4.86-0.14L-4.68-0.14Q-4.30-0.14-4.03-0.41Q-3.76-0.68-3.75-1.06M-0.59-9.43L-0.78-9.43L-0.78-0.74L-0.59-0.74Q-0.01-0.74 0.48-0.97Q0.96-1.20 1.25-1.73Q1.54-2.25 1.54-3.12Q1.54-3.64 1.43-4.05Q1.31-4.47 1.09-4.76Q0.86-5.06 0.52-5.21Q0.18-5.37-0.28-5.37L-0.28-5.50Q0.07-5.50 0.33-5.63Q0.59-5.76 0.75-6Q0.92-6.24 1.01-6.59Q1.09-6.95 1.09-7.40Q1.09-8.18 0.87-8.62Q0.65-9.06 0.27-9.24Q-0.11-9.43-0.59-9.43"/><path transform="translate(227.57 327.95) rotate(-10.24)" d="M-4.13-1.06L-4.13-9.09Q-4.14-9.47-4.41-9.74Q-4.68-10.01-5.05-10.01L-5.24-10.01L-5.24-10.15L0.43-10.15Q1.08-10.15 1.76-10.03Q2.44-9.92 3.01-9.62Q3.57-9.32 3.92-8.79Q4.27-8.25 4.27-7.41Q4.27-6.86 4.07-6.27Q3.86-5.68 3.36-5.24Q2.86-4.80 1.95-4.65Q2.56-4.48 3.01-4.06Q3.46-3.64 3.72-3.20Q3.75-3.16 3.86-2.96Q3.98-2.76 4.16-2.46Q4.34-2.16 4.55-1.84Q4.75-1.52 4.95-1.25Q5.29-0.80 5.53-0.57Q5.78-0.33 6.03-0.25Q6.29-0.16 6.63-0.14L6.63 0L4.82 0Q3.95 0 3.21-0.10Q2.47-0.20 1.89-0.55Q1.30-0.90 0.85-1.65Q0.69-1.91 0.59-2.18Q0.49-2.44 0.41-2.68Q0.34-2.93 0.29-3.15Q0.24-3.38 0.20-3.59Q0.15-3.80 0.09-3.99Q-0.05-4.51-0.25-4.70Q-0.46-4.89-0.66-4.96L-0.66-5.10L-0.43-5.10Q-0.02-5.10 0.30-5.29Q0.62-5.48 0.83-5.87Q1.05-6.26 1.12-6.89Q1.14-7 1.15-7.14Q1.17-7.28 1.15-7.48Q1.09-8.55 0.62-8.98Q0.15-9.40-0.50-9.40L-1.14-9.40L-1.14-1.06Q-1.14-0.68-0.86-0.41Q-0.59-0.14-0.21-0.14L-0.04-0.14L-0.04 0L-5.24 0L-5.24-0.14L-5.05-0.14Q-4.68-0.14-4.41-0.41Q-4.14-0.68-4.13-1.06"/><path transform="translate(239.89 325.51) rotate(-12.14)" d="M-0.26-10.50L-0.13-10.50L4.49-0.90Q4.71-0.52 5-0.36Q5.35-0.14 5.68-0.14L5.80-0.14L5.80 0L0.30 0L0.30-0.14L0.43-0.14Q0.72-0.14 0.95-0.38Q1.17-0.62 0.99-1.06L1-1.06L0.43-2.41L-2.67-2.41L-3.26-1.06L-3.25-1.06Q-3.38-0.77-3.31-0.57Q-3.23-0.36-3.05-0.25Q-2.87-0.14-2.70-0.14L-2.57-0.14L-2.57 0L-5.80 0L-5.80-0.14L-5.67-0.14Q-5.34-0.14-4.97-0.36Q-4.70-0.52-4.50-0.86L-1.09-8.34Q-1.02-8.47-0.89-8.75Q-0.77-9.03-0.63-9.37Q-0.49-9.70-0.38-10.01Q-0.28-10.31-0.26-10.50M0.13-3.13L-1.09-6.05L-2.35-3.13"/></g>
+      </g>
+      <g filter="url(#thread)"><path d="M160.00 349.00L162.22 354.94L168.56 355.22L163.59 359.17L165.29 365.28L160.00 361.78L154.71 365.28L156.41 359.17L151.44 355.22L157.78 354.94Z" fill="url(#st-coyote-c)" stroke="#1b1c17" stroke-width="1.4" stroke-linejoin="round"/></g>
+    </g>
+    <g filter="url(#roll)">
+  <path d="M40 121.45A232 232 0 0 1 280 121.45L280 262C280 322 214 360 160 388C106 360 40 322 40 262Z" fill="none" stroke="#202119" stroke-width="13" stroke-linejoin="round"/>
+  <path d="M40 121.45A232 232 0 0 1 280 121.45L280 262C280 322 214 360 160 388C106 360 40 322 40 262Z" fill="none" stroke="#575848" stroke-width="11" stroke-dasharray=".8 1" stroke-linejoin="round"/>
+  <path d="M40 121.45A232 232 0 0 1 280 121.45L280 262C280 322 214 360 160 388C106 360 40 322 40 262Z" fill="none" stroke="#000" stroke-width="1" opacity=".55" transform="translate(0 0)"/>
+</g>
+  </g>
+</g>
+</svg>

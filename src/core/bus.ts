@@ -44,6 +44,14 @@ export interface GameEvents {
   camHand: { active: boolean };
   drillState: { state: 'standby' | 'running' | 'finished'; drillId: string };
   timerBeep: { kind: 'start' | 'stop' };
+  /** A scoring target registered a hit (paper zone, or steel). No-shoot paper sets `noShoot`. */
+  targetHit: {
+    targetId: string;
+    kind: 'paper' | 'steel';
+    zone?: 'A' | 'C' | 'D';
+    noShoot?: boolean;
+    point: Vector3;
+  };
 }
 
 type Handler<T> = (e: T) => void;

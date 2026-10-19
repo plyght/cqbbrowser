@@ -13,7 +13,10 @@
     "format:check": "prettier --check .",
     "test": "bun test src",
     "e2e": "playwright test",
-    "check:assets": "bun tools/check-assets.ts"
+    "check:assets": "bun tools/check-assets.ts",
+    "check:workflows": "bun tools/check-workflows.ts",
+    "brand": "bun tools/brand/build-brand.ts",
+    "contact-sheet": "bun tools/contact-sheet.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.21.0",
@@ -26,6 +29,7 @@
     "@types/bun": "^1.4.3",
     "@types/three": "^0.186.0",
     "eslint": "^10.13.0",
+    "opentype.js": "2.0.0",
     "prettier": "^3.9.10",
     "typescript": "5.9",
     "typescript-eslint": "^8.71.2",
