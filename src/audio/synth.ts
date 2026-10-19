@@ -197,6 +197,37 @@ export function pressurePulse(rate: number) {
   return out;
 }
 
+/**
+ * Chest/body thump of a close unsuppressed shot: a tight 40–120 Hz transient (fast downward sweep, ~60 ms),
+ * felt more than heard. Not a Hollywood boom: it's over in under 0.15 s.
+ */
+export function shotThump(rate: number, rng: Rng) {
+  const out = alloc(0.16, rate);
+  const f0 = 105 + rng() * 20;
+  const f1 = 42 + rng() * 8;
+  let ph = 0;
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate;
+    const f = f1 + (f0 - f1) * Math.exp(-t / 0.018);
+    ph += (TAU * f) / rate;
+    const att = Math.min(1, t / 0.0015);
+    out[i] = Math.sin(ph) * att * Math.exp(-t / 0.032);
+  }
+  // A little broadband "punch" at the very front so it reads on small speakers too.
+  burst(out, rate, rng, { dur: 0.012, gain: 0.35, lp: 900 });
+  return normalisePeak(out, 0.95);
+}
+
+/** Sharp initial crack: N-wave edge + a few ms of bright noise (the supersonic/blast front). */
+export function crack(rate: number, rng: Rng) {
+  const out = alloc(0.03, rate);
+  const nw = Math.max(2, Math.floor(0.00035 * rate));
+  for (let i = 0; i < nw * 2; i++) out[i] += i < nw ? 1 - i / nw : -(1 - (i - nw) / nw) * 0.8;
+  burst(out, rate, rng, { dur: 0.006, gain: 0.9, hp: 2500, attack: 0.00005 });
+  burst(out, rate, rng, { dur: 0.02, gain: 0.25, hp: 1200 });
+  return normalisePeak(out, 0.95);
+}
+
 export type MechKind = 'ar' | 'ak' | 'pistol';
 
 /** Close, dry mechanical layer: bolt carrier / slide clacks, buffer spring twang. */
@@ -452,9 +483,15 @@ export function click(rate: number, rng: Rng, pitch = 1) {
 
 /** Loose gear rattle (stressed reloads, running): many tiny clicks. */
 export function rattle(rate: number, rng: Rng) {
+  // Broadband 1–3 ms clacks only: tonal decaying pings read as water drips, not gear.
   const out = alloc(0.3, rate);
-  for (let k = 0; k < 10; k++)
-    modal(out, rate, [[1800 + rng() * 3000, 0.2 + rng() * 0.3, 0.02]], rng() * 0.25, rng);
+  for (let k = 0; k < 9; k++)
+    burst(out, rate, rng, {
+      at: rng() * 0.25,
+      dur: 0.002 + rng() * 0.002,
+      gain: 0.3 + rng() * 0.5,
+      hp: 1200,
+    });
   return normalisePeak(out, 0.6);
 }
 
