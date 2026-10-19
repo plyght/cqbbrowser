@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { type Matrix4, Vector3 } from 'three';
 
 const _dir = new Vector3();
 const _pole = new Vector3();
@@ -41,4 +41,28 @@ export function solveTwoBone(
   outMid.copy(root).addScaledVector(_dir, a).addScaledVector(_pole, h);
   outEnd.copy(root).addScaledVector(_dir, dist);
   return reached;
+}
+
+const _hz = new Vector3();
+const _nat = new Vector3();
+/**
+ * Elbow pole for an arm reaching a hand frame: the swivel that lines the forearm up with the hand (+z of the hand
+ * frame = toward the wrist/forearm) keeps the wrist near neutral; blended with the natural "down and out" pole
+ * (`natural`, a direction from the shoulder) so elbows never flip up. Writes and returns `out` (a world point).
+ */
+export function armPole(
+  shoulder: Vector3,
+  wrist: Vector3,
+  hand: Matrix4,
+  natural: Vector3,
+  out: Vector3,
+  k = 0.9,
+) {
+  _hz.set(0, 0, 1).transformDirection(hand);
+  _nat.copy(natural).normalize();
+  out
+    .copy(_hz)
+    .multiplyScalar(k)
+    .addScaledVector(_nat, 1 - k);
+  return out.multiplyScalar(0.5).add(k > 0.5 ? wrist : shoulder);
 }

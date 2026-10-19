@@ -4,7 +4,6 @@ import {
   BufferGeometry,
   CapsuleGeometry,
   Color,
-  Euler,
   Float32BufferAttribute,
   Matrix4,
   MeshStandardMaterial,
@@ -18,24 +17,12 @@ import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { HAND_POSES, POSE_SIZE } from '../anim/handPoses';
 import { solveTwoBone } from '../anim/ik';
 import { rigTextures } from './textures';
+import { FINGERS, N_BONES, THUMB, THUMB_BONE, WRIST, fingerBone, fingerFK } from '../anim/grip/hand';
+
+export { WRIST };
 
 /** Arm segment lengths (m): shoulder→elbow, elbow→wrist. */
 export const ARM = { upper: 0.31, fore: 0.29 };
-
-/**
- * Hand frame (both sides): origin at the grasp centre (the axis the curled fingers wrap around), fingers along
- * -z, back of the hand +y, palm -y. Right hand's thumb is on -x, left hand's on +x (mirrored).
- */
-export const WRIST = new Vector3(0, 0.034, 0.072);
-const KNUCKLE_Y = 0.035;
-const KNUCKLE_Z = -0.034;
-const FINGERS = [
-  { x: -0.029, len: [0.044, 0.026, 0.021], r: 0.0098, splay: 0.06 },
-  { x: -0.0095, len: [0.048, 0.029, 0.023], r: 0.0102, splay: 0.015 },
-  { x: 0.0095, len: [0.045, 0.027, 0.022], r: 0.0097, splay: -0.03 },
-  { x: 0.028, len: [0.036, 0.021, 0.019], r: 0.0086, splay: -0.08 },
-];
-const THUMB = { x: -0.034, y: 0.022, z: 0.026, len: [0.04, 0.032, 0.026], r: 0.0112 };
 
 /** Colours (sRGB hex). Glove: dark coyote synthetic back, darker suede palm, black TPR knuckles. */
 export const PALETTE = {
@@ -52,9 +39,8 @@ const B_UPPER = 0,
   B_FORE = 1,
   B_TWIST = 2,
   B_HAND = 3,
-  B_THUMB = 16,
-  NB = 19;
-const fingerBone = (f: number, j: number) => 4 + f * 3 + j;
+  B_THUMB = THUMB_BONE,
+  NB = N_BONES;
 
 const L1 = ARM.upper,
   L2 = ARM.fore;
@@ -224,44 +210,9 @@ const gloveUV = (p: Vector3, n: Vector3): [number, number] => {
 };
 
 const ZERO_POSE = new Float32Array(POSE_SIZE);
-const _m = new Matrix4();
-const _l = new Matrix4();
 const _q = new Quaternion();
-const _e = new Euler(0, 0, 0, 'ZYX');
 const _v = new Vector3();
 const _one = new Vector3(1, 1, 1);
-
-/** m = m * T(x,y,z) * R(e). */
-function mulTR(m: Matrix4, x: number, y: number, z: number, e: Euler) {
-  _q.setFromEuler(e);
-  _l.compose(_v.set(x, y, z), _q, _one);
-  m.multiply(_l);
-}
-
-/** Finger/thumb forward kinematics from a hand matrix; writes bone matrices into `out`. */
-function fingerFK(hand: Matrix4, s: number, c: Float32Array, out: Matrix4[]) {
-  for (let f = 0; f < 4; f++) {
-    const fd = FINGERS[f];
-    _m.copy(hand);
-    _e.set(c[f * 3], s * fd.splay, 0);
-    mulTR(_m, s * fd.x, KNUCKLE_Y, KNUCKLE_Z, _e);
-    out[fingerBone(f, 0)].copy(_m);
-    for (let j = 1; j < 3; j++) {
-      _e.set(c[f * 3 + j], 0, 0);
-      mulTR(_m, 0, 0, -fd.len[j - 1], _e);
-      out[fingerBone(f, j)].copy(_m);
-    }
-  }
-  _m.copy(hand);
-  _e.set(-0.3 + c[13] * 0.3, s * 0.75, s * (0.35 + c[12]));
-  mulTR(_m, s * THUMB.x, THUMB.y, THUMB.z, _e);
-  out[B_THUMB].copy(_m);
-  for (let j = 1; j < 3; j++) {
-    _e.set(c[12 + j], 0, 0);
-    mulTR(_m, 0, 0, -THUMB.len[j - 1], _e);
-    out[B_THUMB + j].copy(_m);
-  }
-}
 
 /** Bind pose: arm straight along -z, palm down. Bone bind matrices (arm space). */
 function bindPose(s: 1 | -1): Matrix4[] {

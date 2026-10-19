@@ -5,12 +5,13 @@
 export type HandPoseName =
   'relaxed' | 'grip' | 'trigger' | 'support' | 'cclamp' | 'magGrab' | 'pinch' | 'flat' | 'fist' | 'cam';
 
-export const POSE_SIZE = 15;
+/** 15 curls + [15] index abduction (rad, + = toward the thumb side). */
+export const POSE_SIZE = 16;
 
 const f = (a: number, b: number, c: number) => [a, b, c];
 
 function pose(index: number[], middle: number[], ring: number[], pinky: number[], thumb: number[]) {
-  return Float32Array.from([...index, ...middle, ...ring, ...pinky, ...thumb]);
+  return Float32Array.from([...index, ...middle, ...ring, ...pinky, ...thumb, 0]);
 }
 
 const wrap = f(-1.3, -1.45, -1.0);

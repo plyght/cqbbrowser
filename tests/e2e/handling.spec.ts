@@ -24,8 +24,8 @@ async function sim(page: Page, n: number, input?: Record<string, unknown>) {
 
 const kind = (page: Page) => page.evaluate(() => (window as any).__sb.weapons.reload.kind as string);
 
-async function start(page: Page) {
-  const errors = await boot(page);
+async function start(page: Page, path = '/') {
+  const errors = await boot(page, path);
   await page.evaluate(() => ((window as any).__sb.renderer.dynres.enabled = false));
   await play(page);
   await sim(page, 150);
@@ -41,9 +41,17 @@ test('handling: high ready, ADS, fast turn lag', async ({ page }) => {
   await shot(page, 'ads');
   await sim(page, 30);
   // Fast turn: the view arrives first, the muzzle a beat later.
-  await sim(page, 1, { look: { yaw: 0.35, pitch: 0 } });
-  await sim(page, 1, { look: { yaw: 0.35, pitch: 0 } });
+  for (let i = 0; i < 4; i++) await sim(page, 1, { look: { yaw: 0.1, pitch: 0 } });
   await shot(page, 'turn-lag');
+  // The gun trails the view through the turn (simulated weapon body behind the torso aim).
+  const lag = await page.evaluate(() => {
+    const g = (window as any).__sb;
+    const cam = g.ctx.camera;
+    const d = cam.position.clone().set(0, 0, -1).applyQuaternion(cam.quaternion);
+    const b = g.weapons.muzzleWorld().dir;
+    return Math.atan2(d.clone().cross(b).y, d.dot(b));
+  });
+  expect(Math.abs(lag)).toBeGreaterThan(0.02);
   expect(errors).toEqual([]);
 });
 
@@ -203,5 +211,46 @@ test('handling: ADS sight pictures per optic, zeroed bore', async ({ page }) => 
       await sim(page, 30);
     }
   }
+  expect(errors).toEqual([]);
+});
+
+test('handling: ?grip overlay — solved grips coloured by SDF', async ({ page }) => {
+  const errors = await start(page, '/?grip');
+  const worst = () => page.evaluate(() => (window as any).__sb.weapons.gripOverlay.worst as number);
+  // Close-up of the hands from beside the gun so the sample dots are readable.
+  const closeUp = async (name: string, off: number[]) => {
+    await page.evaluate((off) => {
+      const g = (window as any).__sb;
+      const cam = g.ctx.camera;
+      const v = g.weapons.view;
+      const save = { p: cam.position.clone(), q: cam.quaternion.clone(), fov: cam.fov, near: cam.near };
+      const target = v.position
+        .clone()
+        .add(cam.position.clone().set(0, 0.0, -0.08).applyQuaternion(v.quaternion));
+      cam.position
+        .copy(target)
+        .add(cam.position.clone().set(off[0], off[1], off[2]).applyQuaternion(v.quaternion));
+      cam.lookAt(target);
+      cam.fov = 45;
+      cam.near = 0.01;
+      cam.updateProjectionMatrix();
+      g.renderer.render(1 / 60);
+      cam.position.copy(save.p);
+      cam.quaternion.copy(save.q);
+      cam.fov = save.fov;
+      cam.near = save.near;
+      cam.updateProjectionMatrix();
+    }, off);
+    await shot(page, `grip-${name}`);
+  };
+  await shot(page, 'grip-chestcam');
+  expect(await worst()).toBeLessThan(0.0015);
+  await closeUp('rifle-left', [-0.45, 0.12, -0.05]);
+  await closeUp('rifle-right', [0.45, 0.05, 0.05]);
+  await sim(page, 1, { down: ['switchWeapon'] });
+  await sim(page, 70);
+  expect(await worst()).toBeLessThan(0.0015);
+  await closeUp('pistol-left', [-0.35, 0.08, 0.1]);
+  await closeUp('pistol-right', [0.35, 0.05, 0.1]);
   expect(errors).toEqual([]);
 });

@@ -1,10 +1,11 @@
 import { Euler, Group, Matrix4, Object3D, Quaternion, Vector3 } from 'three';
 import type { Context, System } from '../core/Context';
-import { Spring, clamp, damp, noise1, rng, wrapAngle } from '../core/math';
+import { clamp, damp, noise1, rng } from '../core/math';
 import { ReloadGesture } from '../input/ReloadGesture';
 import { CHEST_MOUNT, type Player } from '../player/Player';
 import { ScopeOverlay } from '../player/ScopeOverlay';
 import { settings } from '../settings/Settings';
+import { CFG, type ClassCfg, type Hold } from '../anim/holds';
 import {
   BeatPlayer,
   VariantPicker,
@@ -30,12 +31,28 @@ import {
 } from '../anim/data/sequences';
 import { HAND_POSES, blendPose, POSE_SIZE } from '../anim/handPoses';
 import { ease } from '../anim/tracks';
+import type { ArmRig } from '../body/ArmRig';
 import { BodyRig } from '../body/BodyRig';
 import { DroppedMags } from '../body/DroppedMags';
 import { applyBuild, PRESETS } from './attachments';
 import { BASE_WEAPONS, WEAPONS, type FireMode, type WeaponDef } from './defs';
 import { Magazines } from './Magazines';
 import { buildModel, type SightLine, type WeaponModel } from './models';
+import { rigParams } from '../anim/handling/params';
+import { armSwivel } from '../anim/grip/arm';
+import { WRIST } from '../anim/grip/hand';
+import { GripOverlay } from '../anim/grip/GripOverlay';
+import {
+  anchorBasis,
+  basisQuat,
+  BASES,
+  resolveHandContact,
+  weaponAnchor,
+  weaponRig,
+  type WeaponRig,
+} from '../anim/grip/anchors';
+import { recoilFor, type RecoilProfile } from '../anim/handling/recoil';
+import { WeaponRigidBody, gainsFor } from '../anim/handling/sim';
 
 /** Kept for HUD/tests: what the hands are busy with. */
 export type ReloadState = { kind: 'idle' | 'reload' | 'check' | 'camFix' | 'switch' };
@@ -47,153 +64,6 @@ export const handlingSettings = settings.ns('gameplay.handling', {
   /** Realism preset gate for reload fumbles (§6.7). */
   fumbles: 'rare' as FumbleMode,
 });
-
-type HoldName = 'high' | 'ads' | 'low' | 'compressed' | 'sprint';
-interface Hold {
-  /** Weapon root (grip) position, torso-local. */
-  p: V3;
-  /** Weapon-local [pitch, yaw, roll] offsets from the converged aim. */
-  r: V3;
-}
-
-interface ClassCfg {
-  holds: Record<HoldName, Hold>;
-  /** How far below the magwell mouth the support hand holds the mag. */
-  graspDepth: number;
-  shoulderR: V3;
-  shoulderL: V3;
-  /** Elbow pole directions (torso-local). */
-  poleR: V3;
-  poleL: V3;
-  /** Holster / sling pose at the bottom of a weapon switch. */
-  away: Hold;
-  awayTime: number;
-  drawTime: number;
-  /** Fallback socket positions when a model lacks them. */
-  sockets: Record<string, V3>;
-  /** Hand bases [finger dir, back-of-hand dir] in the weapon frame. */
-  gripBasis: [V3, V3];
-  supportBasis: [V3, V3];
-}
-
-/**
- * Hold poses are tuned against chest-cam reference footage (camera at torso (-0.075, 0, -0.15)):
- * rifle at high ready enters bottom-right, big, rail running toward the aim point; ADS rises to the
- * upper centre with the optic large and close; pistol sits low-centre with both arms extended.
- */
-const CFG: Record<WeaponClass, ClassCfg> = {
-  rifle: {
-    holds: {
-      high: { p: [0.03, -0.235, -0.31], r: [-0.02, 0, 0] },
-      ads: { p: [0.03, 0.02, -0.28], r: [0, 0, 0] },
-      low: { p: [0.03, -0.28, -0.28], r: [-0.55, 0.05, 0.06] },
-      compressed: { p: [0.04, -0.2, -0.22], r: [-0.12, 0, 0] },
-      sprint: { p: [0.02, -0.25, -0.25], r: [-0.75, 0.55, -0.5] },
-    },
-    graspDepth: 0.065,
-    shoulderR: [0.19, 0.02, -0.02],
-    shoulderL: [-0.19, 0.0, -0.1],
-    poleR: [0.45, -0.55, 0.15],
-    poleL: [-0.8, -0.6, 0.0],
-    away: { p: [0.07, -0.34, 0.1], r: [-1.05, 0.35, 0.75] },
-    awayTime: 0.32,
-    drawTime: 0.42,
-    sockets: {
-      gripRight: [0, -0.04, 0.042],
-      gripLeft: [0, 0.03, -0.28],
-      magwell: [0, -0.015, -0.06],
-      chargingHandle: [0, 0.052, 0.098],
-      boltCatch: [-0.027, 0.005, -0.02],
-      slideRear: [0, 0.05, 0.05],
-    },
-    gripBasis: [
-      [0, -0.34, -0.94],
-      [1, 0, 0],
-    ],
-    supportBasis: [
-      [0.8, 0.5, -0.33],
-      [-0.5, -0.85, 0],
-    ],
-  },
-  pistol: {
-    holds: {
-      high: { p: [-0.055, -0.14, -0.55], r: [0, 0, 0] },
-      ads: { p: [-0.07, -0.02, -0.55], r: [0, 0, 0] },
-      low: { p: [-0.05, -0.25, -0.47], r: [-0.6, 0, 0] },
-      compressed: { p: [-0.01, -0.17, -0.3], r: [-0.1, 0, 0] },
-      sprint: { p: [0.06, -0.28, -0.3], r: [-1.0, 0.15, 0] },
-    },
-    graspDepth: 0.012,
-    shoulderR: [0.17, 0.06, -0.05],
-    shoulderL: [-0.17, 0.06, -0.05],
-    poleR: [0.45, -0.55, 0.05],
-    poleL: [-0.45, -0.55, 0.05],
-    away: { p: [0.14, -0.42, 0.26], r: [-1.3, 0, 0.2] },
-    awayTime: 0.36,
-    drawTime: 0.4,
-    sockets: {
-      gripRight: [0, -0.04, 0.012],
-      gripLeft: [-0.022, -0.052, 0],
-      magwell: [0, -0.105, 0.005],
-      chargingHandle: [0, 0.03, 0.022],
-      boltCatch: [-0.016, 0.0, -0.02],
-      slideRear: [0, 0.03, 0.022],
-    },
-    gripBasis: [
-      [0, -0.25, -0.97],
-      [1, 0, 0],
-    ],
-    supportBasis: [
-      [0.1, -0.25, -0.96],
-      [-1, 0, 0.1],
-    ],
-  },
-};
-
-/** Hand bases for the remaining anchors (left hand; weapon / mag / torso frames). */
-const BASES: Partial<Record<Anchor, [V3, V3]>> = {
-  well: [
-    [0, 0, -1],
-    [-1, 0, 0],
-  ],
-  charging: [
-    [1, 0, 0],
-    [0, 1, 0],
-  ],
-  boltCatch: [
-    [0, 0.3, -1],
-    [-1, 0, 0],
-  ],
-  slide: [
-    [1, -0.3, 0.15],
-    [0, 1, 0],
-  ],
-  cam: [
-    [0.3, 0.15, -1],
-    [-1, 0, 0],
-  ],
-};
-const VERTICAL_GRIP_BASIS: [V3, V3] = [
-  [0.12, -0.2, -0.97],
-  [-1, 0.05, 0],
-];
-const BODY_BASIS: [V3, V3] = [
-  [0, -0.3, -1],
-  [-1, 0, 0],
-];
-
-const _bx = new Vector3();
-const _by = new Vector3();
-const _bz = new Vector3();
-const _bm = new Matrix4();
-/** Quaternion whose -z is `finger` and +y is (orthogonalised) `back`. */
-function basisQuat([finger, back]: [V3, V3], out = new Quaternion()): Quaternion {
-  _bz.set(-finger[0], -finger[1], -finger[2]).normalize();
-  _by.set(back[0], back[1], back[2]);
-  _by.addScaledVector(_bz, -_by.dot(_bz)).normalize();
-  _bx.crossVectors(_by, _bz);
-  return out.setFromRotationMatrix(_bm.makeBasis(_bx, _by, _bz));
-}
 
 interface Part {
   obj: Object3D;
@@ -213,12 +83,14 @@ interface Equipped {
   bolt: Part | null;
   slide: Part | null;
   charging: Part | null;
-  /** Mag frame: rest rotation (weapon frame) and the support-hand grasp point in mag-local coords. */
+  /** Mag rest rotation (weapon frame). */
   magRestQ: Quaternion;
-  magGrasp: Vector3;
-  gripQ: Quaternion;
-  supportQ: Quaternion;
   boltLocked: boolean;
+  /** Grip surfaces + solved hand placements (anim/grip). */
+  grip: WeaponRig;
+  /** Rigid-body handling sim for this build. */
+  body: WeaponRigidBody;
+  recoilProfile: RecoilProfile;
   /** Muzzle tip in the weapon frame (bullets leave the barrel, not the screen centre). */
   muzzleLocal: Vector3;
   /** Rear-of-sight point per aim mode, weapon frame. */
@@ -249,7 +121,12 @@ const _posA = new Vector3();
 const _posB = new Vector3();
 const _qA = new Quaternion();
 const _qB = new Quaternion();
-const _poseTmp = new Float32Array(POSE_SIZE);
+const _poseA = new Float32Array(POSE_SIZE);
+const _poseB = new Float32Array(POSE_SIZE);
+const _poseC = new Float32Array(POSE_SIZE);
+const _hw = new Matrix4();
+const _invView = new Matrix4();
+const CONTACT_ANCHORS = new Set<Anchor>(['well', 'charging', 'boltCatch', 'slide']);
 const _seg: HandSegment = { a: DEFAULT_LEFT, b: DEFAULT_LEFT, u: 1, mid: 0 };
 const _pseg: PoseSegment = { a: null, b: null, u: 1 };
 
@@ -288,14 +165,6 @@ export class WeaponController implements System {
   private cooldown = 0;
   private triggerHeld = false;
   private triggerW = 0;
-  private aimYaw = new Spring(9, 0.82);
-  private aimPitch = new Spring(9, 0.82);
-  private swayX = new Spring(5, 0.6);
-  private swayY = new Spring(5, 0.6);
-  private recoilPitch = new Spring(7, 0.75);
-  private recoilYaw = new Spring(6, 0.7);
-  private recoilRoll = new Spring(6, 0.6);
-  private recoilBack = new Spring(14, 0.6);
   private ads = 0;
   private wLow = 0;
   private wComp = 0;
@@ -307,8 +176,6 @@ export class WeaponController implements System {
   private idleTime = 0;
   private cycle = 0;
   private rand = rng(1337);
-  private prevTorsoYaw = 0;
-  private prevPitch = 0;
   private readonly aimTarget = new Vector3();
   private readonly drift = new Vector3();
   private readonly driftTarget = new Vector3();
@@ -329,9 +196,7 @@ export class WeaponController implements System {
     ctx.scene.add(this.view, ...this.body.objects);
     this.drops = new DroppedMags(ctx);
     this.scope = new ScopeOverlay(ctx.scene);
-    this.aimYaw.reset(player.yaw);
-    this.aimPitch.reset(player.pitch);
-    this.prevTorsoYaw = player.yaw;
+    if (GripOverlay.enabled()) this.gripOverlay = new GripOverlay(ctx.scene);
     const apply = (s: ReturnType<typeof handlingSettings.get>) => {
       this.inertia = clamp(s.weaponInertia, 0, 1.5);
       this.fumbleMode = s.fumbles;
@@ -347,29 +212,14 @@ export class WeaponController implements System {
     const root = model.root;
     root.updateMatrixWorld(true);
     const inv = new Matrix4().copy(root.matrixWorld).invert();
-    const sockets: Record<string, Vector3> = {};
-    const named = model.sockets as Record<string, Object3D | undefined>;
-    // Pistols rack on the slide serrations (the `chargingHandle` socket of the new models).
-    const alias: Record<string, string> = { slideRear: 'chargingHandle' };
-    for (const [name, fb] of Object.entries(cfg.sockets)) {
-      const o =
-        named[name] ??
-        (model.parts as Record<string, Object3D | undefined>)[name] ??
-        (alias[name] ? named[alias[name]] : undefined) ??
-        root.getObjectByName(name);
-      sockets[name] = o
-        ? new Vector3().setFromMatrixPosition(o.matrixWorld).applyMatrix4(inv)
-        : new Vector3(...fb);
-    }
+    // Sockets, mag frame, grip surfaces and the solved hand placements (anim/grip).
+    const rig = weaponRig(model, cfg);
+    const sockets = rig.sockets;
     const part = (name: string): Part | null => {
       const obj = (model.parts as Record<string, Object3D | undefined>)[name] ?? root.getObjectByName(name);
       return obj ? { obj, rest: obj.position.clone() } : null;
     };
     const mag = part('mag');
-    const magRestQ = mag ? mag.obj.quaternion.clone() : new Quaternion();
-    // Grasp point: below the well mouth along the mag axis, expressed in the mag's local frame.
-    const magGrasp = new Vector3(0, -cfg.graspDepth, 0).applyQuaternion(magRestQ).add(sockets.magwell);
-    if (mag) magGrasp.sub(mag.rest).applyQuaternion(magRestQ.clone().invert());
     const instability = clamp((def.recoil.up * 0.6 + def.recoil.side * 0.4) / (def.mass * 0.6), 0, 2);
     // Sight lines at rest in the weapon frame (immune to slide travel on pistols).
     const sightLocal = model.sightLines.map((l) =>
@@ -391,18 +241,13 @@ export class WeaponController implements System {
       bolt: part('bolt'),
       slide: part('slide'),
       charging: part('chargingHandle'),
-      magRestQ,
-      magGrasp,
-      gripQ: basisQuat(cfg.gripBasis),
-      // Vertical foregrip: the support hand wraps it like a pistol grip (thumb on top, palm facing right).
-      supportQ: basisQuat(
-        cls === 'rifle' && sockets.gripLeft.y < (model.boreY ?? 0.03) - 0.05
-          ? VERTICAL_GRIP_BASIS
-          : cfg.supportBasis,
-      ),
+      magRestQ: rig.magRestQ,
       boltLocked: false,
       muzzleLocal,
       sightLocal,
+      grip: rig,
+      body: new WeaponRigidBody(rigParams(def)),
+      recoilProfile: recoilFor(def, model.boreY ?? 0.03),
       adjustAfter: Math.max(1, Math.round(5 - instability * 2)),
     };
   }
@@ -414,7 +259,8 @@ export class WeaponController implements System {
   /** Start a sling/holster → draw switch. */
   equip(i: number) {
     const next = this.loadout[i];
-    if (!next || next === this.equipped || this.switching || this.busy) return;
+    // A switch interrupts anything but a reload (mag check, cam fix, grip readjust).
+    if (!next || next === this.equipped || this.switching || this.planKind === 'reload') return;
     this.stopPlan();
     this.switching = { phase: 'out', t: 0, to: i };
     this.emitBeat(this.equipped.cls === 'pistol' ? 'holster' : 'sling', false);
@@ -455,30 +301,8 @@ export class WeaponController implements System {
     this.equipped = next;
     this.view.add(next.model.root);
     this.aimIndex = 0;
+    this.simReset = true;
     this.stopPlan();
-  }
-
-  /** Spring frequency from mass/length: heavier & longer = more lag; ADS stiffens. */
-  private lagFreq(): number {
-    const d = this.equipped.def;
-    if (this.inertia < 0.05) return 60;
-    const adsBoost = 1 + this.adsBlend * 1.6;
-    // Build handling (§6.3): half-life h of a critically damped follow → ω = 1.678 / h.
-    const h = d.handling?.lagHalfLife;
-    const base = h ? 1.678 / h / (2 * Math.PI) : clamp(13 - d.mass * 1.4 - d.length * 4.5, 4, 16);
-    return (base * adsBoost) / Math.max(0.15, this.inertia);
-  }
-
-  /** Front-heavy / long builds overshoot on stop (build `overshoot` → damping ratio). */
-  private lagZeta(): number {
-    const d = this.equipped.def;
-    const os = d.handling?.overshoot;
-    if (os !== undefined) {
-      if (os < 0.005) return 0.98;
-      const l = Math.log(os);
-      return clamp(-l / Math.sqrt(Math.PI * Math.PI + l * l), 0.45, 0.98);
-    }
-    return clamp(0.93 - (d.length - 0.2) * 0.35 - (d.suppressed ? 0.06 : 0), 0.55, 0.95);
   }
 
   fixedUpdate() {
@@ -536,40 +360,10 @@ export class WeaponController implements System {
     _v2.copy(this.aimTarget).sub(_v);
     const wantYaw = Math.atan2(-_v2.x, -_v2.z);
     const wantPitch = Math.atan2(_v2.y, Math.hypot(_v2.x, _v2.z));
-    const freq = this.lagFreq();
-    this.aimYaw.freq = this.aimPitch.freq = freq;
-    this.aimYaw.zeta = this.aimPitch.zeta = this.lagZeta();
-    this.aimYaw.value = wantYaw - wrapAngle(wantYaw - this.aimYaw.value);
-    if (this.inertia < 0.05) {
-      this.aimYaw.reset(wantYaw);
-      this.aimPitch.reset(wantPitch);
-    } else {
-      this.aimYaw.step(wantYaw, dt);
-      this.aimPitch.step(wantPitch, dt);
-    }
 
-    // Positional inertia sway: opposite turn rate & look pitch, scaled by the inertia master.
-    const yawRate = wrapAngle(p.yaw - this.prevTorsoYaw) / Math.max(dt, 1e-4);
-    const pitchRate = (p.pitch - this.prevPitch) / Math.max(dt, 1e-4);
-    this.prevTorsoYaw = p.yaw;
-    this.prevPitch = p.pitch;
-    const sway = (1 - this.ads * 0.6) * this.inertia * (0.6 + d.mass * 0.15) * (d.handling?.swayMul ?? 1);
-    this.swayX.step(clamp(yawRate * 0.0035, -0.05, 0.05) * sway, dt);
-    this.swayY.step(clamp(-pitchRate * 0.003, -0.04, 0.04) * sway, dt);
-
-    // Recoil springs relax toward 0 (returns toward the original point of aim); fatigue slows recovery.
-    const rec = 1 - this.fatigue * 0.35;
-    const recMul = d.handling?.recoveryMul ?? 1;
-    this.recoilPitch.freq = 7 * rec * recMul;
-    this.recoilYaw.freq = 6 * rec * recMul;
-    this.recoilPitch.step(0, dt);
-    this.recoilYaw.step(0, dt);
-    this.recoilRoll.step(0, dt);
-    this.recoilBack.step(0, dt);
-
-    // Breathing + stress hand shake + fatigue; lower crouched and in ADS.
+    // Breathing + stress hand tremor + fatigue go into the hand targets; lower crouched and in ADS.
     const t = this.ctx.time;
-    const steady = (1 - this.ads * 0.5) * (1 - p.crouch * 0.25);
+    const steady = (1 - this.ads * 0.5) * (1 - p.crouch * 0.25) * (d.handling?.swayMul ?? 1);
     const shake = (0.0015 + p.stress * 0.006 + this.fatigue * 0.005) * steady;
     const breathY = Math.sin(t * 1.5 * (1 + p.stress * 0.5)) * 0.004 * (1 - this.ads * 0.7);
     const nX = noise1(t * 6.1, 1) * shake;
@@ -579,7 +373,7 @@ export class WeaponController implements System {
     this.idleTime += dt;
     if (this.sinceShot > 0.35 && this.shotsInString > 0) this.endString();
 
-    this.pose(nX, nY + breathY);
+    this.simulate(dt, wantYaw + nX, wantPitch + nY + breathY);
     this.updatePlan(dt);
     this.updateParts(dt);
     this.updateHands(dt);
@@ -631,11 +425,9 @@ export class WeaponController implements System {
     }
     // Muzzle tuck: retract and cant up; recoil drives the stock back.
     const len = e.def.length;
-    h.z += this.tuck * 0.16 * len + this.recoilBack.value * 0.04;
+    h.z += this.tuck * 0.16 * len;
     h.y += this.tuck * 0.03;
     r.x += this.tuck * 0.45;
-    h.x += this.swayX.value;
-    h.y += this.swayY.value;
     // Looking well down the arms don't follow the eyes all the way: the gun rides up in the frame,
     // uncovering the boots.
     // Offset dot: cant the weapon so the 45° sight comes on top.
@@ -645,20 +437,38 @@ export class WeaponController implements System {
     if (lift > 0) h.sub(CHEST_MOUNT).applyAxisAngle(X_AXIS, -lift).add(CHEST_MOUNT);
   }
 
-  private pose(nX: number, nY: number) {
+  /**
+   * Weapon pose from the rigid-body handling sim: the hands/shoulder chase the hold pose (torso aim toward
+   * the aim point + ready/beat offsets + tremor); lag, overshoot and recoil come out of the integration.
+   */
+  private simulate(dt: number, yaw: number, pitch: number) {
     const p = this.player;
+    const e = this.equipped;
+    const b = e.body;
     const r = this.holdR;
-    _e.set(
-      this.aimPitch.value + this.recoilPitch.value + nY,
-      this.aimYaw.value + this.recoilYaw.value + nX,
-      this.recoilRoll.value - p.lean * p.tuning.leanAngle * 0.85,
-    );
-    this.view.quaternion.setFromEuler(_e);
+    _e.set(pitch, yaw, -p.lean * p.tuning.leanAngle * 0.85);
+    _q.setFromEuler(_e);
     _e.set(r.x, r.y, r.z);
-    this.view.quaternion.multiply(_q.setFromEuler(_e));
-    this.view.position.copy(this.hold).applyMatrix4(p.torso.matrixWorld);
+    _q.multiply(_q2.setFromEuler(_e));
+    _v.copy(this.hold).applyMatrix4(p.torso.matrixWorld);
+    const jump = b.targetPos.distanceToSquared(_v) > 0.25;
+    b.targetPos.copy(_v);
+    b.targetQ.copy(_q);
+    gainsFor({ ads: this.adsBlend, fatigue: this.fatigue, inertia: this.inertia, crouch: p.crouch }, b.gains);
+    const rec = e.def.handling?.recoveryMul ?? 1;
+    b.gains.kHand *= rec;
+    b.gains.kWrist *= rec;
+    b.locked = this.inertia < 0.05;
+    if (jump || this.simReset) b.reset();
+    this.simReset = false;
+    b.step(dt);
+    b.origin(this.view.position);
+    this.view.quaternion.copy(b.q);
     this.view.updateMatrixWorld(true);
   }
+
+  /** Snap the handling sim to its target on the next frame (equip, teleport). */
+  private simReset = true;
 
   /** Selected aim mode per weapon (index into `model.sightLines`). */
   aimIndex = 0;
@@ -670,6 +480,8 @@ export class WeaponController implements System {
   private baseNear = 0;
   private lastNear = 0;
   private scope!: ScopeOverlay;
+  /** `?grip` debug overlay (finger samples coloured by SDF). */
+  gripOverlay: GripOverlay | null = null;
   private lastFov = 0;
 
   /** 0..1 eased ADS blend (camera chest → sight line). Read by HUD / post. */
@@ -820,10 +632,9 @@ export class WeaponController implements System {
     const r = d.recoil;
     const ramp = 1 + Math.min(this.shotsInString, 8) * 0.06;
     const fat = 1 + this.fatigue * 0.3;
-    this.recoilPitch.impulse(r.up * 0.9 * stab * ramp * fat * (1 - this.ads * 0.25));
-    this.recoilYaw.impulse((this.rand() - 0.5) * r.side * 0.9 * stab * fat);
-    this.recoilRoll.impulse((this.rand() - 0.4) * r.roll * 1.2 * stab);
-    this.recoilBack.impulse(r.back * 3);
+    // Impulse on the bore axis into the rigid body; the hands and shoulder recover it (§6.3.7).
+    const rp = e.recoilProfile;
+    e.body.recoil(rp.profile, rp.impulseNs * ramp * fat, (this.rand() - 0.5) * r.side * 0.035 * fat);
     this.player.kick(-r.up * 0.12 * stab, (this.rand() - 0.5) * 0.05, (this.rand() - 0.5) * 0.08);
     this.ctx.input.haptics.rumble(0.35 * r.back, 0.6, 70);
   }
@@ -899,6 +710,7 @@ export class WeaponController implements System {
   }
 
   private stopPlan() {
+    if (this.camHandOn) this.setCamHand(false);
     this.beats.stop();
     this.planKind = null;
     this.beats.holding = false;
@@ -1086,35 +898,14 @@ export class WeaponController implements System {
     const p = this.player;
     switch (at) {
       case 'grip':
-        outP.copy(e.sockets.gripRight).applyMatrix4(w);
-        outQ.copy(this.view.quaternion);
-        return;
       case 'handguard':
-        outP.copy(e.sockets.gripLeft).applyMatrix4(w);
-        outQ.copy(this.view.quaternion);
-        return;
       case 'well':
-        // Mag frame at rest (mag rotation within the weapon), origin at the support-hand grasp point.
-        outQ.copy(this.view.quaternion).multiply(e.magRestQ);
-        outP.copy(e.magGrasp).applyQuaternion(e.magRestQ);
-        if (e.mag) outP.add(e.mag.rest);
-        outP.applyMatrix4(w);
-        return;
       case 'charging':
-        outP.copy(e.sockets.chargingHandle);
-        outP.z += this.beats.part('charge') * 0.07;
-        outP.applyMatrix4(w);
-        outQ.copy(this.view.quaternion);
-        return;
       case 'boltCatch':
-        outP.copy(e.sockets.boltCatch).applyMatrix4(w);
-        outQ.copy(this.view.quaternion);
-        return;
       case 'slide':
-        outP.copy(e.sockets.slideRear);
-        outP.z += this.beats.part('slide') * 0.028;
+        weaponAnchor(e.grip, at, this.beats.part('charge'), this.beats.part('slide'), outP, outQ);
         outP.applyMatrix4(w);
-        outQ.copy(this.view.quaternion);
+        outQ.premultiply(this.view.quaternion);
         return;
       case 'pouch':
         this.body.rifleSlot(outP, outQ);
@@ -1139,10 +930,7 @@ export class WeaponController implements System {
   }
 
   private basis(at: Anchor, _side: 'left' | 'right', out: Quaternion): Quaternion {
-    const e = this.equipped;
-    if (at === 'grip') return out.copy(e.gripQ);
-    if (at === 'handguard') return out.copy(e.supportQ);
-    return basisQuat(BASES[at] ?? BODY_BASIS, out);
+    return anchorBasis(this.equipped.grip, at, out);
   }
 
   /** Resolve a key to a world hand transform. */
@@ -1174,16 +962,45 @@ export class WeaponController implements System {
     const jitter = b?.jitter ?? ZERO3;
     if (!seg) {
       this.keyToWorld(def, side, ZERO3, 0, outP, outQ);
-      curls.set(HAND_POSES[def.pose ?? 'relaxed']);
+      curls.set(this.poseFor(def, def, side));
       return;
     }
     this.keyToWorld(seg.a, side, jitter, 0, _posA, _qA);
     this.keyToWorld(seg.b, side, jitter, seg.mid, _posB, _qB);
     outP.lerpVectors(_posA, _posB, seg.u);
     outQ.slerpQuaternions(_qA, _qB, seg.u);
-    const pa = HAND_POSES[seg.a.pose ?? def.pose ?? 'relaxed'];
-    const pb = HAND_POSES[seg.b.pose ?? seg.a.pose ?? def.pose ?? 'relaxed'];
-    blendPose(pa, pb, seg.u, curls);
+    _poseA.set(this.poseFor(seg.a, def, side));
+    blendPose(_poseA, this.poseFor(seg.b, def, side, seg.a), seg.u, curls);
+    // Hands working on the gun (mag well, charging handle, bolt catch, slide): the authored pose is the intent,
+    // the fingers close only until they touch the weapon surfaces.
+    if (CONTACT_ANCHORS.has(seg.b.at) || CONTACT_ANCHORS.has(seg.a.at)) {
+      _hw.compose(outP, outQ, _one);
+      _invView.copy(this.view.matrixWorld).invert();
+      _hw.premultiply(_invView);
+      _poseB.set(curls);
+      resolveHandContact(this.equipped.grip, _hw, side === 'left' ? -1 : 1, _poseB, curls, this.magHeld);
+      _hw.premultiply(this.view.matrixWorld);
+      _hw.decompose(outP, outQ, _v);
+    }
+  }
+
+  /** Curls for a key: solved grips on the grip / handguard, authored poses elsewhere. */
+  private poseFor(k: HandKey, def: HandKey, side: 'left' | 'right', prev?: HandKey): Float32Array {
+    const g = this.equipped.grip;
+    const name = k.pose ?? prev?.pose ?? def.pose ?? 'relaxed';
+    if (k.at === 'grip' && side === 'right' && (name === 'grip' || name === 'trigger'))
+      return blendPose(g.fire.curls, g.fireTrigger.curls, name === 'trigger' ? 1 : this.triggerW, _poseC);
+    if (k.at === 'handguard' && side === 'left' && (name === 'support' || name === 'cclamp'))
+      return g.support.curls;
+    return HAND_POSES[name];
+  }
+
+  private elbowPole(a: ArmRig, natural: V3, tw: Matrix4) {
+    _m.compose(a.handPos, a.handQuat, _one);
+    _v.copy(WRIST).applyMatrix4(_m);
+    _v2.fromArray(natural).transformDirection(tw);
+    _v3.set(0, 1, 0).transformDirection(tw);
+    armSwivel(a.shoulder, _v, _m, _v2, _v3, a.side, a.pole);
   }
 
   private updateHands(_dt: number) {
@@ -1196,22 +1013,21 @@ export class WeaponController implements System {
     // Shoulders: ADS draws the right shoulder in under the cheek weld; sprint drops them a little.
     R.shoulder.set(cfg.shoulderR[0] - this.ads * 0.03, cfg.shoulderR[1], cfg.shoulderR[2] - this.ads * 0.02);
     L.shoulder.set(cfg.shoulderL[0], cfg.shoulderL[1], cfg.shoulderL[2] - this.ads * 0.02);
-    R.pole.fromArray(cfg.poleR).add(R.shoulder);
-    L.pole.fromArray(cfg.poleL).add(L.shoulder);
     R.shoulder.applyMatrix4(tw);
-    R.pole.applyMatrix4(tw);
     L.shoulder.applyMatrix4(tw);
-    L.pole.applyMatrix4(tw);
     this.solveHand('left', DEFAULT_LEFT, L.handPos, L.handQuat, L.curls);
     this.solveHand('right', DEFAULT_RIGHT, R.handPos, R.handQuat, R.curls);
-    // Trigger finger: indexed along the receiver until ADS / firing.
-    if (!this.beats.active || !this.beats.current?.variant.right) {
-      blendPose(R.curls, HAND_POSES.trigger, this.triggerW, _poseTmp);
-      R.curls.set(_poseTmp);
-    }
+    // Elbow swivel: line the forearm up with the hand (wrist near neutral), biased down-and-out (anim/ik).
+    this.elbowPole(R, cfg.poleR, tw);
+    this.elbowPole(L, cfg.poleL, tw);
     this.body.update(p);
     L.update();
     R.update();
+    if (this.gripOverlay)
+      this.gripOverlay.update(e.grip.shapes.set, this.view.matrixWorld, [
+        { pos: L.handPos, quat: L.handQuat, curls: L.curls, side: -1 },
+        { pos: R.handPos, quat: R.handQuat, curls: R.curls, side: 1 },
+      ]);
 
     // Mag rides the support hand while held.
     if (this.magHeld && e.mag) {
@@ -1219,7 +1035,7 @@ export class WeaponController implements System {
       _m.compose(L.handPos, L.handQuat, _one);
       _q.copy(basisQuat(BASES.well!, _q)).invert();
       _m.multiply(_m2.makeRotationFromQuaternion(_q));
-      _m.multiply(_m2.makeTranslation(-e.magGrasp.x, -e.magGrasp.y, -e.magGrasp.z));
+      _m.multiply(_m2.makeTranslation(-e.grip.magGrasp.x, -e.grip.magGrasp.y, -e.grip.magGrasp.z));
       // Into the weapon root's space (the mag stays parented to the model).
       _m2.copy(e.model.root.matrixWorld).invert();
       _m.premultiply(_m2);
