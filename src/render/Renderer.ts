@@ -12,7 +12,7 @@ import { DynamicResolution } from './DynamicResolution';
 import { PerfOverlay } from './PerfOverlay';
 import { BodycamEffect } from './post/BodycamEffect';
 import type { LensParams } from './post/lens';
-import { QUALITY, videoSettings, type QualityPreset, type QualityTier } from './quality';
+import { QUALITY, toTier, videoSettings, type QualityPreset, type QualityTier } from './quality';
 
 /**
  * Owns the WebGL renderer, scene camera and the post chain:
@@ -55,9 +55,9 @@ export class Renderer {
     // Chest cams are wide; the CAM04 lens pass then warps and crops it into the fisheye image circle.
     this.camera = new PerspectiveCamera(92, 16 / 9, 0.03, 600);
     const v = videoSettings.get();
-    this.tier = QUALITY[v.quality] ? v.quality : 'medium';
+    this.tier = toTier(v.quality);
     this.quality = QUALITY[this.tier];
-    this.resolutionScale = v.resolutionScale;
+    this.resolutionScale = v.resScale;
     this.dynres.enabled = v.dynamicResolution;
     this.dynres.targetFps = v.targetFps;
     this.dynres.max = Math.min(1, this.quality.maxScale);
@@ -66,10 +66,10 @@ export class Renderer {
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.composer.addPass(new EffectPass(this.camera, this.bodycam));
     videoSettings.onChange((s) => {
-      this.resolutionScale = s.resolutionScale;
+      this.resolutionScale = s.resScale;
       this.dynres.enabled = s.dynamicResolution;
       this.dynres.targetFps = s.targetFps;
-      if (s.quality !== this.tier) this.setQuality(s.quality);
+      if (toTier(s.quality) !== this.tier) this.setQuality(toTier(s.quality));
       this.resize();
     });
     addEventListener('resize', () => this.resize());

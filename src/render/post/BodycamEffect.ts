@@ -13,7 +13,7 @@ import {
   type WebGLRenderer,
 } from 'three';
 import { clamp, lerp, noise1 } from '../../core/math';
-import { postSettings, type PostSettings, type QualityPreset } from '../quality';
+import { postSettings, videoSettings, type PostSettings, type QualityPreset } from '../quality';
 import { AutoExposure } from './AutoExposure';
 import { BitrateModel } from './BitrateModel';
 import { cam04Frag } from './cam04.frag';
@@ -39,6 +39,7 @@ export class BodycamEffect extends Effect {
   private mips = new MipmapBlurPass();
   private dirt: Texture = makeLensDirt();
   private p: PostSettings = postSettings.get();
+  private footage = videoSettings.get().footage;
   private aspect = 16 / 9;
   private tanHalf = new Vector2(1, 1);
   private omega = new Vector3();
@@ -84,6 +85,10 @@ export class BodycamEffect extends Effect {
     this.uniforms.get('tDirt')!.value = this.dirt;
     this.mips.radius = 0.85;
     this.setQuality(quality, false);
+    videoSettings.onChange((v) => {
+      this.footage = v.footage;
+      this.lensKey[0] = NaN;
+    });
     postSettings.onChange((v) => {
       this.p = v;
       this.lensKey[0] = NaN;
@@ -161,7 +166,7 @@ export class BodycamEffect extends Effect {
     this.time += dt;
     const u = this.uniforms;
     const p = this.p;
-    const I = clamp(p.footageIntensity, 0, 1);
+    const I = clamp(this.footage * p.footageIntensity, 0, 1);
 
     // Shared blur pyramid from the HDR scene.
     this.mips.render(renderer, inputBuffer, null as never);

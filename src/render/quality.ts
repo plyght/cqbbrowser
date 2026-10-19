@@ -53,21 +53,31 @@ export const QUALITY: Record<QualityTier, QualityPreset> = {
   },
 };
 
-/** Renderer-level video settings. */
+/** Map a stored tier (the settings UI also offers 'ultra') onto a preset. */
+export function toTier(q: string): QualityTier {
+  if (q === 'ultra') return 'high';
+  return q === 'low' || q === 'medium' || q === 'high' ? q : 'medium';
+}
+
+/**
+ * Renderer-level video settings. Keys shared with the settings UI (src/ui/settingsSchema.ts): `quality`,
+ * `resScale` (static scale; dynamic resolution works under it) and `footage` (the Footage-intensity master).
+ */
 export const videoSettings = settings.ns('video', {
-  quality: 'medium' as QualityTier,
-  /** Static resolution scale (upper bound when dynamic resolution is on). */
-  resolutionScale: 1,
+  quality: 'medium' as string,
+  resScale: 1,
+  /** Footage intensity master, 0 = clean render, 1 = full CAM04. */
+  footage: 0.9,
   dynamicResolution: true,
   targetFps: 60,
 });
 
 /**
- * CAM04 post settings. `footageIntensity` is the master (0 = clean game render, 1 = full bodycam);
- * every other value is a per-effect multiplier (1 = default look) or an explicit tuning value.
+ * CAM04 post settings (Advanced). Effective intensity = `video.footage` × `footageIntensity`; every other
+ * value is a per-effect multiplier (1 = default look) or an explicit tuning value.
  */
 export const postSettings = settings.ns('video.post', {
-  footageIntensity: 0.9,
+  footageIntensity: 1,
   distortion: 1,
   imageCircle: 1,
   chromaticAberration: 1,
