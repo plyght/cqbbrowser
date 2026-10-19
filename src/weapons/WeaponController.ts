@@ -157,6 +157,8 @@ export class WeaponController implements System {
   /** Shown by the HUD while true. */
   checking = false;
   readonly beats = new BeatPlayer();
+  /** Beat libraries (exposed for the dev tools / live tuning). */
+  readonly libraries = LIBRARIES;
   /** What the current plan is for. */
   planKind: 'reload' | 'check' | 'camFix' | 'micro' | null = null;
   /** 0..1 hand fatigue from sustained fire. */

@@ -584,8 +584,8 @@ registerSettings([
   {
     tab: 'gameplay',
     group: 'Realism',
-    ns: 'gameplay',
-    key: 'inertia',
+    ns: 'gameplay.handling',
+    key: 'weaponInertia',
     label: 'Weapon inertia',
     kind: 'slider',
     min: 0,

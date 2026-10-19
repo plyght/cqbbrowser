@@ -5,10 +5,13 @@ import { COMMON_BEATS, add, hk, pk } from './common';
  * Pistol beat tracks. `well` is the magazine frame with its origin just under the baseplate when seated,
  * so p.y ≈ -0.095 puts the mag top at the mouth of the grip.
  */
-const WP: V3 = [-0.03, 0.09, 0.2];
+const WP: V3 = [-0.02, 0.06, 0.11];
 const WR: V3 = [0.38, 0.1, -0.38];
-const WP2: V3 = [-0.01, 0.07, 0.22];
+const WP2: V3 = [0, 0.05, 0.12];
 const WR2: V3 = [0.3, 0.05, -0.28];
+/** Mag-check pose: gun drawn in a little and canted so the support hand and the witness holes face the lens. */
+const PCP: V3 = [0.02, 0.03, 0.12];
+const PCR: V3 = [0.4, 0.3, -0.9];
 
 export const PISTOL_BEATS: BeatLibrary = {
   ...COMMON_BEATS,
@@ -269,7 +272,7 @@ export const PISTOL_BEATS: BeatLibrary = {
         id: 'a',
         dur: 0.3,
         left: [hk(0.6, 'well', [-0.02, -0.05, 0.02], 'relaxed'), hk(1, 'well', [0, 0, 0], 'magGrab', 'out')],
-        weapon: [pk(1, [-0.03, 0.12, 0.24], [0.42, 0.2, -0.95])],
+        weapon: [pk(1, PCP, PCR)],
         events: [{ t: 1, ev: 'magToHand' }],
       },
     ],
@@ -286,7 +289,7 @@ export const PISTOL_BEATS: BeatLibrary = {
           hk(0.3, 'well', [0, -0.01, 0], 'magGrab', 'in'),
           hk(1, 'well', [0, -0.05, 0.004], 'magGrab', 'out'),
         ],
-        weapon: [pk(1, [-0.03, 0.13, 0.25], [0.5, 0.25, -1.05])],
+        weapon: [pk(1, add(PCP, [0, 0.01, 0.01]), add(PCR, [0.08, 0.05, -0.1]))],
         kick: { at: 'well', j: [0, -0.2, 0] },
       },
     ],
@@ -302,8 +305,8 @@ export const PISTOL_BEATS: BeatLibrary = {
           hk(1, 'well', [0, -0.05, 0.004], 'magGrab'),
         ],
         weapon: [
-          pk(0.5, [-0.03, 0.134, 0.25], [0.52, 0.26, -1.07]),
-          pk(1, [-0.03, 0.13, 0.25], [0.5, 0.25, -1.05]),
+          pk(0.5, add(PCP, [0, 0.014, 0.01]), add(PCR, [0.1, 0.06, -0.12])),
+          pk(1, add(PCP, [0, 0.01, 0.01]), add(PCR, [0.08, 0.05, -0.1])),
         ],
       },
     ],

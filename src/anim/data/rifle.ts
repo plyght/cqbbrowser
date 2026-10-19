@@ -12,11 +12,11 @@ const WR: V3 = [0.36, 0.34, -0.7];
 const WP2: V3 = [-0.04, 0.12, -0.09];
 const WR2: V3 = [0.3, 0.28, -0.58];
 /** Mag-check weapon pose (cant toward the support hand, in toward the chest cam). */
-const CP: V3 = [-0.06, 0.1, -0.1];
-const CR: V3 = [0.28, 0.26, -0.75];
-/** Mag held out for the check: below the well, tilted so the top round faces the chest cam (mag frame). */
-const SHOW_P: V3 = [-0.03, -0.17, 0.07];
-const SHOW_R: V3 = [0.2, -0.95, 0.35];
+const CP: V3 = [-0.05, 0.06, -0.05];
+const CR: V3 = [0.22, 0.22, -0.6];
+/** Mag held up for the check in front of the chest cam (torso frame), feed lips / top round toward the lens. */
+const SHOW_P: V3 = [-0.16, -0.13, -0.38];
+const SHOW_R: V3 = [1.3, 0, 0.25];
 
 export const RIFLE_BEATS: BeatLibrary = {
   ...COMMON_BEATS,
@@ -413,7 +413,7 @@ export const RIFLE_BEATS: BeatLibrary = {
         left: [
           hk(0.18, 'well', [0, -0.012, 0], 'magGrab', 'in'),
           hk(0.42, 'well', [0, -0.1, 0], 'magGrab', 'lin'),
-          hk(1, 'well', SHOW_P, 'magGrab', 'io', SHOW_R),
+          hk(1, 'chest', SHOW_P, 'magGrab', 'io', SHOW_R),
         ],
         weapon: [pk(1, CP, CR)],
         kick: { at: 'well', j: [0, -0.35, 0] },
@@ -427,8 +427,8 @@ export const RIFLE_BEATS: BeatLibrary = {
         dur: 0.6,
         hold: true,
         left: [
-          hk(0.5, 'well', add(SHOW_P, [0.003, 0.004, 0.002]), 'magGrab', 'io', add(SHOW_R, [0.04, 0.03, 0])),
-          hk(1, 'well', SHOW_P, 'magGrab', 'io', SHOW_R),
+          hk(0.5, 'chest', add(SHOW_P, [0.003, 0.004, 0.002]), 'magGrab', 'io', add(SHOW_R, [0.04, 0.03, 0])),
+          hk(1, 'chest', SHOW_P, 'magGrab', 'io', SHOW_R),
         ],
         weapon: [pk(0.5, add(CP, [0, 0.004, 0.003]), add(CR, [0.02, 0.01, -0.02])), pk(1, CP, CR)],
       },

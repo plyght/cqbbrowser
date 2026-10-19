@@ -48,3 +48,19 @@ export function dumpUpgradeTail(tail: readonly string[]): string[] | null {
   if (i < 0) return null;
   return [...tail.slice(0, i), 'magDump', ...tail.slice(i + 1)];
 }
+
+/**
+ * Seam for the authored arms rig (`src/anim/rig` ArmsRig, when it lands): every hand plan the WeaponController
+ * starts maps onto one rig action. The rig's `onEvent(beat)` replaces `BeatSink.hit` (→ `weaponBeat` + contact
+ * kicks: magSeat / boltRelease / chargingHandle / slideRelease), `hold` + `releaseHold()` replace
+ * `BeatPlayer.holding` for the mag check, and the inventory events (magToHand / magHide / drop / chamber) come from
+ * the rig's markers. The switch state machine maps out/in to `swapOut` / `swapIn` with `swapMid` at the change.
+ */
+export const RIG_ACTION = {
+  tactical: 'reloadTactical',
+  speed: 'reloadEmpty',
+  empty: 'reloadEmpty',
+  check: 'magCheck',
+  swapOut: 'swapOut',
+  swapIn: 'swapIn',
+} as const;
