@@ -28,7 +28,7 @@ export async function steps(page: Page, n: number, input?: Record<string, unknow
       const g = (window as any).__sb;
       for (let i = 0; i < (n as number); i++) {
         if (input) g.test.next = structuredClone(input);
-        g.step(1 / 60);
+        g.step(1 / 60, i >= (n as number) - 3); // only draw the last frames (SwiftShader is slow)
       }
       g.test.next = {};
     },

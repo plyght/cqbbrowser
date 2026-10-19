@@ -13,6 +13,9 @@ import { Player } from '../player/Player';
 import { Renderer } from '../render/Renderer';
 import { Hud } from '../ui/Hud';
 import { Menu } from '../ui/Menu';
+import { setDrillSource, type RunResult } from '../ui/drills';
+import { toDrillInfo, toRunResult } from '../ui/drillAdapter';
+import { Magazines } from '../weapons/Magazines';
 import { Ballistics } from '../weapons/Ballistics';
 import { WeaponController } from '../weapons/WeaponController';
 import { Drills } from '../drills/Drills';
@@ -91,8 +94,44 @@ export class Game {
     this.aimAssist.provider = this.aimAssistProvider();
     this.audio = new AudioEngine(bus, this.ctx.camera, { physics, exclude: () => this.player.rigidBody });
     this.hud = new Hud(ui);
+    this.hud.bind({
+      camera: this.ctx.camera,
+      lens: this.renderer.bodycam.uniforms,
+      posture: () => this.player,
+      device: () => this.ctx.input.frame.activeDevice,
+      padType: () => this.gamepad.padType,
+    });
     this.menu = new Menu(ui);
+    this.menu.attachInput({
+      trackpad: this.trackpad,
+      gyro: this.gyro,
+      gyroSupported: Gyro.supported,
+      activeDevice: () => this.ctx.input.frame.activeDevice,
+      padType: () => this.gamepad.padType,
+    });
     this.menu.onPlay = () => this.enter(canvas);
+    setDrillSource(() => this.drills.list().map(toDrillInfo));
+    this.menu.onStartDrill = (d) => {
+      this.enter(canvas);
+      this.drills.start(d.id);
+    };
+    this.drills.onResult((r) =>
+      this.showResults(
+        toRunResult(
+          r,
+          this.drills.list().find((d) => d.id === r.drillId),
+        ),
+      ),
+    );
+    // Fresh mags at every drill standby.
+    bus.on('drillState', (e) => {
+      if (e.state !== 'standby') return;
+      for (const w of this.weapons.loadout) w.mags = new Magazines(w.def.magCapacity, w.def.spareMags);
+    });
+    this.menu.onRestart = () => {
+      this.resetDrill();
+      this.enter(canvas);
+    };
     canvas.addEventListener('click', () => {
       if (!this.paused && document.pointerLockElement !== canvas) this.lock(canvas);
     });
@@ -152,6 +191,13 @@ export class Game {
     return this.world;
   }
 
+  /** End-of-run results screen (drills call this). */
+  showResults(r: RunResult) {
+    this.paused = true;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.menu.showResults(r);
+  }
+
   resetDrill() {
     this.drills.restart();
   }
@@ -170,8 +216,8 @@ export class Game {
     this.step(dt);
   };
 
-  /** One render frame. Exposed for deterministic stepping in tests. */
-  step(dt: number) {
+  /** One frame. Exposed for deterministic stepping in tests; `render=false` skips drawing (fast sim). */
+  step(dt: number, render = true) {
     const ctx = this.ctx;
     ctx.time += dt;
     ctx.input.enabled = !this.paused;
@@ -189,6 +235,6 @@ export class Game {
     for (const s of this.systems) s.update?.(dt, alpha);
     this.audio.update(dt);
     this.hud.update(this.weapons);
-    this.renderer.render(dt);
+    if (render) this.renderer.render(dt);
   }
 }
