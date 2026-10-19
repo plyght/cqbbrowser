@@ -143,6 +143,11 @@ export class ArmsRig {
     return new ArmsRig(file, skeletonClone(gltf.scene), mats);
   }
 
+  /** Build from already-loaded data (headless tools/tests: the clips file + the AK glb scene, any materials). */
+  static fromData(file: ClipsFile, scene: Object3D, mats: { gloves: Material; sleeves: Material }): ArmsRig {
+    return new ArmsRig(file, skeletonClone(scene), mats);
+  }
+
   private constructor(
     readonly file: ClipsFile,
     src: Object3D,
@@ -292,7 +297,48 @@ export class ArmsRig {
       this.spareMag.visible = false;
       mag.parent!.add(this.spareMag);
     }
+    this.seat.identity();
+    this.seatIdentity = true;
+    if (this.seatProvider) {
+      // Measure the idle hold of this weapon without the seat, then restore the playback state.
+      const keep = {
+        layer: this.layer,
+        shot: this.shot,
+        fadeDur: this.fadeDur,
+        fade: this.fade,
+        holding: this.holding,
+      };
+      const pose = this.pose.slice();
+      const from = this.from.slice();
+      const onBeat = this.onBeat;
+      this.onBeat = undefined;
+      this.play('idle', { fade: 0 });
+      this.update(0);
+      const s = this.seatProvider(this, model, weaponId);
+      this.onBeat = onBeat;
+      Object.assign(this, keep);
+      this.pose.set(pose);
+      this.from.set(from);
+      if (s) this.setGripSeat(s);
+    }
     if (!this.layer) this.play('idle', { fade: 0 });
+  }
+
+  /**
+   * Contact-layer hook, called on every attach with the rig posed at idle frame 0 (no seat): returns the grip
+   * seat for this weapon (gun frame correction relative to the firing hand, weapon frame), or null.
+   */
+  seatProvider?: (rig: ArmsRig, model: WeaponModel, weaponId: string) => Matrix4 | null;
+  private seat = new Matrix4();
+  private seatIdentity = true;
+  /** This frame's world change of the gun frame due to the seat (applied to an anchored support hand). */
+  private seatDelta = new Matrix4();
+  private seatMoved = false;
+
+  /** Gun frame correction relative to the firing hand (weapon frame), applied while the hand holds the grip. */
+  setGripSeat(m: Matrix4 | null): void {
+    this.seat.copy(m ?? _m.identity());
+    this.seatIdentity = !m;
   }
 
   detachWeapon(): void {
@@ -504,6 +550,21 @@ export class ArmsRig {
     pB.lerp(pA, w);
     qB.slerp(qA, w);
     this.gunWorld.compose(pB, qB, ONE).multiply(_m.makeTranslation(-a.grip[0], -a.grip[1], -a.grip[2]));
+    // Per-weapon grip seat (contact layer): the gun frame corrected relative to the hand, blended by gunW.
+    this.seatMoved = false;
+    if (w > 0.001 && !this.seatIdentity) {
+      this.seatDelta.copy(this.gunWorld).invert();
+      this.seatMoved = true;
+      if (w >= 0.999) this.gunWorld.multiply(this.seat);
+      else {
+        this.seat.decompose(pA, qA, _s);
+        pA.multiplyScalar(w);
+        qA.slerp(_q.identity(), 1 - w);
+        this.gunWorld.multiply(_m.compose(pA, qA, ONE));
+      }
+      this.gunWorld.decompose(pB, qB, _s);
+      this.seatDelta.premultiply(this.gunWorld);
+    }
     this.gunQ.copy(qB);
     _m.copy(this.root.matrixWorld).invert().multiply(this.gunWorld);
     _m.decompose(model.root.position, model.root.quaternion, _s);
@@ -541,6 +602,14 @@ export class ArmsRig {
       wsum += wv;
     }
     if (wsum > 1) delta.divideScalar(wsum);
+    // A support hand on the gun follows the grip seat's correction of the gun (weighted by its contact).
+    let seatTurn: Quaternion | undefined;
+    const sw = side === 'L' && this.seatMoved ? Math.min(1, wsum) : 0;
+    if (sw > 0.001) {
+      target.lerp(_v.copy(wrist).applyMatrix4(this.seatDelta), sw);
+      this.seatDelta.decompose(_v2, _q2, _s);
+      seatTurn = new Quaternion().slerp(_q2, sw);
+    }
     target.add(delta.applyQuaternion(this.gunQ));
     // Authored overrides.
     let turn: Quaternion | undefined;
@@ -575,9 +644,10 @@ export class ArmsRig {
         }
       }
     }
-    if (target.distanceToSquared(wrist) < 1e-8 && !turn) return;
+    if (target.distanceToSquared(wrist) < 1e-8 && !turn && !seatTurn) return;
     // Two-bone solve keeping the hand's world rotation and the current bend plane.
     const handQ = hand.getWorldQuaternion(new Quaternion());
+    if (seatTurn) handQ.premultiply(seatTurn);
     if (turn) handQ.premultiply(turn);
     const sh = arm.getWorldPosition(new Vector3());
     const el = fore.getWorldPosition(new Vector3());
@@ -669,6 +739,103 @@ export class ArmsRig {
       o.position.copy(r.p).add(pg);
       o.quaternion.copy(r.q).premultiply(qg);
     });
+  }
+
+  // ------------------------------------------------------------------------------------------ contact layer API
+
+  /** 0..1: the gun rides the firing hand (1) or the rig (0) this frame. */
+  get gunOnHand(): number {
+    return this.layer ? Math.max(0, Math.min(1, this.pose[this.layout.gunW])) : 1;
+  }
+
+  /** Mag slot `k` (0 = the model's mag): support-hand weight, visibility and distance from its seat (m). */
+  magState(k = 0): { held: number; visible: boolean; travel: number } {
+    const m = this.layout.mag[k];
+    const P = this.pose;
+    const o = m.gun;
+    return {
+      held: Math.max(0, Math.min(1, P[m.w])),
+      visible: P[m.vis] > 0.5,
+      travel: Math.hypot(P[o], P[o + 1], P[o + 2]),
+    };
+  }
+
+  /** Anchor-contact weight of a hand this frame (`grip`, `well`, `charge`). */
+  anchorWeight(side: 'L' | 'R', anchor: (typeof ANCHORS)[number]): number {
+    return this.pose[(side === 'L' ? this.layout.wL : this.layout.wR)[anchor]];
+  }
+
+  /**
+   * Shift the weapon by `d` (weapon frame, metres) relative to where the hand track put it, then re-drive the
+   * parts. Contact layer: moves the gun out of the firing palm.
+   */
+  offsetGun(d: Vector3): void {
+    const model = this.weapon;
+    if (!model) return;
+    this.gunWorld.multiply(_m.makeTranslation(d.x, d.y, d.z));
+    _m.copy(this.root.matrixWorld).invert().multiply(this.gunWorld);
+    _m.decompose(model.root.position, model.root.quaternion, _s);
+    model.root.updateMatrixWorld(true);
+    this.driveParts();
+  }
+
+  /** Re-drive bolt/slide/trigger/mags from the current bones (after a later layer moved the support hand). */
+  refreshParts(): void {
+    if (this.weapon && this.anims && this.layer) this.driveParts();
+  }
+
+  /**
+   * Two-bone arm solve putting `side`'s wrist on `target` (world), keeping the hand's world rotation and the
+   * current elbow bend plane. Allocation-free.
+   */
+  reachHand(side: 'L' | 'R', target: Vector3): void {
+    const hand = side === 'L' ? this.bones.handL : this.bones.handR;
+    const fore = side === 'L' ? this.bones.foreArmL : this.bones.foreArmR;
+    const arm = side === 'L' ? this.bones.armL : this.bones.armR;
+    const r = this.reach;
+    hand.getWorldQuaternion(r.hq);
+    arm.getWorldPosition(r.sh);
+    fore.getWorldPosition(r.el);
+    hand.getWorldPosition(r.wr);
+    r.mid.copy(r.sh).lerp(r.wr, 0.5);
+    r.pole.copy(r.el).sub(r.mid).add(r.el);
+    const [l1, l2] = this.armLen[side];
+    solveTwoBone(r.sh, target, r.pole, l1, l2, r.mid, r.end);
+    this.aimTo(arm, r.el, r.mid);
+    arm.updateMatrixWorld(true);
+    hand.getWorldPosition(r.wr);
+    this.aimTo(fore, r.wr, r.end);
+    fore.updateMatrixWorld(true);
+    fore.getWorldQuaternion(r.pq);
+    hand.quaternion.copy(r.pq.invert().multiply(r.hq));
+    hand.updateMatrixWorld(true);
+  }
+
+  private reach = {
+    hq: new Quaternion(),
+    pq: new Quaternion(),
+    wq: new Quaternion(),
+    sh: new Vector3(),
+    el: new Vector3(),
+    wr: new Vector3(),
+    mid: new Vector3(),
+    end: new Vector3(),
+    pole: new Vector3(),
+    a: new Vector3(),
+    b: new Vector3(),
+    o: new Vector3(),
+  };
+
+  /** Allocation-free `aim`. */
+  private aimTo(bone: Bone, childNow: Vector3, childGoal: Vector3) {
+    const r = this.reach;
+    bone.getWorldPosition(r.o);
+    r.a.copy(childNow).sub(r.o).normalize();
+    r.b.copy(childGoal).sub(r.o).normalize();
+    _q2.setFromUnitVectors(r.a, r.b);
+    bone.getWorldQuaternion(r.wq);
+    bone.parent!.getWorldQuaternion(r.pq);
+    bone.quaternion.copy(r.pq.invert().multiply(_q2.multiply(r.wq)));
   }
 
   /** For tests/debug: the weapon socket world position. */

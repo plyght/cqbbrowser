@@ -69,8 +69,36 @@ export interface WeaponModel {
   massKg: number;
   /** Draw calls (meshes) and triangles for perf budgeting. */
   stats: { drawCalls: number; triangles: number };
+  /**
+   * Optional authored collision proxies (e.g. exported per part by an asset pipeline). Absent = the hand-contact
+   * layer (src/anim/contact) fits proxies to the meshes at load. Same format either way.
+   */
+  collision?: CollisionProxy[];
   dispose(): void;
 }
+
+/**
+ * Hand-contact collision proxy, in the frame of `part` (its pivot, rest pose) or the weapon frame when `part` is
+ * absent. Boxes are rounded (`r` ≤ every half extent), `quat` rotates box axes into that frame.
+ */
+export type CollisionProxy =
+  | {
+      kind: 'box';
+      name: string;
+      part?: PartName;
+      center: [number, number, number];
+      quat?: [number, number, number, number];
+      half: [number, number, number];
+      r: number;
+    }
+  | {
+      kind: 'capsule';
+      name: string;
+      part?: PartName;
+      a: [number, number, number];
+      b: [number, number, number];
+      r: number;
+    };
 
 const LEGACY: Record<string, WeaponId> = { ar: 'sb16', pdw: 'hb300', ak: 'k47s', pistol: 'p17', smg: 'kp9' };
 
