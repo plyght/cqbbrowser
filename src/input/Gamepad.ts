@@ -60,8 +60,7 @@ const SIMPLE: [PadAction, ButtonAction][] = [
   ['switchWeapon', 'switchWeapon'],
   ['leanLeft', 'leanLeft'],
   ['leanRight', 'leanRight'],
-  ['light', 'light'],
-  ['fireMode', 'fireMode'],
+  ['throw', 'throw'],
   ['pause', 'pause'],
 ];
 
@@ -80,6 +79,11 @@ export class Gamepad implements InputSource, Haptics {
   private restart = new HoldGate(0.8);
   private dUp = new TapHold();
   private dDown = new TapHold();
+  // D-pad left: tap = weapon light, hold = flip NVG; D-pad right: tap = fire mode, hold = IR laser.
+  private dLeft = new TapHold();
+  private dRight = new TapHold();
+  private dLeftHeld = false;
+  private dRightHeld = false;
   private sprintLatched = false;
   private prevSprintBtn = false;
   private queue: ButtonAction[] = [];
@@ -184,6 +188,15 @@ export class Gamepad implements InputSource, Haptics {
     this.dUp.update(isDown('aimModeOrMagnifier'), dt);
     if (this.dUp.tap) frame.pressed.add('aimMode');
     if (this.dUp.hold) frame.down.add('magnifier');
+
+    this.dLeft.update(isDown('light'), dt);
+    if (this.dLeft.tap) frame.pressed.add('light');
+    if (this.dLeft.hold && !this.dLeftHeld) frame.pressed.add('nvg');
+    this.dLeftHeld = this.dLeft.hold;
+    this.dRight.update(isDown('fireMode'), dt);
+    if (this.dRight.tap) frame.pressed.add('fireMode');
+    if (this.dRight.hold && !this.dRightHeld) frame.pressed.add('ir');
+    this.dRightHeld = this.dRight.hold;
 
     // D-pad down: tap = cycle ready (high → low → compressed → high), hold = fix camera.
     this.dDown.update(isDown('fixCamOrReady'), dt);

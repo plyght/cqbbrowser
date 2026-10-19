@@ -82,6 +82,35 @@ export interface GameEvents {
     noShoot?: boolean;
     point: Vector3;
   };
+  /**
+   * A flashbang (or training flash-bang simulator) went off. Gear computes the listener-side exposure:
+   * `visual` (sensor white-out) and `hearing` (0..1, drives tinnitus/dulling) from distance, line of sight
+   * and enclosure; audio renders the blast from `point`.
+   */
+  flashbang: {
+    point: Vector3;
+    distance: number;
+    visual: number;
+    hearing: number;
+    los: boolean;
+    indoor: boolean;
+    training?: boolean;
+  };
+  /** Gear foley: pin pull, spoon flick, grenade bounces, throw swish, NVG flip detents, IR switch. */
+  gearSound: {
+    kind: 'pin' | 'spoon' | 'bounce' | 'throw' | 'nvgDown' | 'nvgUp' | 'irClick';
+    point?: Vector3;
+    surface?: Surface;
+    /** Impact speed (m/s) for bounces. */
+    speed?: number;
+  };
+  /** NVG intensifier powered (audio: the faint tube whine). */
+  nvg: { on: boolean };
+  /**
+   * Startle reflex hook for the body/animation: a bright/loud event nearby. `strength` 0..1 (≥ ~0.5 = arm comes
+   * up to shield the face, Bodycam-style), `dir` = unit vector from the player toward the source (world).
+   */
+  flinch: { strength: number; dir: Vector3; cause: 'flashbang' | 'blast' | 'loud' };
 }
 
 type Handler<T> = (e: T) => void;

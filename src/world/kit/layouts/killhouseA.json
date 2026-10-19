@@ -29,7 +29,10 @@
     { "id": "D2", "at": [9.2, 6], "kind": "door", "door": { "hinge": "min", "swing": "+", "open": 0.35 } },
     { "id": "D3", "at": [4.5, 4.8], "kind": "door", "door": { "hinge": "min", "swing": "-", "open": 0 } },
     { "id": "O4", "at": [12.5, 4.8], "kind": "opening", "width": 0.9 },
-    { "id": "D5", "at": [16, 2.4], "kind": "door", "door": { "hinge": "min", "swing": "+", "open": 0 } }
+    { "id": "D5", "at": [16, 2.4], "kind": "door", "door": { "hinge": "min", "swing": "+", "open": 0 } },
+    { "id": "W1", "at": [0, 9.4], "kind": "window", "width": 1.0, "sill": 1.0, "height": 1.95 },
+    { "id": "W2", "at": [10.6, 12], "kind": "window", "width": 1.0, "sill": 1.0, "height": 1.95 },
+    { "id": "W3", "at": [0, 2.6], "kind": "window", "width": 0.8, "sill": 1.05, "height": 1.85 }
   ],
   "targets": [
     { "id": "t0", "at": [1.0, 10.9], "face": [3.7, 6] },
@@ -46,5 +49,12 @@
   ],
   "start": { "at": [8, 14.2], "yaw": 0 },
   "finish": { "min": [16.3, 0.6], "max": [19.5, 4.2] },
-  "catwalk": { "a": [-1.5, 5.4], "b": [16, 5.4], "width": 1.3, "height": 2.44 }
+  "catwalk": { "a": [-1.5, 5.4], "b": [16, 5.4], "width": 1.3, "height": 2.44 },
+  "roof": { "span": "z", "joistDepth": 0.14, "spacing": 0.61, "overhang": 0.3, "sheathing": 0.012 },
+  "lights": [
+    { "id": "L1", "kind": "bulb", "at": [3.4, 8.6], "on": true },
+    { "id": "L2", "kind": "bulb", "at": [2.6, 5.4], "on": true },
+    { "id": "L3", "kind": "bulb", "at": [12.9, 5.4], "on": true, "flicker": true },
+    { "id": "L4", "kind": "work", "at": [8.3, 4.2], "y": 1.45, "aim": [3.0, 1.6], "on": true }
+  ]
 }

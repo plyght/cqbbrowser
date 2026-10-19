@@ -48,7 +48,7 @@ async function freeCam(page: Page, pos: number[], look: number[]) {
 }
 
 test('kill house: rounds through walls and a closed door', async ({ page }) => {
-  const errors = await boot(page, '/?map=killhouse&ballistics');
+  const errors = await boot(page, '/?map=killhouse&ballistics&roof=0');
   await ready(page);
   const O = { x: -158, z: -6 };
   const at = (x: number, y: number, z: number) => [O.x + x, y, O.z + z];

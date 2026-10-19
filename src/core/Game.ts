@@ -2,6 +2,7 @@ import { Vector3 } from 'three';
 import { videoSettings } from '../render/quality';
 import { AudioEngine } from '../audio/AudioEngine';
 import { Fx } from '../fx/Fx';
+import { Gear } from '../gear/Gear';
 import { AimAssist } from '../input/AimAssist';
 import { mouseSettings } from '../input/config';
 import { Gamepad } from '../input/Gamepad';
@@ -47,6 +48,7 @@ export class Game {
   player!: Player;
   weapons!: WeaponController;
   fx!: Fx;
+  gear!: Gear;
   world!: World;
   ballistics!: Ballistics;
   drills!: Drills;
@@ -96,6 +98,17 @@ export class Game {
     this.systems.push(this.player, this.weapons, ballistics, this.world, this.drills);
     this.fx = new Fx(this.ctx, { weapons: this.weapons, player: this.player, renderer: this.renderer });
     this.systems.push(this.fx);
+    // Tactical gear (NVG, IR, flashbangs) runs after Fx so its camera shake lands on the final pose.
+    this.gear = new Gear(this.ctx, {
+      renderer: this.renderer,
+      player: this.player,
+      muzzle: () => this.weapons.muzzleWorld(),
+      rooms: () => this.world.roomGraph(),
+      roofed: () => this.world.killhouse.roofed,
+      fx: this.fx,
+      toast: (t) => this.hud?.toast(t),
+    });
+    this.systems.push(this.gear);
     this.aimAssist.provider = this.aimAssistProvider();
     this.audio = new AudioEngine(bus, this.ctx.camera, { physics, exclude: () => this.player.rigidBody });
     this.hud = new Hud(ui);
@@ -207,6 +220,7 @@ export class Game {
   resetDrill() {
     this.drills.restart();
     this.fx.reset();
+    this.gear.resupply();
   }
 
   /** When true the rAF loop only renders; tests drive `step()` explicitly. */

@@ -303,7 +303,7 @@ export class World implements System, HitListener {
     const f = this.ctx.input.frame;
     if (f.pressed.has('interact')) this.tryInteract();
     for (const t of this.targetList) t.update?.(dt, alpha);
-    this.killhouse.update();
+    this.killhouse.update(dt);
     this.atlas.flush();
 
     const cam = this.ctx.camera;

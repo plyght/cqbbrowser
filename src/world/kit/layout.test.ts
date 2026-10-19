@@ -1,12 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import layoutA from './layouts/killhouseA.json';
-import { assignRoles, deriveRoomGraph, OUTSIDE, roomAt, wallPieces, type Layout } from './layout';
+import {
+  assignRoles,
+  ceilingOf,
+  deriveRoomGraph,
+  OUTSIDE,
+  roomAt,
+  setGraphRoof,
+  wallPieces,
+  type Layout,
+} from './layout';
 
 const L = layoutA as Layout;
 
 describe('kill house layout', () => {
   test('room graph: rooms, portals and what they connect', () => {
-    const g = deriveRoomGraph(L, [100, 50], 'khA');
+    const g = deriveRoomGraph(L, [100, 50], 'khA', false);
     expect(g.rooms.map((r) => r.id).sort()).toEqual([
       'khA.H1',
       'khA.H2',
@@ -47,11 +56,12 @@ describe('kill house layout', () => {
     const pieces = wallPieces(L);
     // South exterior wall (z = 12) is cut by the entry door at x = 8.
     const south = pieces.filter((p) => p.axis === 'x' && Math.abs(p.z - 12) < 1e-6);
-    const full = south.filter((p) => p.y === 0).sort((a, b) => a.x - b.x);
-    expect(full.length).toBe(2);
+    // Full-height pieces: either side of the door, and past window W2 (whose sill piece is shorter).
+    const full = south.filter((p) => p.y === 0 && p.h > L.wallHeight - 1e-6).sort((a, b) => a.x - b.x);
+    expect(full.length).toBe(3);
     const gap = full[1].x - full[1].sx / 2 - (full[0].x + full[0].sx / 2);
     expect(gap).toBeCloseTo(0.9);
-    const header = south.find((p) => p.y > 0)!;
+    const header = south.find((p) => p.y > 0 && Math.abs(p.x - 8) < 0.01)!;
     expect(header.y).toBeCloseTo(2.03);
     expect(header.h).toBeCloseTo(0.37);
     expect(south.every((p) => p.exterior)).toBe(true);
@@ -84,5 +94,42 @@ describe('kill house layout', () => {
       { minNoShoots: 0, minThreats: 0 },
     );
     expect(fixed).toEqual({ x: 'noshoot', y: 'threat' });
+  });
+
+  test('roofed graph: closed tops at the sheathing, no sky portals; toggles in place', () => {
+    const g = deriveRoomGraph(L, [0, 0], 'khA');
+    expect(L.roof).toBeDefined();
+    const ceil = ceilingOf(L);
+    expect(ceil).toBeCloseTo(L.wallHeight + L.roof!.joistDepth);
+    for (const r of g.rooms) {
+      expect(r.openTop).toBe(false);
+      expect(r.ceilingHeight).toBeCloseTo(ceil);
+      expect(r.max[1]).toBeCloseTo(ceil);
+    }
+    expect(g.portals.some((p) => p.kind === 'sky')).toBe(false);
+    const door = g.portals.find((p) => p.id === 'khA.D3')!;
+    setGraphRoof(g, L, false);
+    expect(g.rooms.every((r) => r.openTop && Math.abs(r.ceilingHeight - L.wallHeight) < 1e-6)).toBe(true);
+    expect(g.portals.filter((p) => p.kind === 'sky').length).toBe(6);
+    expect(g.portals.find((p) => p.id === 'khA.D3')).toBe(door);
+    setGraphRoof(g, L, true);
+    expect(g.portals.some((p) => p.kind === 'sky')).toBe(false);
+    const r1 = g.rooms.find((r) => r.id === 'khA.R1')!;
+    expect(r1.volume).toBeCloseTo(7.4 * 6 * ceil);
+  });
+
+  test('windows: sill piece below, header above, portal spans the sill..head', () => {
+    const g = deriveRoomGraph(L, [0, 0], 'khA');
+    const w1 = g.portals.find((p) => p.id === 'khA.W1')!;
+    expect(w1.kind).toBe('opening');
+    expect([...w1.rooms].sort()).toEqual(['khA.R1', OUTSIDE].sort());
+    expect(w1.center[1]).toBeCloseTo((1.0 + 1.95) / 2);
+    expect(w1.height).toBeCloseTo(0.95);
+    const west = wallPieces(L).filter((p) => p.axis === 'z' && Math.abs(p.x) < 1e-6);
+    const below = west.find((p) => p.y === 0 && Math.abs(p.z - 9.4) < 1e-6)!;
+    expect(below.h).toBeCloseTo(1.0);
+    const above = west.find((p) => p.y > 1 && Math.abs(p.z - 9.4) < 1e-6)!;
+    expect(above.y).toBeCloseTo(1.95);
+    expect(above.y + above.h).toBeCloseTo(L.wallHeight);
   });
 });
