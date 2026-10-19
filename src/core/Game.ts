@@ -1,3 +1,5 @@
+import { HapticsDirector } from '../input/HapticsDirector';
+import { gamepadSettings } from '../input/config';
 import { Vector3 } from 'three';
 import { videoSettings } from '../render/quality';
 import { AudioEngine } from '../audio/AudioEngine';
@@ -58,6 +60,7 @@ export class Game {
   trackpad!: Trackpad;
   gamepad!: Gamepad;
   gyro = new Gyro();
+  haptics!: HapticsDirector;
   systems: System[] = [];
   paused = true;
   private acc = 0;
@@ -74,7 +77,19 @@ export class Game {
     input.add(this.trackpad);
     input.add(this.gamepad);
     input.add(this.gyro);
-    input.padHaptics = this.gamepad;
+    // All rumble goes through the director so overlapping effects mix; direct `input.haptics.rumble()`
+    // calls from gameplay code become director voices too.
+    this.haptics = new HapticsDirector(
+      bus,
+      {
+        dual: (st, wk, ms) => this.gamepad.rumble(st, wk, ms),
+        triggers: (l, r, ms) => this.gamepad.triggerRumble(l, r, ms),
+      },
+      this.gyro,
+    );
+    this.haptics.enabled = () => input.frame.activeDevice === 'gamepad' && gamepadSettings.get().haptics;
+    this.haptics.strength = () => gamepadSettings.get().hapticsStrength;
+    input.padHaptics = { rumble: (st, wk, ms) => this.haptics.play(ms, st, wk) };
     void this.gyro.reconnect().catch(() => {});
     input.add(this.test);
     this.ctx = {
@@ -244,6 +259,7 @@ export class Game {
     const alpha = this.acc / Physics.STEP;
     for (const s of this.systems) s.update?.(dt, alpha);
     this.audio.update(dt);
+    this.haptics.update(dt);
     this.hud.update(this.weapons);
     this.renderer.setAds(this.weapons.adsBlend);
     // Input turn rate drives CAM04 bitrate starvation alongside the measured camera rotation.

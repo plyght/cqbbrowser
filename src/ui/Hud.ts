@@ -1,3 +1,4 @@
+import { bus } from '../core/bus';
 import { Box3, Object3D, Vector3, type PerspectiveCamera } from 'three';
 import type { DeviceKind } from '../input/actions';
 import { glyphFor, type KeyAction, type PadType } from '../input/bindings';
@@ -64,6 +65,7 @@ export class Hud {
   private box = new Box3();
   private v = new Vector3();
   private v2 = new Vector3();
+  private hit = document.createElement('div');
   private pipsKey = '';
 
   constructor(parent: HTMLElement) {
@@ -88,7 +90,27 @@ export class Hud {
     this.toastW.className = 'toast toast-r';
     this.toastP.className = 'toast toast-l';
     this.promptEl.className = 'world-prompt';
-    this.root.append(this.cam, this.camR, this.mag, this.dot, this.toastW, this.toastP, this.promptEl);
+    this.hit.className = 'hitmark';
+    this.hit.innerHTML = '<i></i><i></i><i></i><i></i>';
+    this.root.append(
+      this.cam,
+      this.camR,
+      this.mag,
+      this.dot,
+      this.hit,
+      this.toastW,
+      this.toastP,
+      this.promptEl,
+    );
+    // Hit confirmation: a brief, small four-tick marker at screen centre (off in Hardcore / via settings).
+    const hm = settings.ns('gameplay.feedback', { hitMarker: true });
+    bus.on('targetHit', (e) => {
+      if (this.mode === 'hardcore' || !hm.get().hitMarker) return;
+      this.hit.classList.toggle('bad', !!e.noShoot);
+      this.hit.classList.remove('show');
+      void this.hit.offsetWidth; // restart the CSS animation
+      this.hit.classList.add('show');
+    });
     parent.append(this.root);
 
     const gp = settings.ns('gameplay', { realism: 'standard' });

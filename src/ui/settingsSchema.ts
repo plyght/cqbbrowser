@@ -481,6 +481,25 @@ registerSettings([
     default: G.hapticsStrength,
     format: pct,
   },
+  {
+    tab: 'controls',
+    group: 'Controller',
+    ns: 'input.haptics',
+    key: 'adaptiveTriggers',
+    label: 'DualSense adaptive triggers',
+    kind: 'toggle',
+    default: true,
+    hint: 'Trigger resistance per weapon. Needs the controller connected via "Connect gyro" (Chrome/Edge).',
+  },
+  {
+    tab: 'controls',
+    group: 'Controller',
+    ns: 'input.haptics',
+    key: 'footsteps',
+    label: 'Footstep vibration (sprint)',
+    kind: 'toggle',
+    default: true,
+  },
   // Controls · Gyro (WebHID, Chromium only; Menu.attachInput registers the Connect button)
   {
     tab: 'controls',
@@ -561,6 +580,16 @@ registerSettings([
     step: 0.05,
     default: 1,
     format: pct,
+  },
+  {
+    tab: 'gameplay',
+    group: 'Realism',
+    ns: 'gameplay.feedback',
+    key: 'hitMarker',
+    label: 'Hit marker',
+    kind: 'toggle',
+    default: true,
+    hint: 'Brief tick at screen centre when a round scores. Never shown in Hardcore.',
   },
   {
     tab: 'gameplay',

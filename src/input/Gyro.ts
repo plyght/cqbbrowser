@@ -1,3 +1,4 @@
+import { buildSonyOutput, type SonyPad, type SonyRumble, type SonyTransport } from './sonyHid';
 import type { ActionFrame, InputSource, PollInfo } from './actions';
 import { gyroSettings } from './config';
 
@@ -103,6 +104,7 @@ interface HIDDeviceLike {
   opened: boolean;
   open(): Promise<void>;
   close(): Promise<void>;
+  sendReport?(reportId: number, data: Uint8Array): Promise<void>;
   addEventListener(
     type: 'inputreport',
     fn: (e: { reportId: number; data: DataView; timeStamp: number }) => void,
@@ -117,6 +119,9 @@ interface HIDLike {
 export class Gyro implements InputSource {
   readonly calibrator = new StillnessCalibrator();
   device: HIDDeviceLike | null = null;
+  /** Transport inferred from the input report ids we receive (0x01 = USB; 0x31 / 0x11 = Bluetooth). */
+  transport: SonyTransport = 'usb';
+  private rumbleBusy = false;
   private yaw = 0;
   private pitch = 0;
   private lastT = 0;
@@ -149,6 +154,30 @@ export class Gyro implements InputSource {
     return dev ? this.attach(dev) : false;
   }
 
+  /** Which Sony pad is attached (for rumble report layout), or null. */
+  get pad(): SonyPad | null {
+    const d = this.device;
+    if (!d?.opened) return null;
+    return DUALSENSE.includes(d.productId) ? 'dualsense' : DS4.includes(d.productId) ? 'ds4' : null;
+  }
+
+  /**
+   * Rumble (and DualSense trigger resistance) straight over HID. Drops the frame if a previous report is
+   * still in flight so a busy director can never queue up a backlog of stale vibration.
+   */
+  rumble(r: SonyRumble): boolean {
+    const pad = this.pad;
+    const dev = this.device;
+    if (!pad || !dev?.sendReport || this.rumbleBusy) return false;
+    const out = buildSonyOutput(pad, this.transport, r);
+    this.rumbleBusy = true;
+    dev
+      .sendReport(out.reportId, out.data)
+      .catch(() => {})
+      .finally(() => (this.rumbleBusy = false));
+    return true;
+  }
+
   async disconnect() {
     await this.device?.close();
     this.device = null;
@@ -164,6 +193,7 @@ export class Gyro implements InputSource {
 
   /** Integrates one report. Exposed for tests. */
   onReport(product: number, reportId: number, data: DataView, timeStamp: number) {
+    this.transport = reportId === 0x31 || reportId === 0x11 ? 'bt' : 'usb';
     const sample = parseGyro(data, gyroOffset(product, reportId));
     if (!sample) return;
     const dt = this.lastT ? Math.min(0.05, Math.max(0, (timeStamp - this.lastT) / 1000)) : 0;
