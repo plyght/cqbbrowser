@@ -373,7 +373,7 @@ No browser game handles trackpads well. Our approach:
 **Aim assist (single-player training, so it's a fun and accessibility tool, not a competitive one):**
 - **Rotational slowdown / friction** when the weapon's aim ray (not the screen center) is near a valid target. Strength depends on preset (§6.7) and is adjustable 0–100%.
 - **No snap-to-target, no magnetism by default.** Optional light magnetism (tracking a moving target) in Arcade.
-- Disabled on no-shoot targets (they still produce friction? **No.** Friction only on shootable targets, so assist doesn't trick you into penalties).
+- **Friction applies only to shootable targets.** No-shoots never produce it, so the assist can't pull you into a penalty.
 - **Leaderboards tag runs** with input type and assist level
 
 **Gyro aiming (big differentiator):**
