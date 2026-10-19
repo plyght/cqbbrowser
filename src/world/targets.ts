@@ -1,3 +1,4 @@
+import type { HitInfo } from '../weapons/Ballistics';
 import {
   CanvasTexture,
   DoubleSide,
@@ -43,7 +44,7 @@ export interface Target extends System {
   noShoot: boolean;
   /** World-space point to aim at (centre of the scoring area / remaining plate). For aim assist. */
   aimPoint(): Vector3;
-  onHit(hit: RayHit, dir: Vector3, energy: number): boolean;
+  onHit(hit: RayHit, dir: Vector3, energy: number, info?: HitInfo): boolean;
   reset(): void;
 }
 

@@ -1,3 +1,4 @@
+import type { HitInfo } from '../../weapons/Ballistics';
 import { Mesh, Quaternion, Vector3 } from 'three';
 import { RAPIER, type RayHit } from '../../physics/Physics';
 import { boxGeo, mergeAny } from '../geo';
@@ -104,7 +105,7 @@ export class Paddle implements Target {
     return this.mesh.localToWorld(new Vector3(0, ARM + PLATE / 2 - 0.02, 0));
   }
 
-  onHit(hit: RayHit, dir: Vector3, energy: number): boolean {
+  onHit(hit: RayHit, dir: Vector3, energy: number, info?: HitInfo): boolean {
     this.hits++;
     const local = this.mesh.worldToLocal(hit.point.clone());
     const b = this.bounds;
@@ -112,14 +113,14 @@ export class Paddle implements Target {
     if (ly > b.minY) {
       this.env.atlas.mark(this.cell, (local.x - b.minX) / b.w, (ly - b.minY) / b.h, 64 / PLATE, energy);
     }
-    this.pending.push({ point: hit.point.clone(), dir: dir.clone(), energy });
+    this.pending.push({ point: hit.point.clone(), dir: dir.clone(), energy, impulse: info?.steelImpulse });
     emitSteelHit(this.env, this.id, hit.point, PLATE, 9.5, energy);
     return true;
   }
 
   private process() {
     for (const h of this.pending) {
-      const p = hitImpulse(h.energy, this.env.shots.massKg);
+      const p = h.impulse ?? hitImpulse(h.energy, this.env.shots.massKg);
       const a = this.angle();
       const from = Math.sign(a) || this.side;
       const axis = new Vector3(0, 0, 1).applyQuaternion(this.frameQ);

@@ -1,3 +1,4 @@
+import type { HitInfo } from '../weapons/Ballistics';
 import {
   AmbientLight,
   Color,
@@ -277,11 +278,11 @@ export class World implements System, HitListener {
 
   // ---- HitListener ------------------------------------------------------------------------------
 
-  onHit(hit: RayHit, dir: Vector3, energy: number): boolean {
+  onHit(hit: RayHit, dir: Vector3, energy: number, info?: HitInfo): boolean {
     const id = hit.tag.targetId;
     if (id) {
       const t = this.targets.get(id);
-      if (t) return t.onHit(hit, dir, energy);
+      if (t) return t.onHit(hit, dir, energy, info);
     }
     const di = this.doorByCollider.get(hit.collider.handle);
     if (di !== undefined) {
