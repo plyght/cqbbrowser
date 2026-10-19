@@ -1,4 +1,10 @@
+import { Box3, Vector3, type Object3D } from 'three';
 import { AudioEngine } from '../audio/AudioEngine';
+import { AimAssist } from '../input/AimAssist';
+import { mouseSettings } from '../input/config';
+import { Gamepad } from '../input/Gamepad';
+import { Gyro } from '../input/Gyro';
+import { Trackpad } from '../input/Trackpad';
 import { Input } from '../input/Input';
 import { KeyboardMouse } from '../input/KeyboardMouse';
 import type { ActionFrame, InputSource } from '../input/actions';
@@ -40,6 +46,10 @@ export class Game {
   hud!: Hud;
   menu!: Menu;
   test = new TestDriver();
+  aimAssist = new AimAssist();
+  trackpad!: Trackpad;
+  gamepad!: Gamepad;
+  gyro = new Gyro();
   systems: System[] = [];
   paused = true;
   private acc = 0;
@@ -50,7 +60,14 @@ export class Game {
     await physics.init();
     this.renderer = new Renderer(canvas);
     const input = new Input();
-    input.add(new KeyboardMouse(canvas));
+    this.trackpad = new Trackpad(this.aimAssist);
+    this.gamepad = new Gamepad(this.aimAssist);
+    input.add(new KeyboardMouse(canvas, this.trackpad));
+    input.add(this.trackpad);
+    input.add(this.gamepad);
+    input.add(this.gyro);
+    input.padHaptics = this.gamepad;
+    void this.gyro.reconnect().catch(() => {});
     input.add(this.test);
     this.ctx = {
       scene: this.renderer.scene,
@@ -68,7 +85,8 @@ export class Game {
     this.player.teleport(this.range.spawn.clone(), this.range.spawnYaw);
     this.weapons = new WeaponController(this.ctx, this.player, ['sb16', 'p17']);
     this.systems.push(this.player, this.weapons, this.range);
-    this.audio = new AudioEngine(bus, this.ctx.camera);
+    this.aimAssist.provider = this.aimAssistProvider();
+    this.audio = new AudioEngine(bus, this.ctx.camera, { physics, exclude: () => this.player.rigidBody });
     this.hud = new Hud(ui);
     this.menu = new Menu(ui);
     this.menu.onPlay = () => this.enter(canvas);
@@ -89,11 +107,37 @@ export class Game {
   private lock(canvas: HTMLCanvasElement) {
     const req = canvas.requestPointerLock as (o?: { unadjustedMovement?: boolean }) => Promise<void> | void;
     try {
-      const p = req.call(canvas, { unadjustedMovement: true });
+      // Trackpad preset keeps OS acceleration (§7.3); mouse uses raw input where supported (§7.2).
+      const raw = this.trackpad.wantsRawMouse && mouseSettings.get().rawInput;
+      const p = req.call(canvas, { unadjustedMovement: raw });
       if (p && 'catch' in p) p.catch(() => canvas.requestPointerLock());
     } catch {
       canvas.requestPointerLock();
     }
+  }
+
+  /**
+   * Aim assist: angle from the weapon aim ray to the nearest standing shootable target.
+   * TODO(world): replace the duck-typed mesh lookup with a `Target.aimPoint()` (and `noShoot`) contract.
+   */
+  private aimAssistProvider() {
+    const box = new Box3();
+    const p = new Vector3();
+    return () => {
+      const { origin, dir } = this.weapons.muzzleWorld();
+      let best = Infinity;
+      for (const t of this.range.targets) {
+        const tt = t as typeof t & { noShoot?: boolean; aimPoint?: () => Vector3; mesh?: Object3D };
+        if (t.down || tt.noShoot) continue;
+        if (tt.aimPoint) p.copy(tt.aimPoint());
+        else if (tt.mesh) box.setFromObject(tt.mesh).getCenter(p);
+        else continue;
+        p.sub(origin);
+        if (p.lengthSq() < 0.09) continue;
+        best = Math.min(best, dir.angleTo(p));
+      }
+      return best;
+    };
   }
 
   enter(canvas?: HTMLCanvasElement) {
@@ -144,7 +188,7 @@ export class Game {
     }
     const alpha = this.acc / Physics.STEP;
     for (const s of this.systems) s.update?.(dt, alpha);
-    this.audio.update();
+    this.audio.update(dt);
     this.hud.update(this.weapons);
     this.renderer.render(dt);
   }

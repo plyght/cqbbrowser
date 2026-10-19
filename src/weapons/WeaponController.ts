@@ -213,6 +213,8 @@ interface Equipped {
   gripQ: Quaternion;
   supportQ: Quaternion;
   boltLocked: boolean;
+  /** Muzzle tip in the weapon frame (bullets leave the barrel, not the screen centre). */
+  muzzleLocal: Vector3;
   /** Recoil instability → how soon grip readjusts happen. */
   adjustAfter: number;
 }
@@ -337,14 +339,21 @@ export class WeaponController implements System {
     root.updateMatrixWorld(true);
     const inv = new Matrix4().copy(root.matrixWorld).invert();
     const sockets: Record<string, Vector3> = {};
+    const named = model.sockets as Record<string, Object3D | undefined>;
+    // Pistols rack on the slide serrations (the `chargingHandle` socket of the new models).
+    const alias: Record<string, string> = { slideRear: 'chargingHandle' };
     for (const [name, fb] of Object.entries(cfg.sockets)) {
-      const o = root.getObjectByName(name);
+      const o =
+        named[name] ??
+        (model.parts as Record<string, Object3D | undefined>)[name] ??
+        (alias[name] ? named[alias[name]] : undefined) ??
+        root.getObjectByName(name);
       sockets[name] = o
         ? new Vector3().setFromMatrixPosition(o.matrixWorld).applyMatrix4(inv)
         : new Vector3(...fb);
     }
     const part = (name: string): Part | null => {
-      const obj = root.getObjectByName(name);
+      const obj = (model.parts as Record<string, Object3D | undefined>)[name] ?? root.getObjectByName(name);
       return obj ? { obj, rest: obj.position.clone() } : null;
     };
     const mag = part('mag');
@@ -353,6 +362,10 @@ export class WeaponController implements System {
     const magGrasp = new Vector3(0, -cfg.graspDepth, 0).applyQuaternion(magRestQ).add(sockets.magwell);
     if (mag) magGrasp.sub(mag.rest).applyQuaternion(magRestQ.clone().invert());
     const instability = clamp((def.recoil.up * 0.6 + def.recoil.side * 0.4) / (def.mass * 0.6), 0, 2);
+    const muzzle = model.sockets.muzzle;
+    const muzzleLocal = muzzle
+      ? new Vector3().setFromMatrixPosition(muzzle.matrixWorld).applyMatrix4(inv)
+      : new Vector3(0, model.boreY ?? 0.03, model.muzzleZ);
     return {
       def,
       cls,
@@ -370,6 +383,7 @@ export class WeaponController implements System {
       gripQ: basisQuat(cfg.gripBasis),
       supportQ: basisQuat(cfg.supportBasis),
       boltLocked: false,
+      muzzleLocal,
       adjustAfter: Math.max(1, Math.round(5 - instability * 2)),
     };
   }
@@ -400,15 +414,23 @@ export class WeaponController implements System {
   /** Spring frequency from mass/length: heavier & longer = more lag; ADS stiffens. */
   private lagFreq(): number {
     const d = this.equipped.def;
-    const base = 13 - d.mass * 1.4 - d.length * 4.5;
-    const adsBoost = 1 + this.ads * 0.35;
     if (this.inertia < 0.05) return 60;
-    return (clamp(base, 4, 16) * adsBoost) / Math.max(0.15, this.inertia);
+    const adsBoost = 1 + this.ads * 0.35;
+    // Build handling (§6.3): half-life h of a critically damped follow → ω = 1.678 / h.
+    const h = d.handling?.lagHalfLife;
+    const base = h ? 1.678 / h / (2 * Math.PI) : clamp(13 - d.mass * 1.4 - d.length * 4.5, 4, 16);
+    return (base * adsBoost) / Math.max(0.15, this.inertia);
   }
 
-  /** Front-heavy / long builds overshoot on stop. */
+  /** Front-heavy / long builds overshoot on stop (build `overshoot` → damping ratio). */
   private lagZeta(): number {
     const d = this.equipped.def;
+    const os = d.handling?.overshoot;
+    if (os !== undefined) {
+      if (os < 0.005) return 0.98;
+      const l = Math.log(os);
+      return clamp(-l / Math.sqrt(Math.PI * Math.PI + l * l), 0.45, 0.98);
+    }
     return clamp(0.93 - (d.length - 0.2) * 0.35 - (d.suppressed ? 0.06 : 0), 0.55, 0.95);
   }
 
@@ -430,7 +452,7 @@ export class WeaponController implements System {
 
     // Pose blends.
     const busy = this.busy || !!this.switching;
-    const hd = 0.06 + d.mass * 0.012;
+    const hd = d.handling ? d.handling.adsTime / 3.3 : 0.06 + d.mass * 0.012;
     this.ads += ((p.aiming && !busy ? 1 : 0) - this.ads) * damp(hd, dt);
     this.wSprint += ((p.sprinting && !this.beats.active ? 1 : 0) - this.wSprint) * damp(0.1, dt);
     this.wLow += ((p.ready === 'low' ? 1 : 0) - this.wLow) * damp(0.09, dt);
@@ -475,14 +497,15 @@ export class WeaponController implements System {
     const pitchRate = (p.pitch - this.prevPitch) / Math.max(dt, 1e-4);
     this.prevTorsoYaw = p.yaw;
     this.prevPitch = p.pitch;
-    const sway = (1 - this.ads * 0.6) * this.inertia * (0.6 + d.mass * 0.15);
+    const sway = (1 - this.ads * 0.6) * this.inertia * (0.6 + d.mass * 0.15) * (d.handling?.swayMul ?? 1);
     this.swayX.step(clamp(yawRate * 0.0035, -0.05, 0.05) * sway, dt);
     this.swayY.step(clamp(-pitchRate * 0.003, -0.04, 0.04) * sway, dt);
 
     // Recoil springs relax toward 0 (returns toward the original point of aim); fatigue slows recovery.
     const rec = 1 - this.fatigue * 0.35;
-    this.recoilPitch.freq = 7 * rec;
-    this.recoilYaw.freq = 6 * rec;
+    const recMul = d.handling?.recoveryMul ?? 1;
+    this.recoilPitch.freq = 7 * rec * recMul;
+    this.recoilYaw.freq = 6 * rec * recMul;
     this.recoilPitch.step(0, dt);
     this.recoilYaw.step(0, dt);
     this.recoilRoll.step(0, dt);
@@ -577,11 +600,14 @@ export class WeaponController implements System {
     this.view.updateMatrixWorld(true);
   }
 
+  private readonly muzzleOut = { origin: new Vector3(), dir: new Vector3() };
+
+  /** Muzzle ray in world space. Returns a reused object: copy it if you keep it. */
   muzzleWorld(): { origin: Vector3; dir: Vector3 } {
-    const m = this.equipped.model;
-    const origin = new Vector3(0, 0.03, m.muzzleZ).applyMatrix4(this.view.matrixWorld);
-    const dir = new Vector3(0, 0, -1).applyQuaternion(this.view.quaternion).normalize();
-    return { origin, dir };
+    const o = this.muzzleOut;
+    o.origin.copy(this.equipped.muzzleLocal).applyMatrix4(this.view.matrixWorld);
+    o.dir.set(0, 0, -1).applyQuaternion(this.view.quaternion).normalize();
+    return o;
   }
 
   // ---------------------------------------------------------------- firing
@@ -610,11 +636,11 @@ export class WeaponController implements System {
   private shoot() {
     const e = this.equipped;
     const d = e.def;
-    const { origin, dir } = this.muzzleWorld();
+    const m = this.muzzleWorld();
     this.ctx.bus.emit('shot', {
       weaponId: d.id,
-      origin,
-      dir,
+      origin: m.origin.clone(),
+      dir: m.dir.clone(),
       suppressed: !!d.suppressed,
       caliber: d.caliber,
     });
@@ -851,10 +877,12 @@ export class WeaponController implements System {
       return;
     }
     s.t += dt;
-    const cfg = this.equipped.cfg;
+    const e = this.equipped;
+    // Build switch time (sling/holster + draw) when available, split ~45/55.
+    const away = e.def.handling ? e.def.handling.switchTime * 0.45 : e.cfg.awayTime;
     if (s.phase === 'out') {
-      this.switchW = clamp(s.t / cfg.awayTime, 0, 1);
-      if (s.t >= cfg.awayTime) {
+      this.switchW = clamp(s.t / away, 0, 1);
+      if (s.t >= away) {
         this.equipNow(s.to);
         s.phase = 'in';
         s.t = 0;
@@ -862,8 +890,9 @@ export class WeaponController implements System {
         this.emitBeat(this.equipped.cls === 'pistol' ? 'draw' : 'unsling', false);
       }
     } else {
-      this.switchW = 1 - clamp(s.t / this.equipped.cfg.drawTime, 0, 1);
-      if (s.t >= this.equipped.cfg.drawTime) {
+      const draw = e.def.handling ? e.def.handling.switchTime * 0.55 : e.cfg.drawTime;
+      this.switchW = 1 - clamp(s.t / draw, 0, 1);
+      if (s.t >= draw) {
         this.switching = null;
         this.switchW = 0;
       }

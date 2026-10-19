@@ -7,3 +7,6 @@ screenshots
 .DS_Store
 assets/audio/pro
 public/assets/audio/pro
+docs/ref
+.claude/worktrees
+tools/audio/.cache
