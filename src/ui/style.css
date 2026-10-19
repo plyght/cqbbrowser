@@ -203,6 +203,55 @@ body {
 .dot.show {
   opacity: 0.75;
 }
+/* Hit marker: four short ticks around centre, ~140 ms. */
+.hitmark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+.hitmark i {
+  position: absolute;
+  width: 7px;
+  height: 1.5px;
+  background: rgba(240, 236, 226, 0.95);
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.9);
+}
+.hitmark i:nth-child(1) {
+  transform: translate(-13px, -9px) rotate(45deg);
+}
+.hitmark i:nth-child(2) {
+  transform: translate(6px, -9px) rotate(-45deg);
+}
+.hitmark i:nth-child(3) {
+  transform: translate(-13px, 8px) rotate(-45deg);
+}
+.hitmark i:nth-child(4) {
+  transform: translate(6px, 8px) rotate(45deg);
+}
+.hitmark.bad i {
+  background: rgba(220, 70, 60, 0.95);
+}
+.hitmark.show {
+  animation: hitmark 160ms ease-out forwards;
+}
+@keyframes hitmark {
+  0% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hitmark.show {
+    animation-duration: 1ms;
+  }
+}
 /* Contextual corner info: fades in on change, then out. */
 .toast {
   position: absolute;

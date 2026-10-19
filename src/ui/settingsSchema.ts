@@ -564,6 +564,16 @@ registerSettings([
   },
   {
     tab: 'gameplay',
+    group: 'Realism',
+    ns: 'gameplay.feedback',
+    key: 'hitMarker',
+    label: 'Hit marker',
+    kind: 'toggle',
+    default: true,
+    hint: 'Brief tick at screen centre when a round scores. Never shown in Hardcore.',
+  },
+  {
+    tab: 'gameplay',
     group: 'Camera',
     ns: 'gameplay',
     key: 'mount',
