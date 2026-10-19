@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { AudioEngine } from '../audio/AudioEngine';
+import { Fx } from '../fx/Fx';
 import { AimAssist } from '../input/AimAssist';
 import { mouseSettings } from '../input/config';
 import { Gamepad } from '../input/Gamepad';
@@ -45,6 +46,7 @@ export class Game {
   renderer!: Renderer;
   player!: Player;
   weapons!: WeaponController;
+  fx!: Fx;
   world!: World;
   drills!: Drills;
   audio!: AudioEngine;
@@ -91,6 +93,8 @@ export class Game {
     this.weapons = new WeaponController(this.ctx, this.player, ['sb16', 'p17']);
     this.drills = new Drills(this.ctx, this.world, this.player, () => this.paused);
     this.systems.push(this.player, this.weapons, this.world, this.drills);
+    this.fx = new Fx(this.ctx, { weapons: this.weapons, player: this.player, renderer: this.renderer });
+    this.systems.push(this.fx);
     this.aimAssist.provider = this.aimAssistProvider();
     this.audio = new AudioEngine(bus, this.ctx.camera, { physics, exclude: () => this.player.rigidBody });
     this.hud = new Hud(ui);
@@ -178,6 +182,7 @@ export class Game {
     this.audio.resume();
     this.menu.show(false);
     this.paused = false;
+    this.renderer.camPowerOn();
     if (canvas && !this.allowUnlocked) this.lock(canvas);
   }
 
@@ -200,6 +205,7 @@ export class Game {
 
   resetDrill() {
     this.drills.restart();
+    this.fx.reset();
   }
 
   /** When true the rAF loop only renders; tests drive `step()` explicitly. */
@@ -235,6 +241,10 @@ export class Game {
     for (const s of this.systems) s.update?.(dt, alpha);
     this.audio.update(dt);
     this.hud.update(this.weapons);
+    // Input turn rate drives CAM04 bitrate starvation alongside the measured camera rotation.
+    this.renderer.setMotion(Math.hypot(f.look.yaw, f.look.pitch) / Math.max(dt, 1e-3));
+    // Skipped frames still advance the camera's temporal state (AE, codec, boot) on the next draw.
     if (render) this.renderer.render(dt);
+    else this.renderer.advance(dt);
   }
 }
