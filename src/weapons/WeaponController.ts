@@ -57,6 +57,9 @@ import { recoilFor, type RecoilFeel, type RecoilProfile } from '../anim/handling
 import { FOV_SPRING } from '../anim/handling/characterise';
 import { WeaponRigidBody, gainsFor } from '../anim/handling/sim';
 import { ArmsRig } from '../anim/rig/ArmsRig';
+import { weaponAnims } from '../anim/library/library';
+import { ContactOverlay } from '../anim/contact/ContactOverlay';
+import { HandContact } from '../anim/contact/HandContact';
 import { solveTwoBone } from '../anim/ik';
 
 const _aq = new Quaternion();
@@ -334,8 +337,20 @@ export class WeaponController implements System {
     this.view.visible = v;
   }
 
+  /** Hard hand–weapon contact on the rig (src/anim/contact); `?contact` draws its proxies. */
+  contact: HandContact | null = null;
+  private contactOverlay: ContactOverlay | null = null;
+
   private useRig(rig: ArmsRig) {
     this.rig = rig;
+    // Per weapon: on for pistols (safe mode + the tuned two-hand hold), off for rifles/SMGs until their
+    // grips/handguards match the clips' hand envelope (README). `?handcontact=off|safe|full` overrides;
+    // `?contact` draws the proxies.
+    this.contact = new HandContact(rig);
+    const hc = HandContact.urlMode();
+    if (hc && hc !== 'off') this.contact.mode = hc;
+    this.contact.autoEnable = (id) => (hc ? hc !== 'off' : weaponAnims(id).family === 'pistol');
+    if (ContactOverlay.enabled()) this.contactOverlay = new ContactOverlay(this.ctx.scene);
     this.rigPending = false;
     this.view.visible = true;
     this.stopPlan();
@@ -536,6 +551,11 @@ export class WeaponController implements System {
     rig.update(dt);
     this.updateRigCamFix(dt);
     this.rigArmLayer(rig);
+    // Hands may not sink into the weapon: after every arm layer, before rendering.
+    if (this.contact) {
+      this.contact.apply(dt);
+      this.contactOverlay?.update(this.contact);
+    }
     // Empty reloads: the rig's falling clone of the old mag is replaced by our physical floor mag.
     const spare = e.model.root.getObjectByName('spareMag');
     if (spare && this.planKind === 'reload') spare.visible = false;

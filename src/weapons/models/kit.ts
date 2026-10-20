@@ -75,6 +75,12 @@ export interface KitBase {
   anchors: Record<string, V3>;
   /** Folding stock: hinge pivot (weapon frame), fold angle about +y (rad) and the folded offset. */
   fold?: { pivot: V3; angle: number; shift: V3 };
+  /**
+   * Weapon-frame translation of the whole asset (origin-anchored nodes, base anchors, base sockets), e.g. to put a
+   * photo-traced grip where the authored hand clip already holds it. Layout-derived anchors (muzzle, optic…) follow
+   * through the platform frame values instead.
+   */
+  offset?: V3;
 }
 
 export interface KitCatalog {
@@ -132,7 +138,11 @@ export function weaponAssetsReady() {
  * Load every kit family (GLB + atlases). Safe to call more than once; resolves when everything is in. Call at
  * boot before the first `buildModel` (Game.start, the bench). `base` prefixes asset URLs.
  */
-export function preloadWeaponAssets(base = ''): Promise<void> {
+export function preloadWeaponAssets(
+  base = '',
+  /** Headless (bun tools, audits): read GLB bytes from disk; textures are skipped (plain materials). */
+  readFile?: (path: string) => ArrayBuffer,
+): Promise<void> {
   if (loading) return loading;
   loading = (async () => {
     const [{ GLTFLoader }, { MeshoptDecoder }] = await Promise.all([
@@ -159,10 +169,16 @@ export function preloadWeaponAssets(base = ''): Promise<void> {
     };
     await Promise.all(
       Object.entries(KIT.families).map(async ([fam, f]) => {
-        const [gltf, mats] = await Promise.all([
-          loader.loadAsync(base + f.glb),
-          familyMaterials(f.materials, loadTex),
-        ]);
+        const [gltf, mats] = readFile
+          ? [
+              await loader.parseAsync(readFile(base + f.glb), ''),
+              new Map<string, Material>(
+                Object.entries(f.materials)
+                  .filter(([, d]) => d.kind !== 'special')
+                  .map(([name]) => [name, new MeshStandardMaterial({ name })]),
+              ),
+            ]
+          : await Promise.all([loader.loadAsync(base + f.glb), familyMaterials(f.materials, loadTex)]);
         familyMats.set(fam, mats);
         gltf.scene.updateMatrixWorld(true);
         gltf.scene.traverse((o) => {
@@ -309,18 +325,38 @@ export function kitEntries(r: ResolvedBuild): KitEntry[] | null {
   return out.every((e) => KIT.nodes[e.node] && (!ready || loaded.has(e.node))) ? out : null;
 }
 
+/**
+ * The build as the kit will lay it out: when this build assembles from the kit and its base has an `offset`, the
+ * platform frame's z values (`…Z` keys, nested `{ z }`) move by the offset so layout-derived anchors, sockets and
+ * sight lines follow the shifted asset. Unchanged (same object) otherwise, so the procedural fallback is untouched.
+ */
+export function kitResolve(r: ResolvedBuild): ResolvedBuild {
+  const base = KIT.bases[r.build.weapon];
+  const dz = base?.offset?.[2] ?? 0;
+  if (!dz || !ready || !kitEnabledFor(r.build.weapon) || !kitEntries(r)) return r;
+  const shift = (v: unknown, key: string): unknown => {
+    if (typeof v === 'number') return key.endsWith('Z') || key === 'z' ? v + dz : v;
+    if (v && typeof v === 'object' && !Array.isArray(v))
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, shift(x, k)]));
+    return v;
+  };
+  const frame = shift(r.platform.frame, '') as typeof r.platform.frame;
+  return { ...r, platform: { ...r.platform, frame } };
+}
+
 const around = (B: number, a: number, d: number): [number, number] => [Math.sin(a) * d, B + Math.cos(a) * d];
 
 /** Model-frame placement of an anchor for this build (layout + per-base overrides). */
 export function anchorMatrix(anchor: string, c: Ctx, base: KitBase): Matrix4 {
   const l: Layout = c.l;
   const m = new Matrix4();
+  const o = base.offset ?? [0, 0, 0];
   const ov = base.anchors[anchor];
-  if (ov) return m.makeTranslation(ov[0], ov[1], ov[2]);
+  if (ov) return m.makeTranslation(ov[0] + o[0], ov[1] + o[1], ov[2] + o[2]);
   const B = c.B;
   switch (anchor) {
     case 'origin':
-      return m;
+      return m.makeTranslation(o[0], o[1], o[2]);
     case 'muzzle':
       return m.makeTranslation(0, 0, l.barrelMuzzleZ);
     case 'gas':
@@ -415,7 +451,8 @@ export function assembleKit(
   const buckets = new Map<Object3D, Map<Material, BufferGeometry[]>>();
   const overrides = new Map<string, Vector3>();
   const placed: { node: string; part?: string; matrix: Matrix4 }[] = [];
-  for (const [k, v] of Object.entries(base.sockets)) overrides.set(k, new Vector3(...v));
+  const off = new Vector3(...(base.offset ?? [0, 0, 0]));
+  for (const [k, v] of Object.entries(base.sockets)) overrides.set(k, new Vector3(...v).add(off));
   for (const e of entries) {
     const ln = loaded.get(e.node)!;
     const kn = KIT.nodes[e.node];

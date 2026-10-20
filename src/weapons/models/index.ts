@@ -20,7 +20,7 @@ import type {
 } from '../attachments/types';
 import { Ctx, type BuildOptions, type PartName, type SocketName } from './core';
 import { triangles } from './geom';
-import { assembleKit } from './kit';
+import { assembleKit, kitCollision, kitResolve } from './kit';
 import { buildAK } from './parts/ak';
 import { buildAR } from './parts/ar';
 import { buildGlock } from './parts/glock';
@@ -71,8 +71,36 @@ export interface WeaponModel {
   massKg: number;
   /** Draw calls (meshes) and triangles for perf budgeting. */
   stats: { drawCalls: number; triangles: number };
+  /**
+   * Optional authored collision proxies (e.g. exported per part by an asset pipeline). Absent = the hand-contact
+   * layer (src/anim/contact) fits proxies to the meshes at load. Same format either way.
+   */
+  collision?: CollisionProxy[];
   dispose(): void;
 }
+
+/**
+ * Hand-contact collision proxy, in the frame of `part` (its pivot, rest pose) or the weapon frame when `part` is
+ * absent. Boxes are rounded (`r` ≤ every half extent), `quat` rotates box axes into that frame.
+ */
+export type CollisionProxy =
+  | {
+      kind: 'box';
+      name: string;
+      part?: PartName;
+      center: [number, number, number];
+      quat?: [number, number, number, number];
+      half: [number, number, number];
+      r: number;
+    }
+  | {
+      kind: 'capsule';
+      name: string;
+      part?: PartName;
+      a: [number, number, number];
+      b: [number, number, number];
+      r: number;
+    };
 
 const LEGACY: Record<string, WeaponId> = {
   ar: 'sb16',
@@ -100,7 +128,7 @@ export function buildModelFromBuild(build: WeaponBuild, opts: BuildOptions = {})
   const errors = validateBuild(build);
   if (errors.length)
     throw new Error(`invalid ${build.weapon} build: ${errors.map((e) => e.message).join('; ')}`);
-  const r = resolveBuild(build);
+  const r = kitResolve(resolveBuild(build));
   const l = layoutBuild(r);
   const c = new Ctx(r, l, opts);
   const pd = r.platform;
@@ -164,7 +192,8 @@ export function buildModelFromBuild(build: WeaponBuild, opts: BuildOptions = {})
   });
 
   // Blender parts kit (when preloaded and every part of the build has an asset).
-  if (assembleKit(c, root, parts, sockets, !!opts.detailParts)) for (const [k, v] of parts) partsRec[k] = v;
+  const kit = assembleKit(c, root, parts, sockets, !!opts.detailParts);
+  if (kit) for (const [k, v] of parts) partsRec[k] = v;
 
   let drawCalls = 0,
     tris = 0;
@@ -193,6 +222,7 @@ export function buildModelFromBuild(build: WeaponBuild, opts: BuildOptions = {})
     length: stats.length,
     massKg: stats.mass,
     stats: { drawCalls, triangles: tris },
+    collision: kit ? kitCollision(root, partsRec) : undefined,
     dispose() {
       root.traverse((o) => {
         const m = o as Mesh;

@@ -12,6 +12,12 @@ from .photo import Profile, bbox
 
 FAM = "p17"
 GRIP_ANGLE = math.radians(22)
+# The traced pistol is authored muzzle-registered (muzzle at the procedural -0.171). In game the whole asset is
+# shifted rearward so its backstrap sits where the authored hand clip holds the old procedural grip (backstrap
+# sections matched over y -0.045..-0.080, mean 50 mm); the runtime applies it via the base `offset`. Platform
+# frame values (catalog.ts p17) and the frame dict below are in the shifted (game) frame.
+OFFSET_Z = 0.050
+OLD_GRIP_RIGHT = (0.0, -0.0607, 0.0415)  # procedural gripRight socket the hand clip was authored against
 
 
 def build():
@@ -181,19 +187,20 @@ def build():
 
     # ------------------------------------------------------------------ catalog entries
     serr_mid = (zf + zr) / 2
-    grip_pt = (0.0, -math.cos(GRIP_ANGLE) * 0.035, math.sin(GRIP_ANGLE) * 0.035 - 0.022)
     kit.base("p17", [kit.entry("p17_frame"), kit.entry("p17_trigger", part="trigger"),
                      kit.entry("p17_slidestop", part="boltCatch"), kit.entry("p17_magrelease", part="magRelease")],
              sockets={
                  "muzzle": (0, B, muzzle_z),
-                 "gripRight": grip_pt,
+                 "gripRight": (OLD_GRIP_RIGHT[0], OLD_GRIP_RIGHT[1], OLD_GRIP_RIGHT[2] - OFFSET_Z),
                  "chargingHandle": (0, B + 0.004, serr_mid),
                  "ejectionPort": (0.0128, top - 0.006, sum(PORT) / 2),
                  "optic": (0, top, rz0 - 0.024),
                  "underRail": (0, rb, -0.1478),
              },
-             frame=dict(boltFaceZ=breech, receiverFrontZ=front + 0.0014, receiverRearZ=rear, railY=top,
-                        ironRear=dict(z=(rz0 + rz1) / 2, y=notch_bottom), railBottomY=rb),
+             frame=dict(boltFaceZ=breech + OFFSET_Z, receiverFrontZ=front + 0.0014 + OFFSET_Z,
+                        receiverRearZ=rear + OFFSET_Z, railY=top,
+                        ironRear=dict(z=(rz0 + rz1) / 2 + OFFSET_Z, y=notch_bottom), railBottomY=rb),
+             offset=(0.0, 0.0, OFFSET_Z),
              anchors={"pistolRail": (0, rb, 0)},
              gripAngle=math.degrees(GRIP_ANGLE))
     for pid in ("p17_slide", "p17_slide_rmr"):
