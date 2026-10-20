@@ -7,7 +7,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { loadHeadlessRig } from '../src/anim/contact/audit';
-import type { GripBake } from '../src/anim/contact/grip';
+import { GRIP_SUPPORT_ONLY, type GripBake } from '../src/anim/contact/grip';
 import { bakeGrip, bakeSupportStyle } from '../src/anim/contact/gripBake';
 import { fitCollision } from '../src/anim/contact/weaponCollision';
 import {
@@ -33,7 +33,10 @@ for (const w of weapons) {
   const model = buildModel(w, { detailParts: true });
   rig.attachWeapon(model, w);
   const t0 = performance.now();
-  const bake = bakeGrip(rig, model, truth.gloves, { log: (s) => console.log(`${w}: ${s}`) });
+  const bake = bakeGrip(rig, model, truth.gloves, {
+    supportOnly: GRIP_SUPPORT_ONLY.has(w),
+    log: (s) => console.log(`${w}: ${s}`),
+  });
   const R = truth.measure(model, 'R'),
     L = truth.measure(model, 'L');
   console.log(`${w}: baked in ${((performance.now() - t0) / 1000).toFixed(1)} s`);

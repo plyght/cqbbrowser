@@ -593,6 +593,8 @@ export function rigid(x: number[], c: Vector3, out: Matrix4): Matrix4 {
 // ------------------------------------------------------------------------------------------ the bake
 
 export interface BakeOptions {
+  /** Bake the support hand only (no seat, the firing hand as the clip has it). */
+  supportOnly?: boolean;
   /** Support grip styles to bake (the default handguard hold always). */
   styles?: SupportGrip[];
   log?: (s: string) => void;
@@ -613,133 +615,141 @@ export function bakeGrip(
   rig.play('idle', { fade: 0 });
   rig.update(0);
   const s = new GripSolver(rig, model, gloves);
-  // 1. Seat.
-  const pivot = (model.sockets.gripRight?.getWorldPosition(new Vector3()) ?? new Vector3()).applyMatrix4(
-    s.toWeapon,
-  );
-  const pts = s.palmPoints('R');
-  const kn = s.knucklePads('R', [2, 3, 4]);
   const S = new Matrix4();
-  const Si = new Matrix4();
-  const seatCost = (x: number[]) => {
+  const trigger: JointDelta[] = [];
+  // Support only (the firing hand stays the clip's: its grip needs an asset change first, see README).
+  if (!opts.supportOnly) {
+    // 1. Seat.
+    const pivot = (model.sockets.gripRight?.getWorldPosition(new Vector3()) ?? new Vector3()).applyMatrix4(
+      s.toWeapon,
+    );
+    const pts = s.palmPoints('R');
+    const kn = s.knucklePads('R', [2, 3, 4]);
+    const Si = new Matrix4();
+    const seatCost = (x: number[]) => {
+      rigid(x, pivot, S);
+      Si.copy(S).invert();
+      const c = s.rigidCost(pts, Si, 0.0005, kn, KNUCKLE_W);
+      const t = Math.hypot(x[0], x[1], x[2]) * 1000;
+      const r = Math.hypot(x[3], x[4], x[5]);
+      // The gun moves at most ~5 mm in the hand.
+      const over = Math.max(0, t - SEAT_MM);
+      return c.cost + 0.05 * t * t + 400 * r * r + 200 * over * over;
+    };
+    const x = [0, 0, 0, 0, 0, 0];
+    const before = s.rigidCost(pts, new Matrix4());
+    const L = SEAT_MM / 1000;
+    patternSearch(
+      seatCost,
+      x,
+      [L, L, L, SEAT_ROT, SEAT_ROT, SEAT_ROT],
+      [0.002, 0.002, 0.002, 0.02, 0.02, 0.02],
+    );
     rigid(x, pivot, S);
-    Si.copy(S).invert();
-    const c = s.rigidCost(pts, Si, 0.0005, kn, KNUCKLE_W);
-    const t = Math.hypot(x[0], x[1], x[2]) * 1000;
-    const r = Math.hypot(x[3], x[4], x[5]);
-    // The gun moves at most ~5 mm in the hand.
-    const over = Math.max(0, t - SEAT_MM);
-    return c.cost + 0.05 * t * t + 400 * r * r + 200 * over * over;
-  };
-  const x = [0, 0, 0, 0, 0, 0];
-  const before = s.rigidCost(pts, new Matrix4());
-  const L = SEAT_MM / 1000;
-  patternSearch(
-    seatCost,
-    x,
-    [L, L, L, SEAT_ROT, SEAT_ROT, SEAT_ROT],
-    [0.002, 0.002, 0.002, 0.02, 0.02, 0.02],
-  );
-  rigid(x, pivot, S);
-  const after = s.rigidCost(pts, Si.copy(S).invert());
-  log(
-    `seat t ${mm(x.slice(0, 3))} mm r ${x
-      .slice(3)
-      .map((v) => v.toFixed(3))
-      .join(
-        ',',
-      )} | palm pen ${mm([before.pen])}→${mm([after.pen])} gap ${mm([before.gap])}→${mm([after.gap])} mm`,
-  );
-  rig.setGripSeat(S);
-  rig.update(0);
-  s.sync();
-  s.rebase('R');
-  s.rebase('L');
-  // 2. Firing fingers.
-  const R = s.chains.R;
-  const gripAngle = Math.abs(model.sockets.gripRight?.rotation.x ?? 0.33);
-  const fR = (n: Vector3) => faceOf(n, gripAngle);
-  for (const fi of [2, 3, 4])
+    const after = s.rigidCost(pts, Si.copy(S).invert());
+    log(
+      `seat t ${mm(x.slice(0, 3))} mm r ${x
+        .slice(3)
+        .map((v) => v.toFixed(3))
+        .join(
+          ',',
+        )} | palm pen ${mm([before.pen])}→${mm([after.pen])} gap ${mm([before.gap])}→${mm([after.gap])} mm`,
+    );
+    rig.setGripSeat(S);
+    rig.update(0);
+    s.sync();
+    s.rebase('R');
+    s.rebase('L');
+    // 2. Firing fingers.
+    const R = s.chains.R;
+    const gripAngle = Math.abs(model.sockets.gripRight?.rotation.x ?? 0.33);
+    const fR = (n: Vector3) => faceOf(n, gripAngle);
+    for (const fi of [2, 3, 4])
+      fitLog(
+        s,
+        R[fi],
+        {
+          contact: [0.3, 1, 1],
+          faces: { left: 0, front: 6, bottom: fi === 2 ? 6 : 20 },
+          press: 1,
+          abd: true,
+          ...FIRING_STYLE,
+        },
+        fR,
+        log,
+      );
     fitLog(
       s,
-      R[fi],
+      R[1],
       {
-        contact: [0.3, 1, 1],
-        faces: { left: 0, front: 6, bottom: fi === 2 ? 6 : 20 },
-        press: 1,
-        abd: true,
-        ...FIRING_STYLE,
+        contact: [0, 0.3, 0.3],
+        anyVertex: [false, true, true],
+        straight: [0, 1.5, 1.5],
+        openCost: 1,
+        point: true,
       },
       fR,
       log,
     );
-  fitLog(
-    s,
-    R[1],
-    {
-      contact: [0, 0.3, 0.3],
-      anyVertex: [false, true, true],
-      straight: [0, 1.5, 1.5],
-      openCost: 1,
-      point: true,
-    },
-    fR,
-    log,
-  );
-  fitLog(
-    s,
-    R[0],
-    { contact: [0, 0.3, 1], faces: { left: 0, top: 0 }, penW: [0, 1, 1], openCost: 1, reg: 30 },
-    fR,
-    log,
-  );
-  const rest = R[1].delta.slice();
-  const trigger: JointDelta[] = [];
-  if (s.trigField) {
-    const ch = R[1];
-    // Index pad onto the blade: flex + knuckle abduction from the rest pose, nothing else penetrated.
-    const r = s.fitFinger(
-      ch,
-      {
-        contact: [0, 0.5, 1],
-        contactField: s.trigField,
-        start: [...rest, 0],
-        abd: true,
-        abdMax: 0.7,
-        reg: 2,
-        openCost: 1,
-        cap: 30,
-        point: true,
-      },
-      () => '',
+    fitLog(
+      s,
+      R[0],
+      { contact: [0, 0.3, 1], faces: { left: 0, top: 0 }, penW: [0, 1, 1], openCost: 1, reg: 30 },
+      fR,
+      log,
     );
-    const d = r.d.concat([0]).slice(0, 4);
-    let tg = MAXD;
-    for (const j of [1, 2]) for (const i of ch.pads[j]) tg = Math.min(tg, s.dist(i, s.trigField));
-    const pen = s.chainPen(ch);
-    const found = tg < 0.003 && pen < 0.003;
-    if (found) {
-      if (Math.abs(d[3]) > 1e-4)
-        trigger.push({
-          bone: canonName(rig, ch.joints[0].bone),
-          axis: ch.abd.toArray() as V3,
-          a: round(d[3]),
-        });
-      ch.joints.forEach((J, j) => {
-        if (Math.abs(d[j] - rest[j]) > 1e-4)
+    const rest = R[1].delta.slice();
+    if (s.trigField) {
+      const ch = R[1];
+      // Index pad onto the blade: flex + knuckle abduction from the rest pose, nothing else penetrated.
+      const r = s.fitFinger(
+        ch,
+        {
+          contact: [0, 0.5, 1],
+          contactField: s.trigField,
+          start: [...rest, 0],
+          abd: true,
+          abdMax: 0.7,
+          reg: 2,
+          openCost: 1,
+          cap: 30,
+          point: true,
+        },
+        () => '',
+      );
+      const d = r.d.concat([0]).slice(0, 4);
+      let tg = MAXD;
+      for (const j of [1, 2]) for (const i of ch.pads[j]) tg = Math.min(tg, s.dist(i, s.trigField));
+      const pen = s.chainPen(ch);
+      const found = tg < 0.003 && pen < 0.003;
+      if (found) {
+        if (Math.abs(d[3]) > 1e-4)
           trigger.push({
-            bone: canonName(rig, J.bone),
-            axis: J.axis.toArray() as V3,
-            a: round(d[j] - rest[j]),
+            bone: canonName(rig, ch.joints[0].bone),
+            axis: ch.abd.toArray() as V3,
+            a: round(d[3]),
           });
-      });
+        ch.joints.forEach((J, j) => {
+          if (Math.abs(d[j] - rest[j]) > 1e-4)
+            trigger.push({
+              bone: canonName(rig, J.bone),
+              axis: J.axis.toArray() as V3,
+              a: round(d[j] - rest[j]),
+            });
+        });
+      }
+      log(
+        `trigger ${found ? 'on' : 'MISS'} d ${d.map((v, j) => (v - (rest[j] ?? 0)).toFixed(2)).join(',')} pad gap ${(tg * 1000).toFixed(1)} pen ${(pen * 1000).toFixed(1)} mm`,
+      );
+      s.setChain(ch, [...rest]);
     }
-    log(
-      `trigger ${found ? 'on' : 'MISS'} d ${d.map((v, j) => (v - (rest[j] ?? 0)).toFixed(2)).join(',')} pad gap ${(tg * 1000).toFixed(1)} pen ${(pen * 1000).toFixed(1)} mm`,
-    );
-    s.setChain(ch, [...rest]);
   }
-  const bake: GripBake = { seat: S.toArray().map((v) => round(v, 6)), R: s.deltas('R'), trigger, L: {} };
+  const bake: GripBake = {
+    seat: S.toArray().map((v) => round(v, 6)),
+    R: opts.supportOnly ? [] : s.deltas('R'),
+    trigger,
+    L: {},
+  };
   // 3. Support hand: the weapon and the (final) firing hand are its obstacles.
   const hand = new HandObstacle((n) => rig.boneMap.get(n)!);
   hand.update(s.toWeapon);

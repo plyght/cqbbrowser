@@ -316,7 +316,12 @@ export class HandContact {
       if (this.trig > 0.001) applyJoints(rig, g.trigger, wr * this.trig);
     }
     const L = supportHold(g, this.model, this.style);
-    const wl = Math.min(1, Math.max(0, rig.anchorWeight('L', 'grip')));
+    const wl0 = Math.min(1, Math.max(0, rig.anchorWeight('L', 'grip')));
+    // Rate-limited (≤ 6 /s): a speed reload drops the support anchor in 2–3 frames, which would snap the
+    // finger wrap open at once.
+    const maxStep = 6 * Math.max(dt, 1 / 240);
+    this.wl += Math.max(-maxStep, Math.min(maxStep, wl0 - this.wl));
+    const wl = this.wl;
     if (L && wl > 0.001) {
       const k = wl * wl * (3 - 2 * wl);
       rig.root.updateMatrixWorld(true);
@@ -328,6 +333,8 @@ export class HandContact {
   }
 
   private trig = 0;
+  /** Eased support-hold weight. */
+  private wl = 1;
 
   /** Per weapon build: idle hold score raw vs solved (lower is better; see `holdScore`). */
   readonly gate = new Map<string, { raw: number; solved: number }>();
@@ -405,6 +412,7 @@ export class HandContact {
   /** Forget all eased / warm-started solver state (a new weapon in the hands). */
   reset() {
     this.trig = 0;
+    this.wl = 1;
     this.gunOff.set(0, 0, 0);
     this.magOff.set(0, 0, 0);
     this.heldPush.set(0, 0, 0);

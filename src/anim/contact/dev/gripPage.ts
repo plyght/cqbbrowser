@@ -106,7 +106,7 @@ async function main() {
     if (v.startsWith('gsec:') || v.startsWith('bsec:')) return section(v);
     const s = VIEWS[v];
     // Left of the grip: cut away everything more than 4 cm left of the bore (the support arm passes there).
-    if (v === 'left' || v === 'leftfront') {
+    if ((v === 'left' || v === 'leftfront') && !m.parts.slide) {
       const gq0 = m.root.getWorldQuaternion(new Quaternion());
       const nx = new Vector3(1, 0, 0).applyQuaternion(gq0);
       const p0 = new Vector3(-0.04, 0, 0).applyMatrix4(m.root.matrixWorld);

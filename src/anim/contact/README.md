@@ -4,10 +4,16 @@
 
 **In game, the default depends on the weapon** (`HandContact.defaultFor`):
 
-- **Baked grip** (`grip.ts`, `GRIP_SHIP`): K-47S, SB-16, HB-300. Both hands hold the gun from an offline solve
-  on the true meshes (below); per frame it only blends in (~0.06 ms).
-- **Safe mode** for pistols (P-17, P-92): no seat, finger opening only, the hand-tuned `PISTOL_SUPPORT` hold.
-- **Raw clip** for the KP-9.
+- **Baked grip** (`grip.ts`, `GRIP_SHIP`): K-47S, SB-16, HB-300 (both hands), KP-9 (support hand only,
+  `GRIP_SUPPORT_ONLY`). An offline solve on the true meshes (below); per frame it only blends in (~0.03–0.06 ms).
+- **Safe mode** for pistols (P-17, P-92): no seat, finger opening only, the hand-tuned `PISTOL_SUPPORT` hold. A
+  support-only bake exists for both (true-mesh support penetration 9.3 → 1.3 / 0.3 mm) but does not read better
+  than the tuned hold yet, so it is not shipped.
+- Firing hands on the KP-9, P-17 and P-92 stay the clip's: their grips are 26–29 mm wide where the hand holds
+  them (SB-16: 25 mm, K-47S: 18 mm) and the palm sinks 5–7 mm into the near panel even after the 5 mm seat, so
+  no finger solve can make them hold cleanly; that needs the kit grips narrowed.
+- SBR foregrips (`fg_stubby`, `fg_wedge`, and the full-length vertical / angled grips): their own baked holds per
+  foregrip part, picked by `supportGripFor` (`vgrip` / `afg`).
 
 `?handcontact=off|safe|full` overrides; `?contact` draws the proxies.
 
