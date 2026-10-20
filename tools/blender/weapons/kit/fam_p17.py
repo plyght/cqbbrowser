@@ -134,6 +134,11 @@ def build():
     feather = lambda p: max(0.0, min(1.0, (-0.002 - p[1]) / 0.01)) if p[2] > -0.062 else 0.0  # noqa: E731
     fit = lib.fit_grip(frame, 0.030, 0.050, 22, -0.045, in_grip, feather)
     print("[p17] grip w×d %.1f×%.1f → %.1f×%.1f mm" % tuple(x * 1000 for x in fit))
+    # firing-hand band (grip socket → 40 mm up) to 24.5 mm wide (true-mesh audit: the palm sank into the 30 mm
+    # panels); x only, tapered into the frame above and the mag well below; the trigger guard is left alone
+    sock_y = OLD_GRIP_RIGHT[1]
+    nb = lib.narrow_grip(frame, 0.0245, sock_y, 0.040, 0.012, 0.010, lambda p: in_grip(p) and p[2] > -0.041)
+    print("[p17] hand-band width %.1f → %.1f mm" % (nb[0] * 1000, nb[1] * 1000))
     prox = lib.obb_proxies(frame, 3, in_grip, 22) + kit.auto_proxies_where(frame, lambda p: not in_grip(p), 2)
     kit.node(frame, FAM, proxies=prox)
 

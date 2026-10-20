@@ -87,6 +87,10 @@ def build():
     in_grip = lambda p: p[1] < -0.054 and p[2] > GZ  # noqa: E731
     fit = lib.fit_grip(lower, 0.028, 0.045, seat_ang, -0.075, in_grip)
     print("[kp9] grip w×d %.1f×%.1f → %.1f×%.1f mm (seat %.1f°)" % (tuple(x * 1000 for x in fit) + (seat_ang,)))
+    # firing-hand band to 24.5 mm wide (true-mesh audit: the palm sank into the 28 mm grip); x only, centreline,
+    # rake and depth kept; the housing above keeps its width, the bottom tapers back out
+    nb = lib.narrow_grip(lower, 0.0245, OLD_GRIP_RIGHT[1], 0.040, 0.035, 0.010, in_grip)
+    print("[kp9] hand-band width %.1f → %.1f mm" % (nb[0] * 1000, nb[1] * 1000))
     prox = lib.obb_proxies(lower, 3, in_grip, seat_ang) + kit.auto_proxies_where(lower, lambda p: not in_grip(p), 2)
     kit.node(lower, FAM, proxies=prox)
 
