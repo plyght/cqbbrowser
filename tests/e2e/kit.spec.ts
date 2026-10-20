@@ -7,7 +7,13 @@ import { boot, play, steps } from './helpers';
  * Blender parts kit (src/weapons/models/kit.ts): the default builds assembled from the GLB kit on the bench, one
  * contact sheet, plus chest-cam idle / ADS frames in game. Screenshots: screenshots/kit-*.png.
  */
-const dir = 'screenshots';
+const dir = process.env.KIT_SHOT_DIR ?? 'screenshots';
+/** In-game shots: `KIT_SHOTS=sb16:0,p17:1` (model:slot), `KIT_SHOT_PREFIX` names the files. */
+const SHOTS = (process.env.KIT_SHOTS ?? 'p17:1,sb16:0,k47s:0')
+  .split(',')
+  .map((s) => s.split(':'))
+  .map(([m, slot]) => [Number(slot), m] as const);
+const PREFIX = process.env.KIT_SHOT_PREFIX ?? 'kit-ingame';
 const BUILDS: [string, string][] = [
   ['sb16', 'side'],
   ['hb300', 'side'],
@@ -76,18 +82,14 @@ test('kit: default builds load from the GLB kit on the bench', async ({ page }) 
 
 test('kit: chest cam idle + ADS in game', async ({ page }) => {
   test.setTimeout(900_000);
-  const errors = await boot(page, '/?kit=all');
+  const errors = await boot(page, process.env.KIT_URL ?? '/?kit=all');
   await page.evaluate(() => ((window as any).__sb.renderer.dynres.enabled = false));
   await play(page);
   await page
     .waitForFunction(() => !!(window as any).__sb.weapons.rig, null, { timeout: 60_000 })
     .catch(() => {});
   const files: string[] = [];
-  for (const [slot, model] of [
-    [1, 'p17'],
-    [0, 'sb16'],
-    [0, 'k47s'],
-  ] as const) {
+  for (const [slot, model] of SHOTS) {
     await page.evaluate(
       ([slot, model]) => {
         const w = (window as any).__sb.weapons;
@@ -101,17 +103,17 @@ test('kit: chest cam idle + ADS in game', async ({ page }) => {
       },
       [slot, model] as const,
     );
-    await steps(page, 140); // swap-in done
+    await steps(page, Number(process.env.KIT_SWAP_STEPS ?? 140)); // swap-in done
     await settle(page);
-    const idle = `${dir}/kit-ingame-${model}-idle.png`;
+    const idle = `${dir}/${PREFIX}-${model}-hip.png`;
     await page.screenshot({ path: idle });
     await steps(page, 40, { down: ['aim'] });
     await settle(page, { down: ['aim'] });
-    const ads = `${dir}/kit-ingame-${model}-ads.png`;
+    const ads = `${dir}/${PREFIX}-${model}-ads.png`;
     await page.screenshot({ path: ads });
     files.push(idle, ads);
     const kit = await page.evaluate(() => !!(window as any).__sb.weapons.equipped.model.root.userData.kit);
-    expect(kit, model).toBe(true);
+    if (process.env.KIT_EXPECT !== '0') expect(kit, model).toBe(true);
   }
   await sheet(page, files, `${dir}/kit-sheet-ingame.png`, 2);
   expect(errors).toEqual([]);

@@ -287,7 +287,7 @@ export class ArmsRig {
   }
 
   /** Parent `model` under the rig; it follows the firing hand via the clip's gun track from now on. */
-  attachWeapon(model: WeaponModel, weaponId: string): void {
+  attachWeapon(model: WeaponModel, weaponId: string, opts: { keepAction?: boolean } = {}): void {
     if (this.weapon) this.detachWeapon();
     this.weapon = model;
     this.anims = weaponAnims(weaponId);
@@ -321,7 +321,17 @@ export class ArmsRig {
       const s = this.atIdle(() => this.seatProvider!(this, model, weaponId));
       if (s) this.setGripSeat(s);
     }
-    if (!this.layer) this.play('idle', { fade: 0 });
+    // A direct attach (loadout change, equipNow) starts this weapon's idle: the playing layer belongs to the
+    // previous weapon's clip set (a rifle idle on the pistol stretched the support arm out and dropped the
+    // gun). Only the swap chain keeps its swap-out layer, to crossfade it into this weapon's draw.
+    const own = !!this.layer && Object.values(this.clips).includes(this.layer.clip);
+    if (!this.layer || (!own && !opts.keepAction)) {
+      this.shot = this.shotPrev = undefined;
+      this.outgoing = undefined;
+      this.fadeDur = 0;
+      this.holding = false;
+      this.play('idle', { fade: 0 });
+    }
   }
 
   /**
@@ -571,7 +581,7 @@ export class ArmsRig {
       if (l.clip.action === 'swapOut' && this.pendingSwap) {
         const p = this.pendingSwap;
         this.pendingSwap = undefined;
-        this.attachWeapon(p.model, p.id);
+        this.attachWeapon(p.model, p.id, { keepAction: true });
         this.emit('swapMid', p.opts.onEvent);
         // The swap-out's last pose and the draw's first are far apart (≈ 60 cm at the support hand): a 0.06 s
         // fade moved the arm through view in 3–4 frames. Both ends are below the frame; 0.2 s keeps it continuous.

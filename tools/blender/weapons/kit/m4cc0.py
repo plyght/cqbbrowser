@@ -76,10 +76,9 @@ def apply(fam):
         old = kit.NODES.pop(n, None)
         if old:
             lib.delete(old["obj"])
-    grip = src.set_pivot(base["grip"], (0, 0, 0), "g")
-    fit = lib.fit_grip(grip, 0.027, 0.043, 25, -0.05)
-    print("[m4cc0] A2 grip w×d %.1f×%.1f → %.1f×%.1f mm" % tuple(x * 1000 for x in fit))
-    _replace("ar_grip_a2", grip, fam, proxies=lib.obb_proxies(grip, 3, angle_deg=25))
+    # The CC0 pistol grip is 17 mm wide and raked/low against the authored hand: the A2 grip stays the lofted one
+    # on the procedural grip seat (fam_ar), so drop the CC0 grip.
+    lib.delete(base["grip"])
 
     # Barrel object: keep only the A2 birdcage (anchor 'muzzle': rear at z = 0)
     def cls_barrel(mn, mx):

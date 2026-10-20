@@ -207,12 +207,7 @@ def build():
         kit.part(pid, kit.entry("p17_slide", part="slide"))
     for pid in ("p17_b_std", "p17_b_thread", "p17_bare", "p17_irons"):
         kit.part(pid)
-    # pistol red dot on the slide (rides with the slide), just ahead of the rear sight
-    from .fam_acc import rmr_parts
-
-    dot = join("p17_rmr", rmr_parts(rz0 - 0.001, rz0 - 0.046, top - 0.0015), pivot=(0, 0, 0))
-    kit.node(dot, FAM)
-    kit.part("p17_rmr", kit.entry("p17_rmr", part="slide"))
+    # The slide red dot (part p17_rmr) is built in the acc family (fam_acc.p17_rmr) from the same profile marks.
     from .devices import device
 
     device(FAM, "p17_comp", 0.028, 0.0135, "comp", "nitride", part="slide")

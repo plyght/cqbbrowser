@@ -81,6 +81,11 @@ export interface KitBase {
    * through the platform frame values instead.
    */
   offset?: V3;
+  /**
+   * Platform frame keys measured on this asset (they move with `offset`); omitted = every z value of the frame
+   * (the P-17's frame is the asset's). E.g. the KP-9 keeps its procedural frame except the rear sight.
+   */
+  frameShift?: string[];
 }
 
 export interface KitCatalog {
@@ -107,10 +112,10 @@ let ready = false;
 
 /**
  * Weapons that use the kit when it is loaded (the others keep their procedural meshes). Families are switched on
- * as they pass review: P-17 and the new P-92 by default; `?kit=all` turns everything on, `?kit=0` off, or a list
+ * as they pass review: P-17, the new P-92, the SB-16 and the KP-9 by default; `?kit=all` turns everything on, `?kit=0` off, or a list
  * (`?kit=p17,k47s`).
  */
-const DEFAULT_KIT_WEAPONS = ['p17', 'p92'];
+const DEFAULT_KIT_WEAPONS = ['p17', 'p92', 'sb16', 'kp9'];
 let kitWeapons: Set<string> | 'all' = new Set(DEFAULT_KIT_WEAPONS);
 {
   const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('kit') : null;
@@ -272,11 +277,11 @@ function special(name: string): Material {
     specials = {
       glass: new MeshStandardMaterial({
         name: 'glass',
-        color: 0x223033,
-        metalness: 0.9,
+        color: 0x3a4a4e,
+        metalness: 0.6,
         roughness: 0.05,
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.1,
         depthWrite: false,
         side: DoubleSide,
         envMap: weaponEnvMap(),
@@ -340,7 +345,13 @@ export function kitResolve(r: ResolvedBuild): ResolvedBuild {
       return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, shift(x, k)]));
     return v;
   };
-  const frame = shift(r.platform.frame, '') as typeof r.platform.frame;
+  const keys = base.frameShift;
+  const f0 = r.platform.frame as unknown as Record<string, unknown>;
+  const frame = (
+    keys
+      ? { ...f0, ...Object.fromEntries(keys.filter((k) => k in f0).map((k) => [k, shift(f0[k], k)])) }
+      : shift(f0, '')
+  ) as typeof r.platform.frame;
   return { ...r, platform: { ...r.platform, frame } };
 }
 

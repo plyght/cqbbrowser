@@ -37,7 +37,9 @@ def red_dot():
     parts = clamp(0, -0.04)
     riser_top = ax - ro + 0.003
     parts.append(box("riser", 0.02, riser_top - 0.003, -0.002, -0.038, 0, (riser_top + 0.003) / 2, mat="anod", bevel=0.0012))
-    parts.append(box("base", 0.023, 0.011, zb0 - 0.004, zb1 + 0.004, 0, ax - ro + 0.005, mat="anod", bevel=0.002))
+    # saddle under the tube: its top stays below the bore (ax - ri) so the view through the tube is clear
+    by0, by1 = riser_top - 0.001, ax - ri - 0.0006
+    parts.append(box("base", 0.023, by1 - by0, zb0 - 0.004, zb1 + 0.004, 0, (by0 + by1) / 2, mat="anod", bevel=0.0015))
     body = lathe("body", [(ri, zb0), (ro - 0.0006, zb0), (ro, zb0 - 0.0015), (ro, zb1 + 0.0035), (ro + 0.0009, zb1 + 0.002),
                           (ro + 0.0009, zb1), (ri, zb1), (ri, zb0)], 32, ax, 0, "anod", 0.0003)
     parts.append(body)
@@ -185,6 +187,19 @@ def foregrips():
     return out
 
 
+def p17_rmr():
+    """P-17 slide red dot (rides with the slide): RMR footprint just ahead of the rear sight, on the slide top
+    (profiles/p17.json marks, P-17 asset frame; the P-17 base offset moves it with the pistol)."""
+    from .photo import Profile, bbox
+
+    P = Profile("p17")
+    top = P.m("slideTop")[1]
+    rz0 = bbox(P.outer("rearSight"))[0]
+    dot = join("acc_p17_rmr", rmr_parts(rz0 - 0.001, rz0 - 0.046, top - 0.0015), pivot=(0, 0, 0))
+    kit.node(dot, FAM)
+    kit.part("p17_rmr", kit.entry("acc_p17_rmr", part="slide"))
+
+
 def build():
     lib.set_collection(FAM)
     kit.node(red_dot(), FAM)
@@ -212,6 +227,7 @@ def build():
              kit.entry("acc_mag3x", anchor="magnifier", part="magnifier"))
     kit.node(offset_dot(), FAM)
     kit.part("off_dot45", kit.entry("acc_offset_dot", anchor="offset"))
+    p17_rmr()
     for combo, pid in ((False, "p17_light"), (True, "p17_combo")):
         n = pistol_light(combo)
         kit.node(n, FAM, sockets={"light": (0, -0.0175, 0)})

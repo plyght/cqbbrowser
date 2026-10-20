@@ -144,11 +144,13 @@ def consolidate(o, fam):
         if tgt not in names:
             names.append(tgt)
         remap.append(names.index(tgt))
-    for p in o.data.polygons:
-        p.material_index = remap[p.material_index] if p.material_index < len(remap) else 0
+    idx = [remap[p.material_index] if p.material_index < len(remap) else 0 for p in o.data.polygons]
+    # (materials.clear() resets the face indices: re-assign them after the new slots exist)
     o.data.materials.clear()
     for m in names:
         o.data.materials.append(m)
+    o.data.polygons.foreach_set("material_index", idx)
+    o.data.update()
 
 
 def export_family(fam, extra_materials=None):
