@@ -22,7 +22,7 @@ import { HandContact } from '../HandContact';
  * Rows = weapon × mode, columns = views. `xray=1` draws the weapon see-through (fingers inside it show),
  * `overlay=1` the contact proxies, `state=idle|fire|ads`, `t=` seconds into it. Modes: raw (clip), contact
  * (shipping default for the weapon), safe, full. Section views: `gsec:<mm>` cuts across the grip `mm` up its axis from
- * the grip socket (looking down the grip), `bsec:<mm>` across the bore at the support wrist + `mm` (looking from the
+ * the grip socket (looking down the grip), `fg=fg_vertical|fg_angled` builds with that foregrip, `bsec:<mm>` across the bore at the support wrist + `mm` (looking from the
  * muzzle); cut interiors show red (weapon) / yellow (glove). Hook: window.__grip { ready, stats }.
  */
 const q = new URLSearchParams(location.search);
@@ -75,7 +75,13 @@ async function main() {
   const overlay = q.get('overlay') === '1' ? new ContactOverlay(sheet.scene) : null;
   const models: Record<string, WeaponModel> = {};
   for (const w of weapons) {
-    models[w] = buildModel(w, { detailParts: true });
+    const fg = q.get('fg');
+    models[w] = fg
+      ? buildModel(
+          { v: 1, weapon: w as WeaponModel['weapon'], parts: { foregrip: fg } },
+          { detailParts: true },
+        )
+      : buildModel(w, { detailParts: true });
     if (q.get('xray') === '1') xray(models[w]);
     const capGun = new MeshBasicMaterial({ color: 0xc02020, side: BackSide, clippingPlanes: [cut] });
     const meshes: Mesh[] = [];
@@ -147,6 +153,8 @@ async function main() {
   const pose = (w: string, mode: string) => {
     const on = mode !== 'raw';
     contact.autoEnable = () => on;
+    // `legacy`: the proxy layer as it shipped before the baked grip (safe mode, PISTOL_SUPPORT).
+    contact.useGrip = mode !== 'legacy';
     contact.mode = mode === 'full' ? 'full' : 'safe';
     if (rig.weaponModel) rig.detachWeapon();
     rig.attachWeapon(models[w], w);

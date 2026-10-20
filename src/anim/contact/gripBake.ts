@@ -1,7 +1,8 @@
-import { Matrix4, Quaternion, Vector3, type Bone, type SkinnedMesh } from 'three';
+import { Euler, Matrix4, Quaternion, Vector3, type Bone, type SkinnedMesh } from 'three';
 import type { WeaponModel } from '../../weapons/models';
 import type { ArmsRig } from '../rig/ArmsRig';
 import {
+  applyJoints,
   applySupport,
   type GripBake,
   type JointDelta,
@@ -742,11 +743,120 @@ export function bakeGrip(
   const hand = new HandObstacle((n) => rig.boneMap.get(n)!);
   hand.update(s.toWeapon);
   s.extra = hand.sdf;
-  for (const style of opts.styles ?? ['handguard']) {
-    if (style !== 'handguard') continue;
-    bake.L[style] = supportFit(s, log);
-  }
+  bake.L.handguard = supportFit(s, log);
+  if (!model.parts.slide) bake.L.magwell = postHold(s, model, wellPost(model), log);
   return bake;
+}
+
+/** A vertical post the support hand can wrap: centre (weapon frame) and its axis (down the post). */
+interface Post {
+  c: Vector3;
+  down: Vector3;
+}
+
+/** The magwell as a post: the well mouth 3 cm down the mag. */
+function wellPost(model: WeaponModel): Post {
+  model.root.updateMatrixWorld(true);
+  const inv = new Matrix4().copy(model.root.matrixWorld).invert();
+  const c = (
+    model.sockets.magwell?.getWorldPosition(new Vector3()) ?? new Vector3(0, -0.04, -0.08)
+  ).applyMatrix4(inv);
+  return { c: c.add(new Vector3(0, -0.03, 0)), down: new Vector3(0, -1, 0) };
+}
+
+/** A foregrip node of the build as a post (40 % down its length). */
+function foregripPost(model: WeaponModel): Post | null {
+  const placed = (model.root.userData.kitNodes ?? []) as { node: string; matrix: Matrix4 }[];
+  const n = placed.find((p) => p.node.startsWith('acc_fg_vertical'));
+  if (!n) return null;
+  return { c: new Vector3(0, -0.04, 0).applyMatrix4(n.matrix), down: new Vector3(0, -1, 0) };
+}
+
+/**
+ * The support hand wrapping a post (vertical foregrip, magwell): start from the firing hand's hold on its
+ * grip, mirrored left↔right onto the post (palm frame aligned by its finger axis and palm normal), then the same
+ * rigid refinement and finger wrap, the fingers round the front onto the far (right) side, thumb over the right.
+ */
+function postHold(s: GripSolver, model: WeaponModel, post: Post, log: (s: string) => void): SupportBake {
+  const a = Math.abs(model.sockets.gripRight?.rotation.x ?? 0.33);
+  const gUp = new Vector3(0, Math.cos(a), -Math.sin(a));
+  const gBack = new Vector3(0, Math.sin(a), Math.cos(a));
+  const gO = (model.sockets.gripRight?.getWorldPosition(new Vector3()) ?? new Vector3()).applyMatrix4(
+    s.toWeapon,
+  );
+  const X1 = new Vector3(1, 0, 0);
+  const pUp = post.down.clone().negate();
+  const pBack = new Vector3().crossVectors(X1, pUp).normalize();
+  // Grip frame → mirrored post frame.
+  const map = (v: Vector3, point: boolean) => {
+    const d = point ? v.clone().sub(gO) : v.clone();
+    const r = X1.clone()
+      .multiplyScalar(-d.dot(X1))
+      .addScaledVector(pUp, d.dot(gUp))
+      .addScaledVector(pBack, d.dot(gBack));
+    return point ? r.add(post.c) : r;
+  };
+  const frame = (side: Side) => {
+    const o = s.bone(side, 'Hand').getWorldPosition(new Vector3()).applyMatrix4(s.toWeapon);
+    const u = s
+      .bone(side, 'HandMiddle1')
+      .getWorldPosition(new Vector3())
+      .applyMatrix4(s.toWeapon)
+      .sub(o)
+      .normalize();
+    const n = s.palmNormal(side, new Vector3()).transformDirection(s.toWeapon);
+    return { o, u, n };
+  };
+  const R = frame('R'),
+    L = frame('L');
+  const basis = (u: Vector3, n: Vector3) => {
+    const nn = n.clone().addScaledVector(u, -n.dot(u)).normalize();
+    return new Matrix4().makeBasis(u, nn, new Vector3().crossVectors(u, nn));
+  };
+  const Q = basis(map(R.u, false), map(R.n, false)).multiply(basis(L.u, L.n).invert());
+  const e = new Euler().setFromRotationMatrix(Q, 'ZYX');
+  const o2 = map(R.o, true);
+  const start = [o2.x - L.o.x, o2.y - L.o.y, o2.z - L.o.z, e.x, e.y, e.z];
+  log(
+    `post hold start t ${mm(start.slice(0, 3))} mm r ${start
+      .slice(3)
+      .map((v) => v.toFixed(2))
+      .join(',')}`,
+  );
+  return supportFit(s, log, {
+    start,
+    faces: { right: 0, front: 4, back: 6 },
+    thumbFaces: { right: 0, top: 0, back: 4 },
+  });
+}
+
+/**
+ * Support hold on a build with a foregrip (vertical: wrap the post; angled: the handguard hold, now clearing
+ * the ramp), with the weapon's baked seat and firing fingers in place.
+ */
+export function bakeSupportStyle(
+  rig: ArmsRig,
+  model: WeaponModel,
+  gloves: Record<Side, GloveRegions>,
+  base: GripBake,
+  style: SupportGrip,
+  log: (s: string) => void = () => {},
+): SupportBake | null {
+  rig.setGripSeat(new Matrix4().fromArray(base.seat));
+  rig.play('idle', { fade: 0 });
+  rig.update(0);
+  applyJoints(rig, base.R, 1);
+  rig.root.updateMatrixWorld(true);
+  const s = new GripSolver(rig, model, gloves);
+  const hand = new HandObstacle((n) => rig.boneMap.get(n)!);
+  hand.update(s.toWeapon);
+  s.extra = hand.sdf;
+  if (style === 'angled') return supportFit(s, log);
+  if (style === 'vertical') {
+    const post = foregripPost(model);
+    return post ? postHold(s, model, post, log) : null;
+  }
+  return null;
 }
 
 function fitLog(
@@ -765,31 +875,38 @@ function fitLog(
 
 const mm = (v: number[]) => v.map((x) => (x * 1000).toFixed(1)).join(',');
 
-function supportFit(s: GripSolver, log: (s: string) => void): SupportBake {
+interface SupportOpts {
+  /** Start of the hold search (offset m, ZYX euler rad) and its regularisation centre; default the clip. */
+  start?: number[];
+  /** Distal-pad face costs for the fingers / the thumb. */
+  faces?: Record<string, number>;
+  thumbFaces?: Record<string, number>;
+}
+
+function supportFit(s: GripSolver, log: (s: string) => void, so: SupportOpts = {}): SupportBake {
   const rig = s.rig;
   const pts = s.palmPoints('L');
   const o = rig.bones.handL.getWorldPosition(new Vector3()).applyMatrix4(s.toWeapon);
   const X = new Matrix4();
+  const st = so.start ?? [0, 0, 0, 0, 0, 0];
+  const reg = (x: number[]) => {
+    const t = Math.hypot(x[0] - st[0], x[1] - st[1], x[2] - st[2]) * 1000;
+    const r = Math.hypot(x[3] - st[3], x[4] - st[4], x[5] - st[5]);
+    return 0.01 * t * t + 30 * r * r;
+  };
   const cost = (x: number[]) => {
     rigid(x, o, X);
-    const c = s.rigidCost(pts, X);
-    const t = Math.hypot(x[0], x[1], x[2]) * 1000;
-    const r = Math.hypot(x[3], x[4], x[5]);
-    return c.cost + 0.01 * t * t + 30 * r * r;
+    return s.rigidCost(pts, X).cost + reg(x);
   };
-  const before = s.rigidCost(pts, new Matrix4());
-  // Multi-start: the clip pose, and backed off the palm (down / out of the handguard) by 6–24 mm.
+  const before = s.rigidCost(pts, rigid(st, o, new Matrix4()));
+  // Multi-start: the start pose, and backed off the palm (down / out of the handguard) by 6–24 mm.
   const n = s.palmNormal('L', new Vector3()).transformDirection(s.toWeapon);
-  let x = [0, 0, 0, 0, 0, 0],
+  let x = st.slice(),
     best = Infinity;
+  const lim = [0.03, 0.03, 0.03, 0.3, 0.3, 0.3].map((l, k) => l + Math.abs(st[k]));
   for (const k of [0, 0.006, 0.012, 0.018, 0.024]) {
-    const x0 = [-n.x * k, -n.y * k, -n.z * k, 0, 0, 0];
-    const c = patternSearch(
-      cost,
-      x0,
-      [0.03, 0.03, 0.03, 0.3, 0.3, 0.3],
-      [0.004, 0.004, 0.004, 0.04, 0.04, 0.04],
-    );
+    const x0 = [st[0] - n.x * k, st[1] - n.y * k, st[2] - n.z * k, st[3], st[4], st[5]];
+    const c = patternSearch(cost, x0, lim, [0.004, 0.004, 0.004, 0.04, 0.04, 0.04]);
     if (c < best) {
       best = c;
       x = x0;
@@ -809,12 +926,9 @@ function supportFit(s: GripSolver, log: (s: string) => void): SupportBake {
   };
   const exact = (x: number[]) => {
     pose(x);
-    const c = s.rigidCost(s.palmPoints('L'), I);
-    const t = Math.hypot(x[0], x[1], x[2]) * 1000;
-    const r = Math.hypot(x[3], x[4], x[5]);
-    return c.cost + 0.01 * t * t + 30 * r * r;
+    return s.rigidCost(s.palmPoints('L'), I).cost + reg(x);
   };
-  patternSearch(exact, x, [0.03, 0.03, 0.03, 0.3, 0.3, 0.3], [0.002, 0.002, 0.002, 0.02, 0.02, 0.02], 25);
+  patternSearch(exact, x, lim, [0.002, 0.002, 0.002, 0.02, 0.02, 0.02], 25);
   const offset = [x[0], x[1], x[2]].map((v) => round(v)) as V3;
   const tq = pose(x).map((v) => round(v, 6)) as [number, number, number, number];
   s.sync();
@@ -834,14 +948,14 @@ function supportFit(s: GripSolver, log: (s: string) => void): SupportBake {
     fitLog(
       s,
       L[fi],
-      { contact: [0.3, 1, 1], faces: { right: 0, bottom: 4, top: fi === 1 ? 4 : 20 } },
+      { contact: [0.3, 1, 1], faces: so.faces ?? { right: 0, bottom: 4, top: fi === 1 ? 4 : 20 } },
       fL,
       log,
     );
   fitLog(
     s,
     L[0],
-    { contact: [0, 0.3, 1], faces: { left: 0, top: 0 }, penW: [0.2, 1, 1], openCost: 1 },
+    { contact: [0, 0.3, 1], faces: so.thumbFaces ?? { left: 0, top: 0 }, penW: [0.2, 1, 1], openCost: 1 },
     fL,
     log,
   );
