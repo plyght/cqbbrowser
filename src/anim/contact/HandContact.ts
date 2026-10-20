@@ -322,6 +322,8 @@ export class HandContact {
     this.gunHint = { dir: 0 };
     this.heldHint = { dir: 0 };
     this.frame = 0;
+    this.onGripL = true;
+    this.freshL = 0;
     for (const s of ['L', 'R'] as const) {
       const h = this.hands[s];
       h.push.set(0, 0, 0);
@@ -791,7 +793,23 @@ export class HandContact {
     const r = this.resOff[side];
     const t = this.resGoal[side];
     const g = this.minGap[side];
-    if (g < -0.001) {
+    // Only while the support hand is fully on the gun: the residual of a hand still travelling onto it (the
+    // draw after a swap) built a back-off direction a directly equipped P-17 never had, and the hold kept it
+    // (it settled ~3 cm off). Off the grip the back-off releases.
+    // Hysteresis: on above 0.97, off only once the hand has clearly left the gun (< 0.5).
+    const wg = this.rig.anchorWeight('L', 'grip');
+    const onGrip = side !== 'L' || wg > 0.97 || (this.onGripL && wg > 0.5);
+    if (side === 'L' && onGrip && !this.onGripL) {
+      // Hand just landed on the gun: re-solve its fingers from scratch for a few frames (no steady-state
+      // shortcut), as on a direct equip — the finger openings carried in from the draw picked a different
+      // deepest tip, hence a different hold. The eased openings stay continuous (no finger snap).
+      for (const ch of this.hands.L.chains) ch.stuck = -1;
+      this.freshL = 12;
+      r.set(0, 0, 0);
+    }
+    if (side === 'L') this.onGripL = onGrip;
+    if (!onGrip) t.set(0, 0, 0);
+    else if (g < -0.001) {
       const pen = this.fingerResidual(side, _pos);
       if (pen > 0.001) {
         this.col!.gradient(_pos, _g, null);
@@ -805,6 +823,8 @@ export class HandContact {
     if (r.lengthSq() < 1e-10 && t.lengthSq() === 0) r.set(0, 0, 0);
   }
 
+  private onGripL = true;
+  private freshL = 0;
   private resOff: Record<Side, Vector3> = { L: new Vector3(), R: new Vector3() };
   private resGoal: Record<Side, Vector3> = { L: new Vector3(), R: new Vector3() };
 
@@ -1099,9 +1119,10 @@ export class HandContact {
       // A finger nothing clears (best effort last frame) stays put while that is still as good as it gets.
       const stuck = cs.stuck > -1 && gPrev >= cs.stuck - 0.0005 && gPrev < CONTACT.clear * 0.5;
       const steady =
-        stuck ||
-        (gPrev >= CONTACT.clear * 0.5 &&
-          (cs.wrap ? gPrev <= CONTACT.touch + 0.002 || (idle && gPrev > CONTACT.wrapOut) : idle));
+        !(side === 'L' && this.freshL > 0) &&
+        (stuck ||
+          (gPrev >= CONTACT.clear * 0.5 &&
+            (cs.wrap ? gPrev <= CONTACT.touch + 0.002 || (idle && gPrev > CONTACT.wrapOut) : idle)));
       if (!steady) {
         // 1. Open on penetration: hard (at once); releases ease out.
         let open = 0;
@@ -1171,6 +1192,7 @@ export class HandContact {
     this.col!.unselect();
     this.baseD.fill(0);
     this.minGap[side] = minG;
+    if (side === 'L' && this.freshL > 0) this.freshL--;
   }
 
   /** Apply a weapon-frame rotation (about `_ax`, `ang`) to a bone's world orientation; update its subtree. */
