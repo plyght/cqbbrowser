@@ -26,7 +26,7 @@ for (const w of weapons) {
     [
       'tools/grip-shot.ts',
       `${tmp}/rig-${w}.png`,
-      `weapons=${w}&views=${VIEWS}&modes=raw,contact&tw=274&th=280`,
+      `weapons=${w}&views=${VIEWS}&modes=${process.env.SHEET_MODES ?? 'raw,contact'}&tw=274&th=280`,
     ],
     { stdio: 'inherit' },
   );
