@@ -38,6 +38,7 @@ for (const w of weapons) {
     if (forced) contact.mode = forced;
     else contact.mode = HandContact.defaultMode;
     contact.autoEnable = () => on;
+    contact.useGrip = !args.includes('--legacy');
     if (on && !forced) contact.mode = 'safe';
     rig.attachWeapon(model, w);
     truth.refresh(model);

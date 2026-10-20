@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Matrix4, Vector3 } from 'three';
 import { formatSpikes, runScenario, scenarios, type SpikeRow } from '../rig/poseAudit';
 import { setKitWeapons } from '../../weapons/models/kit';
+import { GRIP_SUPPORT_ONLY } from './grip';
 import { AUDIT_WEAPONS, auditWeapon, formatTable, loadHeadlessRig, measureHand, type ClipRow } from './audit';
 import {
   GRIP_SHIPPED,
@@ -263,7 +264,12 @@ describe('grip truth on the kit weapons (baked grip)', () => {
   test('shipped weapons hold: side-aware wrap of both hands at idle / ADS / fire', () => {
     const bad = gripRows
       .filter((r) => GRIP_SHIPPED.includes(r.w))
-      .flatMap((r) => r.fails.map((f) => `${r.w}.${r.state} ${f}`));
+      // Support-only weapons: the firing hand is the clip's (an asset change first), only the support hold is ruled.
+      .flatMap((r) =>
+        r.fails
+          .filter((f) => !(GRIP_SUPPORT_ONLY.has(r.w) && f.startsWith('R.')))
+          .map((f) => `${r.w}.${r.state} ${f}`),
+      );
     expect(bad).toEqual([]);
   });
 

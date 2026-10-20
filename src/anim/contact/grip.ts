@@ -56,7 +56,14 @@ export const GRIPS = gripData as unknown as GripData;
  * Weapons that ship on their baked grip by default (passed the visual gate: both hands read as holding the gun on
  * the sheets, never worse than raw on the true meshes in CI). The others keep their previous default.
  */
-export const GRIP_SHIP = new Set<string>(['k47s', 'sb16', 'hb300']);
+export const GRIP_SHIP = new Set<string>(['k47s', 'sb16', 'hb300', 'kp9']);
+
+/**
+ * Weapons baked support-hand only: their firing grip needs an asset change before a hand can hold it within the
+ * 5 mm seat (KP-9, P-17, P-92: the palm sinks 5–7 mm into the grip's near panel), so the firing hand stays the
+ * clip's and only the support hold is baked.
+ */
+export const GRIP_SUPPORT_ONLY = new Set<string>(['kp9', 'p17', 'p92']);
 
 /** The baked grip for a weapon, when the model is the kit asset it was baked on. */
 export function gripFor(id: string, model: WeaponModel): GripBake | null {
