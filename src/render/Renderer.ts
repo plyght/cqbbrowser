@@ -1,7 +1,9 @@
 import { EffectComposer, EffectPass, RenderPass } from 'postprocessing';
 import {
+  Group,
   HalfFloatType,
   type Material,
+  type Object3D,
   PCFShadowMap,
   PerspectiveCamera,
   Quaternion,
@@ -190,8 +192,25 @@ export class Renderer {
    * brass and both particle shaders mid-frame (a multi-frame hitch on the first trigger pull). Compiled
    * against the composer's HDR target so the program keys match the real render (linear output).
    */
-  prewarm(): Promise<void> {
+  prewarm(extra: Object3D[] = []): Promise<void> {
     const r = this.renderer;
+    // Objects that aren't in the scene yet (the holstered weapon of the loadout) join an invisible group for the
+    // compile and texture upload: the first swap to the sidearm used to cost ~100 ms (its programs + textures).
+    const spare = new Group();
+    spare.visible = false;
+    for (const o of extra) if (!o.parent) spare.add(o);
+    this.scene.add(spare);
+    // The NVG pass only runs while the goggles are down: draw one frame with it on so its programs exist before
+    // the first flip (it compiled three mid-game).
+    if (!this.nvgPass.enabled) {
+      this.nvgPass.enabled = true;
+      try {
+        this.composer.render(0);
+      } catch {
+        /* prewarm only */
+      }
+      this.nvgPass.enabled = false;
+    }
     const prev = r.getRenderTarget();
     r.setRenderTarget(this.composer.inputBuffer);
     let p: Promise<unknown>;
@@ -211,14 +230,19 @@ export class Renderer {
         if (u) for (const k in u) if (u[k].value instanceof Texture) r.initTexture(u[k].value);
       }
     });
+    const release = () => {
+      for (const o of [...spare.children]) spare.remove(o);
+      this.scene.remove(spare);
+    };
     return p
       .then(() => {
+        release();
         // Finish linking now. Three checks a program's link status (getProgramInfoLog) on its first draw, and
         // without KHR_parallel_shader_compile that call blocks until the driver has actually built it: a pooled
         // FX program drawn first on the first trigger pull cost ~110 ms there.
         for (const prog of r.info.programs ?? []) (prog as { getUniforms?: () => unknown }).getUniforms?.();
       })
-      .catch(() => undefined);
+      .catch(() => release());
   }
 
   /**

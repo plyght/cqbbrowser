@@ -135,7 +135,7 @@ export class Menu {
     this.footage = this.placeholder(
       'Footage',
       'CAM04 archive',
-      'Saved runs: watch, re-render chest or helmet, export WebM. Arrives with M4.',
+      'Saved runs: watch, re-render chest or helmet, export WebM. Coming soon: runs are not recorded yet.',
     );
     this.play.root.dataset.id = 'play';
     this.settings.root.dataset.id = 'settings';

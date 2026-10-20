@@ -60,6 +60,11 @@ export const cameraSettings = settings.ns('camera', {
 export const CHEST_MOUNT = new Vector3(-0.04, 0, -0.16);
 /** Helmet side-rail mount, relative to the head pivot, in the look frame. */
 const HELMET_MOUNT = new Vector3(0.075, 0.09, -0.06);
+/**
+ * Helmet cams are angled down on their rail (rad): level with the eyes the rifle at high ready sat below the image
+ * circle and only its front sight showed.
+ */
+const HELMET_TILT = 0.16;
 
 /**
  * Body-first player. Input rotates the body (yaw) and torso (pitch) immediately; the chest camera rides the
@@ -230,9 +235,10 @@ export class Player implements System {
     this.yaw -= f.look.yaw;
     this.pitch = clamp(this.pitch + f.look.pitch + this.applyViewRecoil(dt), -1.45, 1.45);
 
-    const leanTarget =
+    let leanTarget =
       clamp((f.down.has('leanRight') ? 1 : 0) - (f.down.has('leanLeft') ? 1 : 0) + f.leanAxis, -1, 1) *
       (this.sprinting ? 0 : 1);
+    leanTarget *= this.leanRoom(Math.sign(leanTarget || this.lean));
     this.lean += (leanTarget - this.lean) * damp(0.07, dt);
     if (f.pressed.has('crouch')) this.crouchToggle = !this.crouchToggle;
     const crouchTarget = this.crouchToggle ? 1 : 0;
@@ -244,6 +250,22 @@ export class Player implements System {
 
     this.renderPos.lerpVectors(this.prevPos, this.position, alpha);
     this.updateCamera(dt);
+  }
+
+  /**
+   * How much of a full lean fits toward `side` (-1 left, +1 right) before the chest cam would reach the wall:
+   * a full lean carries the camera ~0.47 m sideways, and leaning into a wall used to put it through the wall.
+   */
+  private leanRoom(side: number): number {
+    if (!side) return 1;
+    const o = this.sampleOrigin.set(
+      this.position.x,
+      this.position.y + this.tuning.chestHeight - this.tuning.crouchDrop * this.crouch,
+      this.position.z,
+    );
+    const dir = this.tmpV2.set(Math.cos(this.yaw) * side, 0, -Math.sin(this.yaw) * side);
+    const hit = this.ctx.physics.raycast(o, dir, LEAN_REACH + LEAN_MARGIN, this.body);
+    return hit ? clamp((hit.distance - LEAN_MARGIN) / LEAN_REACH, 0, 1) : 1;
   }
 
   fixedUpdate(dt: number) {
@@ -546,7 +568,12 @@ export class Player implements System {
     const jitter = noise1(time * 7.3, 3) * 0.0008 * shake * (1 + this.stress * 3);
     const roll = this.stableHorizon ? 0 : leanRoll + this.camRoll.value + gaitRoll + this.knockRoll;
     this.tmpE.set(
-      this.pitch + this.camPitchJolt.value + jitter + this.carrier.value * 0.04 + this.knockPitch,
+      this.pitch +
+        this.camPitchJolt.value +
+        jitter +
+        this.carrier.value * 0.04 +
+        this.knockPitch -
+        (helmet ? HELMET_TILT : 0),
       this.yaw + this.camYawLag.value,
       roll,
     );
@@ -558,6 +585,9 @@ export class Player implements System {
 /** Rapier collision groups: membership in the high 16 bits, filter in the low 16. */
 export const GROUP_PLAYER = 0x0004;
 export const GROUP_DEBRIS = 0x0002;
+/** Sideways travel of the chest cam at full lean (offset + roll over the spine), and the gap kept to walls (m). */
+const LEAN_REACH = 0.47;
+const LEAN_MARGIN = 0.22;
 const PLAYER_GROUPS = (GROUP_PLAYER << 16) | 0xffff;
 /** The character controller walks through dropped mags instead of climbing them. */
 const KCC_FILTER = (0xffff << 16) | (0xffff & ~GROUP_DEBRIS);

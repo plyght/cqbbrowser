@@ -183,7 +183,7 @@ export class Game {
     // Warm up one physics step so bodies settle before first frame.
     physics.step();
     // Shaders for everything that first appears mid-game (shot FX pools), off the first trigger pull.
-    void this.renderer.prewarm();
+    void this.renderer.prewarm(this.weapons.spareModels());
     requestAnimationFrame(this.frame);
   }
 
@@ -238,7 +238,7 @@ export class Game {
   enter(canvas?: HTMLCanvasElement) {
     this.audio.resume();
     // Loadout swaps and the rig (loaded async) may have added materials since boot.
-    void this.renderer.prewarm();
+    void this.renderer.prewarm(this.weapons.spareModels());
     this.menu.show(false);
     this.paused = false;
     this.renderer.camPowerOn();
@@ -267,6 +267,8 @@ export class Game {
     this.fx.reset();
     this.gear.resupply();
   }
+
+  private reportedPresentationError = false;
 
   /** When true the rAF loop only renders; tests drive `step()` explicitly. */
   manual = false;
@@ -302,8 +304,15 @@ export class Game {
     }
     const alpha = this.acc / Physics.STEP;
     for (const s of this.systems) s.update?.(dt, alpha);
-    this.audio.update(dt);
-    this.haptics.update(dt);
+    // Audio and haptics are presentation: a throw there must never stop the frame from rendering (a NaN in the
+    // acoustics once made the mixer throw every frame and froze the game).
+    try {
+      this.audio.update(dt);
+      this.haptics.update(dt);
+    } catch (err) {
+      if (!this.reportedPresentationError) console.error('[game] audio/haptics update threw', err);
+      this.reportedPresentationError = true;
+    }
     this.hud.update(this.weapons);
     this.renderer.setAds(this.weapons.adsBlend);
     // Input turn rate drives CAM04 bitrate starvation alongside the measured camera rotation.

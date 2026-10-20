@@ -86,6 +86,27 @@ describe('reverb bank', () => {
   });
 });
 
+describe('degenerate probes', () => {
+  // Regression: a camera pressed into a wall returns zero-distance hits; the zero volume went NaN through the
+  // log smoothing and the mixer threw on every frame (the game loop froze).
+  test('all rays hitting at 0 m stay finite through analysis and smoothing', () => {
+    const rays = probeDirections().map((dir) => ({ dir, dist: 0, surface: 'plywood' as const }));
+    const a = analyseProbe(rays);
+    const s = smoothAcoustics(OUTDOOR, a, 0.3);
+    for (const v of [
+      a.volume,
+      a.surfaceArea,
+      a.rt60,
+      s.volume,
+      s.surfaceArea,
+      s.rt60,
+      s.predelay,
+      s.roomMode,
+    ])
+      expect(Number.isFinite(v)).toBe(true);
+  });
+});
+
 describe('room maths', () => {
   test('Eyring ≈ Sabine for low absorption, shorter for high', () => {
     expect(eyringRt60(100, 130, 0.05) / sabineRt60(100, 130, 0.05)).toBeGreaterThan(0.95);

@@ -198,8 +198,13 @@ export function analyseProbe(rays: ProbeRay[], right: Vec3 = { x: 1, y: 0, z: 0 
   };
 
   // Room estimate: horizontal hits ≈ radius of an equivalent cylinder, height = floor + ceiling.
-  const radius = horizN ? horizSum / horizN : ENCLOSE_RANGE;
-  const height = Math.min(Number.isFinite(ceiling) ? ceiling : ENCLOSE_RANGE, ENCLOSE_RANGE) + floor;
+  // Floors keep the estimate finite with the listener (camera) pressed into a wall: all-zero probe distances gave
+  // a zero volume, whose log went NaN in smoothing and made the mixer throw every frame (the game froze).
+  const radius = Math.max(0.3, horizN ? horizSum / horizN : ENCLOSE_RANGE);
+  const height = Math.max(
+    0.5,
+    Math.min(Number.isFinite(ceiling) ? ceiling : ENCLOSE_RANGE, ENCLOSE_RANGE) + floor,
+  );
   const area = Math.PI * radius * radius;
   const volume = area * height;
   const surfaceArea = 2 * area + 2 * Math.PI * radius * height;
@@ -276,6 +281,7 @@ export const smoothK = (dt: number, tau: number) => 1 - Math.exp(-dt / Math.max(
 export function smoothAcoustics(cur: Acoustics, target: Acoustics, k: number): Acoustics {
   const L = (a: number, b: number) => a + (b - a) * k;
   const fin = (v: number) => (Number.isFinite(v) ? v : ENCLOSE_RANGE * 2);
+  const lg = (v: number) => Math.log(Math.max(1e-3, v));
   return {
     enclosure: L(cur.enclosure, target.enclosure),
     walls: L(cur.walls, target.walls),
@@ -287,10 +293,10 @@ export function smoothAcoustics(cur: Acoustics, target: Acoustics, k: number): A
       y: L(cur.openness.y, target.openness.y),
       z: L(cur.openness.z, target.openness.z),
     },
-    volume: Math.exp(L(Math.log(cur.volume), Math.log(target.volume))),
-    surfaceArea: Math.exp(L(Math.log(cur.surfaceArea), Math.log(target.surfaceArea))),
+    volume: Math.exp(L(lg(cur.volume), lg(target.volume))),
+    surfaceArea: Math.exp(L(lg(cur.surfaceArea), lg(target.surfaceArea))),
     absorption: L(cur.absorption, target.absorption),
-    rt60: Math.exp(L(Math.log(cur.rt60), Math.log(target.rt60))),
+    rt60: Math.exp(L(lg(cur.rt60), lg(target.rt60))),
     bass: L(cur.bass, target.bass),
     roomMode: L(cur.roomMode, target.roomMode),
     predelay: L(cur.predelay, target.predelay),
