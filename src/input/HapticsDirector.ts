@@ -160,6 +160,11 @@ export class HapticsDirector {
       const k = clamp01(e.speed / 6);
       this.play(110 + k * 80, 0.35 + k * 0.6, 0.25 + k * 0.35, 0, 0, 2);
     });
+    // Shoulder against a wall or a stumble on a step: a short soft tick (landings have their own).
+    bus.on('bodyBump', (e) => {
+      if (e.kind === 'land') return;
+      this.play(70, 0.1 + e.strength * 0.25, 0.04 + e.strength * 0.1, 0, 0, 1);
+    });
     bus.on('ads', (e) => this.play(30, e.on ? 0.12 : 0.08, e.on ? 0.3 : 0.22, 0, 0, 2));
     bus.on('gearSound', (e) => {
       if (e.kind === 'nvgDown' || e.kind === 'nvgUp') return this.play(40, 0.25, 0.5, 0, 0, 2);

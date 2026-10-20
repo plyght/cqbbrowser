@@ -108,6 +108,12 @@ export interface GameEvents {
   nvg: { on: boolean };
   /** Feet back on the ground after a fall / jump; `speed` = downward speed at touchdown (m/s). */
   land: { speed: number };
+  /**
+   * The body knocked against something while moving: a shoulder on a wall or door frame (`side` -1 left / +1 right
+   * = the side that touched), a stair edge or lip (`step`), or a touchdown. `strength` 0..1. The camera rig reacts
+   * itself; the weapon controller nudges the gun and haptics tick.
+   */
+  bodyBump: { kind: 'wall' | 'step' | 'land'; side: number; strength: number };
   /** Aim-down-sights state changed (the raise / drop of the sight, haptic tick). */
   ads: { on: boolean };
   /**

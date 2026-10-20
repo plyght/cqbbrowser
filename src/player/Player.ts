@@ -5,6 +5,7 @@ import { RAPIER } from '../physics/Physics';
 import type { Surface } from '../core/bus';
 import { settings } from '../settings/Settings';
 import { CAM_KICK_SPRING } from '../anim/handling/characterise';
+import { GaitMotion, STABLE_ROLL, StepSmoother, stepCadence, type GaitFrame, type GaitScales } from './gait';
 
 export type ReadyPos = 'high' | 'low' | 'compressed';
 export type CameraMount = 'chest' | 'helmet';
@@ -54,6 +55,8 @@ export const cameraSettings = settings.ns('camera', {
   stableHorizon: false,
   /** The support hand straightens a knocked mount at the next idle moment (manual fix-cam always works). */
   autoFixCam: true,
+  /** 0..1.5 "Movement sway": gait bob, weight shift, bumps and the gun's swing (1 = tuned). */
+  movementSway: 1,
 });
 
 /** Chest cam: on the plate carrier, left of centre, just in front of the plate bag (torso-local). */
@@ -98,6 +101,13 @@ export class Player implements System {
   knockRoll = 0;
   /** Secondary plate-carrier spring (m), also swings the placard. */
   readonly carrier = new Spring(3.4, 0.6);
+  /** Gait-driven body / mount motion (see `gait.ts`) and the 0..1 ADS blend the weapon controller reports. */
+  readonly gait = new GaitMotion();
+  adsBlend = 0;
+  /** "Weapon inertia" master mirrored by the weapon controller (scales the hands' own gait swing). */
+  weaponInertia = 1;
+  /** Movement sway (0..1.5), camera shake relative to default and stable horizon, as the camera last used them. */
+  sway = 1;
 
   /** Torso transform the camera, shoulders and weapon hold are attached to (world space). */
   readonly torso = new Object3D();
@@ -123,7 +133,26 @@ export class Player implements System {
   /** Smoothed planar velocity used for the jerk limit on top of the linear accel. */
   private velCmd = new Vector3();
   private knockFix = 0;
+  /** Eased knock actually shown (the knock itself is a target: it never pops the view). */
+  private knockPitchS = 0;
+  private knockRollS = 0;
   private lastYaw = this.yaw;
+  private yawRateS = 0;
+  private yawAccelS = 0;
+  private readonly stepSmooth = new StepSmoother();
+  /** Fixed-step gait state kept for render-rate interpolation. */
+  private prevGaitPhase = 0;
+  private prevSpeed = 0;
+  private accelFwd = 0;
+  private accelRight = 0;
+  private prevVx = 0;
+  private prevVz = 0;
+  /** Shoulder-brush state per side (-1 left, +1 right): in contact now, and the cooldown. */
+  private brush = [false, false];
+  private brushCooldown = 0;
+  private brushing = 0;
+  /** Camera pulled back from walls (m) and the matching direction-smoothing. */
+  private camClear = 0;
   private grounded = true;
   private vy = 0;
   private wantMove = new Vector3();
@@ -134,6 +163,7 @@ export class Player implements System {
   private knockCooldown = 0;
   private peakSpeed = 0;
   private crouchToggle = false;
+  private renderSpeed = 0;
   private rand = rng(4242);
   private invTorso = new Matrix4();
   private tmpE = new Euler(0, 0, 0, 'YXZ');
@@ -190,6 +220,12 @@ export class Player implements System {
     this.renderPos.copy(p);
     this.velocity.set(0, 0, 0);
     this.velCmd.set(0, 0, 0);
+    this.renderSpeed = this.prevSpeed = 0;
+    this.gait.reset();
+    this.stepSmooth.offset = 0;
+    this.camClear = 0;
+    this.prevVx = this.prevVz = this.accelFwd = this.accelRight = 0;
+    this.yawRateS = this.yawAccelS = 0;
     this.yaw = yaw;
     this.lastYaw = yaw;
     this.pitch = 0;
@@ -230,6 +266,7 @@ export class Player implements System {
     this.tuning.cameraShake = clamp(cs.shake, 0, 1.5);
     this.mount = cs.mount;
     this.stableHorizon = cs.stableHorizon;
+    this.sway = clamp(cs.movementSway, 0, 1.5);
 
     const f = this.ctx.input.frame;
     this.yaw -= f.look.yaw;
@@ -249,7 +286,7 @@ export class Player implements System {
     this.aiming = (f.down.has('aim') || f.aimAxis > 0.3) && !this.sprinting;
 
     this.renderPos.lerpVectors(this.prevPos, this.position, alpha);
-    this.updateCamera(dt);
+    this.updateCamera(dt, alpha);
   }
 
   /**
@@ -327,7 +364,11 @@ export class Player implements System {
     const m = this.kcc.computedMovement();
     const wasGrounded = this.grounded;
     this.grounded = this.kcc.computedGrounded();
-    if (this.grounded && !wasGrounded && this.vy < -2) this.ctx.bus.emit('land', { speed: -this.vy });
+    if (this.grounded && !wasGrounded && this.vy < -2) {
+      this.ctx.bus.emit('land', { speed: -this.vy });
+      this.gait.land(-this.vy);
+      this.ctx.bus.emit('bodyBump', { kind: 'land', side: 0, strength: clamp(-this.vy / 6, 0.2, 1) });
+    }
     const cur = this.body.translation();
     const next = this.next;
     next.x = cur.x + m.x;
@@ -337,6 +378,26 @@ export class Player implements System {
     this.prevPos.copy(this.position);
     this.position.set(next.x, next.y - 0.9, next.z);
     if (this.position.y < -20) this.teleport(new Vector3(0, 0, 8), Math.PI);
+    // Stairs and lips: the capsule steps up in one tick; the camera climbs through it and stumbles a little.
+    if (this.grounded && wasGrounded) {
+      const stumble = this.stepSmooth.push(this.position.y - this.prevPos.y);
+      if (stumble > 0 && planarNow(this.velocity) > 0.5) {
+        this.gait.stumble(stumble);
+        this.ctx.bus.emit('bodyBump', { kind: 'step', side: 0, strength: stumble });
+      }
+    }
+    // Acceleration along / across the facing, smoothed (~50 ms): lean in, lean back, strafe jerk.
+    {
+      const ax = (this.velocity.x - this.prevVx) / dt,
+        az = (this.velocity.z - this.prevVz) / dt;
+      this.prevVx = this.velocity.x;
+      this.prevVz = this.velocity.z;
+      const af = clamp(-Math.sin(this.yaw) * ax - Math.cos(this.yaw) * az, -45, 45);
+      const ar = clamp(Math.cos(this.yaw) * ax - Math.sin(this.yaw) * az, -45, 45);
+      const k = damp(0.035, dt);
+      this.accelFwd += (af - this.accelFwd) * k;
+      this.accelRight += (ar - this.accelRight) * k;
+    }
 
     const planar = this.speed;
     // Wall bump: moving fast but the controller stopped us → knock the camera mount.
@@ -382,15 +443,20 @@ export class Player implements System {
     }
     if (Math.abs(strafe) > 0.05 || Math.abs(this.prevStrafe) > 0.9) this.prevStrafe = strafe;
 
-    // Gait: stride shortens (cadence rises) with stress; heel strikes drive footsteps + bob.
-    // Stride (two steps) lengthens with speed: ~1.6 steps/s slow-walking, ~2.6 walking, ~3.8 sprinting.
-    const stride = clamp(0.9 + 0.35 * planar, 1.1, 2.7) * (1 - this.stress * 0.15);
-    this.gaitPhase += (planar / stride) * dt * Math.PI * 2;
-    this.gaitAmount += (clamp(planar / 1.2, 0, 1) - this.gaitAmount) * damp(0.12, dt);
+    // Gait: the step-phase oscillator runs at the cadence of the real speed (walk ~1.9 steps/s, sprint ~2.8,
+    // crouch-walk slower); one heel strike every π. Render frames interpolate between fixed steps.
+    this.prevGaitPhase = this.gaitPhase;
+    this.prevSpeed = this.renderSpeed;
+    this.renderSpeed = planar;
+    this.gaitPhase += Math.PI * stepCadence(planar, this.crouch, this.stress) * dt;
+    const gaitOn = this.grounded && planar > 0.15 ? clamp(planar / 1.2, 0, 1) : 0;
+    this.gaitAmount += (gaitOn - this.gaitAmount) * damp(0.12, dt);
     if (planar > 0.3) {
       this.tmpV.set(this.velocity.x, 0, this.velocity.z).normalize();
       this.moveDir.lerp(this.tmpV, damp(0.08, dt)).normalize();
     }
+    this.brushCooldown -= dt;
+    this.probeWalls(planar);
     const s = Math.sign(Math.sin(this.gaitPhase));
     if (planar > 0.25 && s !== this.lastStepSign) {
       this.lastStepSign = s;
@@ -406,11 +472,45 @@ export class Player implements System {
         speed: planar,
         scuff,
       });
-      // Heel strike: a small dip through the body (the plate carrier settles a touch later).
-      this.camPitchJolt.impulse(-(0.006 + planar * 0.004) * t.cameraShake);
+      // Heel strike: a dip through the body, a short buzz in the mount, the carrier settles a touch later.
+      this.gait.strike(s > 0 ? 'L' : 'R', planar, this.crouch);
       this.carrier.impulse(-(0.01 + planar * 0.008) * t.cameraShake);
+      // Rubbing along a wall: the shoulder catches on every other step.
+      if (this.brushing && this.brushCooldown <= 0 && planar > 1.2) this.shoulderBump(this.brushing, 0.35);
     }
     this.sampleSurface();
+  }
+
+  /**
+   * Shoulder brush: probe sideways at chest height; a wall within arm's reach of the capsule while moving along
+   * it bumps the shoulder (camera rolls away, the gun is nudged) on contact, then lightly on the steps after.
+   */
+  private probeWalls(planar: number) {
+    if (planar < 1.0) {
+      this.brush[0] = this.brush[1] = false;
+      this.brushing = 0;
+      return;
+    }
+    const o = this.sampleOrigin.set(this.position.x, this.position.y + 1.1, this.position.z);
+    this.brushing = 0;
+    for (let i = 0; i < 2; i++) {
+      const side = i === 0 ? -1 : 1;
+      const dir = this.tmpV2.set(Math.cos(this.yaw) * side, 0, -Math.sin(this.yaw) * side);
+      const hit = this.ctx.physics.raycast(o, dir, BRUSH_REACH, this.body);
+      // Wall running alongside: little velocity into it (not a head-on, which has its own knock).
+      const into = hit ? Math.abs(this.velocity.x * dir.x + this.velocity.z * dir.z) : 0;
+      const touching = !!hit && hit.distance < BRUSH_DIST && into < planar * 0.6;
+      if (touching) this.brushing = side;
+      if (touching && !this.brush[i] && this.brushCooldown <= 0)
+        this.shoulderBump(side, clamp(planar / 4, 0.3, 1));
+      this.brush[i] = touching;
+    }
+  }
+
+  private shoulderBump(side: number, strength: number) {
+    this.brushCooldown = 0.4;
+    this.gait.bump(side, strength);
+    this.ctx.bus.emit('bodyBump', { kind: 'wall', side, strength });
   }
 
   private sampleSurface() {
@@ -470,51 +570,94 @@ export class Player implements System {
     this.carrier.impulse(-shove * 0.4 * s);
   }
 
-  private updateCamera(dt: number) {
+  private readonly gaitFrame: GaitFrame = {
+    phase: 0,
+    speed: 0,
+    amount: 0,
+    accelFwd: 0,
+    strafe: 0,
+    yawRate: 0,
+    yawAccel: 0,
+    crouch: 0,
+    stress: 0,
+    ads: 0,
+    grounded: true,
+  };
+  private readonly gaitScales: GaitScales = { sway: 1, shake: 1, stable: false, inertia: 1 };
+
+  private updateCamera(dt: number, alpha: number) {
     const t = this.tuning;
     const cam = this.ctx.camera;
     const shake = t.cameraShake;
-    const planar = this.speed;
-    const yawRate = (this.yaw - this.lastYaw) / Math.max(dt, 1e-4);
-    this.lastYaw = this.yaw;
     const helmet = this.mount === 'helmet';
+    const stable = this.stableHorizon;
+    const sway = this.sway;
+
+    // Turn rate and acceleration, smoothed (~30 ms): mouse deltas arrive in bursts, and the raw per-frame rate
+    // used to kick the lag springs at every report (visible jitter on slow turns).
+    const rawRate = (this.yaw - this.lastYaw) / Math.max(dt, 1e-4);
+    this.lastYaw = this.yaw;
+    const prevRate = this.yawRateS;
+    this.yawRateS += (clamp(rawRate, -25, 25) - prevRate) * damp(0.03, dt);
+    this.yawAccelS += ((this.yawRateS - prevRate) / Math.max(dt, 1e-4) - this.yawAccelS) * damp(0.03, dt);
+    const yawRate = this.yawRateS;
 
     // Rig springs: turn lag/overshoot on the chest + roll into turns.
-    this.camYawLag.step(clamp(-yawRate * 0.003, -0.03, 0.03) * shake, dt);
-    this.camRoll.step(clamp(yawRate * 0.0015, -0.012, 0.012) * shake, dt);
+    this.camYawLag.step(clamp(-yawRate * 0.003, -0.03, 0.03) * shake * sway, dt);
+    this.camRoll.step(clamp(yawRate * 0.0015, -0.012, 0.012) * shake * sway, dt);
     this.camPitchJolt.step(0, dt);
     this.carrier.step(0, dt);
     this.camBack.step(0, dt);
     const rightX = Math.cos(this.yaw),
       rightZ = -Math.sin(this.yaw);
     const strafe = this.velocity.x * rightX + this.velocity.z * rightZ;
-    this.camSide.step(-strafe * 0.004 * shake, dt);
+    this.camSide.step(-strafe * 0.004 * shake * sway, dt);
 
-    // Mount knock relaxes only when the hand fixes it.
+    // Mount knock: the knock is a target that relaxes only when the hand fixes it; the view eases toward it.
     if (this.knockFix > 0) {
       const k = damp(0.07, dt);
       this.knockPitch -= this.knockPitch * k;
       this.knockRoll -= this.knockRoll * k;
       this.knockFix -= dt * 2;
     }
+    const kk = damp(0.035, dt);
+    this.knockPitchS += (this.knockPitch - this.knockPitchS) * kk;
+    this.knockRollS += (this.knockRoll - this.knockRollS) * kk;
 
-    // Gait-synced bob: vertical double bounce per stride, lateral sway per step, slight roll.
-    const g = this.gaitAmount;
-    const ph = this.gaitPhase;
-    // Subtle on the chest (most of the gait shows on the weapon, see WeaponController): ~1 cm at walk.
-    const bobAmp = (0.004 + planar * 0.0026) * shake * (helmet ? 1.6 : 1);
-    const bobY = -(1 - Math.abs(Math.sin(ph))) * bobAmp * g;
-    const swayX = Math.sin(ph) * (0.002 + planar * 0.0009) * shake * g;
-    const gaitRoll = Math.sin(ph) * 0.0022 * shake * g;
+    // Gait (see gait.ts): bob, weight shift, counter-rotation, accel lean, strafe roll, mount buzz, bumps.
+    const gf = this.gaitFrame;
+    gf.phase = this.prevGaitPhase + (this.gaitPhase - this.prevGaitPhase) * alpha;
+    gf.speed = this.prevSpeed + (this.renderSpeed - this.prevSpeed) * alpha;
+    gf.amount = this.gaitAmount;
+    gf.accelFwd = this.accelFwd;
+    gf.strafe = strafe;
+    gf.yawRate = yawRate;
+    gf.yawAccel = this.yawAccelS;
+    gf.crouch = this.crouch;
+    gf.stress = this.stress;
+    gf.ads = this.adsBlend;
+    gf.grounded = this.grounded;
+    const gs = this.gaitScales;
+    gs.sway = sway;
+    gs.shake = shake / DEFAULT_TUNING.cameraShake;
+    gs.stable = stable;
+    gs.inertia = this.weaponInertia;
+    const g = this.gait.update(dt, gf, gs);
+    // A helmet rides the head: the neck keeps it level, but it nods and yaws more than the chest.
+    const hAtt = helmet ? 1.4 : 1;
+    const hRoll = helmet ? 0.6 : 1;
+    const hPos = helmet ? 1.2 : 1;
+
     const time = this.ctx.time;
     const breathe = Math.sin(time * 1.6 * (1 + this.stress * 0.6)) * 0.003 * shake * (1 + this.stress * 2);
 
-    // Pelvis: yaw only, crouch drops it, lean shifts it a little.
-    const crouchY = -t.crouchDrop * this.crouch;
+    // Pelvis: yaw only, crouch drops it, lean shifts it a little, stairs ease the capsule's step-ups.
+    this.stepSmooth.update(dt);
+    const crouchY = -t.crouchDrop * this.crouch + this.stepSmooth.offset;
     const leanOffset = this.lean * t.leanOffset;
     this.hips.position.set(
       this.renderPos.x + rightX * leanOffset * 0.3,
-      this.renderPos.y + t.hipHeight + crouchY + bobY * 0.6,
+      this.renderPos.y + t.hipHeight + crouchY + g.y * 0.5,
       this.renderPos.z + rightZ * leanOffset * 0.3,
     );
     this.tmpE.set(0, this.yaw, 0);
@@ -534,15 +677,15 @@ export class Player implements System {
     const over = Math.max(0, -this.pitch - 0.6) * 0.16;
     this.spine.position.x += rightX * leanOffset * 0.7 - Math.sin(this.yaw) * over;
     this.spine.position.z += rightZ * leanOffset * 0.7 - Math.cos(this.yaw) * over;
-    this.spine.position.y += breathe - bobY * 0.4 - Math.abs(this.lean) * 0.04;
+    this.spine.position.y += breathe - Math.abs(this.lean) * 0.04;
     this.spine.updateMatrixWorld();
 
     // The chest cam sits on the carrier (spine) but points with the full look pitch — the camera is the POV.
     // Torso = the look frame pivoting about the chest mount: shoulders and the weapon hold live here, so the
     // gun keeps its place in the frame while the camera is rock-solid on the body.
     this.tmpV2.set(
-      CHEST_MOUNT.x + this.camSide.value + swayX,
-      CHEST_MOUNT.y + bobY * 0.4 + this.carrier.value * 0.03,
+      CHEST_MOUNT.x + this.camSide.value + g.x,
+      CHEST_MOUNT.y + g.y * 0.5 + this.carrier.value * 0.03,
       CHEST_MOUNT.z + this.camBack.value,
     );
     this.tmpV2.applyMatrix4(this.spine.matrixWorld);
@@ -556,29 +699,57 @@ export class Player implements System {
       // Helmet: side-rail mount at the head, follows the look; bigger bob.
       this.tmpV.copy(HELMET_MOUNT).applyQuaternion(this.torso.quaternion);
       this.tmpV2
-        .set(0, 0.24 + bobY * 0.3, -0.02)
+        .set(g.x * 0.6, 0.24 + g.y * 0.5 * hPos, -0.02)
         .applyMatrix4(this.spine.matrixWorld)
         .add(this.tmpV);
     }
     cam.position.copy(this.tmpV2);
+    this.clearWalls(dt);
     // Camera position in torso space (the left hand reaches here to fix the mount).
     this.invTorso.copy(this.torso.matrixWorld).invert();
     this.camLocal.copy(cam.position).applyMatrix4(this.invTorso);
 
-    const jitter = noise1(time * 7.3, 3) * 0.0008 * shake * (1 + this.stress * 3);
-    const roll = this.stableHorizon ? 0 : leanRoll + this.camRoll.value + gaitRoll + this.knockRoll;
+    // Rest jitter fades out when standing still: a camera on a still body is still.
+    const jitter =
+      noise1(time * 7.3, 3) * 0.0008 * shake * (1 + this.stress * 3) * (0.25 + 0.75 * this.gaitAmount);
+    const rollRaw = leanRoll + this.camRoll.value + this.knockRollS;
+    const roll = (stable ? rollRaw * STABLE_ROLL : rollRaw) + g.roll * hRoll;
     this.tmpE.set(
       this.pitch +
         this.camPitchJolt.value +
         jitter +
         this.carrier.value * 0.04 +
-        this.knockPitch -
+        this.knockPitchS +
+        g.pitch * hAtt -
         (helmet ? HELMET_TILT : 0),
-      this.yaw + this.camYawLag.value,
+      this.yaw + this.camYawLag.value + g.yaw * hAtt,
       roll,
     );
     cam.quaternion.setFromEuler(this.tmpE);
     cam.updateMatrixWorld();
+  }
+
+  /**
+   * Keep the camera (and the torso frame the gun hangs from) out of walls, doors and frames: probe from the capsule
+   * axis at camera height out to the camera plus a margin and pull everything back by what is missing. Quick in,
+   * slow out, so brushing a surface never flickers the picture.
+   */
+  private clearWalls(dt: number) {
+    const cam = this.ctx.camera.position;
+    // From the capsule axis (the spine itself leans out over the boots when looking down).
+    const pivot = this.tmpV.set(this.renderPos.x, cam.y, this.renderPos.z);
+    const dir = this.tmpV2.subVectors(cam, pivot);
+    const len = dir.length();
+    if (len < 1e-3) return;
+    dir.divideScalar(len);
+    const hit = this.ctx.physics.raycast(pivot, dir, len + CAM_WALL_MARGIN, this.body);
+    const want = hit ? clamp(len + CAM_WALL_MARGIN - hit.distance, 0, len * 0.9) : 0;
+    this.camClear += (want - this.camClear) * damp(want > this.camClear ? 0.015 : 0.09, dt);
+    if (this.camClear < 1e-4) return;
+    dir.multiplyScalar(-this.camClear);
+    cam.add(dir);
+    this.torso.position.add(dir);
+    this.torso.updateMatrixWorld();
   }
 }
 
@@ -591,3 +762,10 @@ const LEAN_MARGIN = 0.22;
 const PLAYER_GROUPS = (GROUP_PLAYER << 16) | 0xffff;
 /** The character controller walks through dropped mags instead of climbing them. */
 const KCC_FILTER = (0xffff << 16) | (0xffff & ~GROUP_DEBRIS);
+
+const planarNow = (v: Vector3) => Math.hypot(v.x, v.z);
+/** Shoulder-brush probe: reach (m) and the ray length at which the capsule (r 0.3) touches the wall. */
+const BRUSH_REACH = 0.6;
+const BRUSH_DIST = 0.37;
+/** Camera keeps this far (m) from any surface between it and the torso axis; the near plane is 0.03. */
+const CAM_WALL_MARGIN = 0.1;
