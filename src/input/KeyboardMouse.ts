@@ -31,6 +31,12 @@ const SPECIAL = new Set<KeyAction>([
  */
 export class KeyboardMouse implements InputSource {
   private codes = new Set<string>();
+  /**
+   * Codes pressed since the last poll. A press released before the next frame (trackpad tap-to-click sends
+   * mousedown + mouseup within a millisecond; quick key taps at low frame rates) still counts as held for one
+   * poll instead of vanishing.
+   */
+  private tapped = new Set<string>();
   private wheelCodes = new Set<string>();
   private dx = 0;
   private dy = 0;
@@ -51,6 +57,7 @@ export class KeyboardMouse implements InputSource {
     addEventListener('keyup', this.onKey);
     addEventListener('blur', () => {
       this.codes.clear();
+      this.tapped.clear();
       this.dirty = true;
     });
     el.addEventListener('mousedown', this.onMouse);
@@ -68,15 +75,19 @@ export class KeyboardMouse implements InputSource {
 
   private onKey = (e: KeyboardEvent) => {
     if (e.code === 'Tab' || e.code.startsWith('Alt') || e.code === 'Backspace') e.preventDefault();
-    if (e.type === 'keydown') this.codes.add(e.code);
-    else this.codes.delete(e.code);
+    if (e.type === 'keydown') {
+      this.codes.add(e.code);
+      this.tapped.add(e.code);
+    } else this.codes.delete(e.code);
     this.dirty = true;
   };
 
   private onMouse = (e: MouseEvent) => {
     const code = `Mouse${e.button}`;
-    if (e.type === 'mousedown') this.codes.add(code);
-    else this.codes.delete(code);
+    if (e.type === 'mousedown') {
+      this.codes.add(code);
+      this.tapped.add(code);
+    } else this.codes.delete(code);
     if (e.button === 1) e.preventDefault();
     this.dirty = true;
   };
@@ -133,6 +144,8 @@ export class KeyboardMouse implements InputSource {
     const held = this.held;
     held.clear();
     for (const code of this.codes) for (const a of lookup.get(code) ?? []) held.add(a);
+    for (const code of this.tapped) for (const a of lookup.get(code) ?? []) held.add(a);
+    this.tapped.clear();
 
     const x = (held.has('moveRight') ? 1 : 0) - (held.has('moveLeft') ? 1 : 0);
     const y = (held.has('moveForward') ? 1 : 0) - (held.has('moveBack') ? 1 : 0);
