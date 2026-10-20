@@ -67,6 +67,23 @@ export interface HandKey {
   turn?: V3;
 }
 
+/** Mag-check presentation layer (see `PresentRecipe` in library/compose.ts), times in clip seconds. */
+export interface ClipPresent {
+  path: { t: number; v: number }[];
+  hand: { t: number; v: number }[];
+  pose: { p: V3; r: V3 };
+  arc: V3;
+  rock: number;
+  rockSpan: number;
+  /** Mag-in-support-hand transform (pos xyz, quat xyzw) sampled from the grip source frame. */
+  grip: Float32Array;
+  gripTurn: number;
+  gripShift: V3;
+  /** Span (clip seconds) the layer owns the mag and the support hand. */
+  t0: number;
+  t1: number;
+}
+
 export interface Clip {
   id: string;
   action: string;
@@ -89,6 +106,8 @@ export interface Clip {
   additive?: boolean;
   /** Last frame is held when finished (swap out: weapon stays off screen until the next action). */
   holdLast?: boolean;
+  /** Mag check: the mag out of the well and presented (procedural, on top of the sampled pose). */
+  present?: ClipPresent;
 }
 
 export function decodeClip(j: ClipJson, layout: Layout): Clip {

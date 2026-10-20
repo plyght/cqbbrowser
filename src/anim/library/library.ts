@@ -65,6 +65,138 @@ export interface WeaponAnims {
 
 const ev = (name: string, t: number): ClipEvent => ({ name, t });
 
+// ------------------------------------------------------------------------------------ mag check
+
+/** Per-family feel of the mag check: where the mag is presented (chest-cam frame) and how the gun moves. */
+interface CheckFeel {
+  /** Mag centre (m, camera frame: -z forward) and its XYZ euler there (rad). */
+  pose: { p: V3; r: V3 };
+  /** Swing around the gun on the way up (camera frame, m). */
+  arc: V3;
+  /** Gun tilt (model-frame euler) while the support hand works the mag. */
+  tilt: V3;
+  /** AK rock about the front lug (rad). */
+  rock?: number;
+  /** Hand moved around the mag (see PresentRecipe.gripTurn / gripShift); default: palm on the front, a bit low. */
+  gripTurn?: number;
+  gripShift?: V3;
+}
+
+/**
+ * Rifle / SMG mag check on the AK-pack arms: support hand to the mag (clip), release, the mag comes **fully out**
+ * (path 0 → 1: clear of the well plus a gap), up and tilted toward the face (1 → 2), hold, back down, in, seat with a
+ * push, a tug check, hand back to the handguard. Composed time (s) before `speed`:
+ *
+ *   0.42 release · 0.45–0.78 out (magCheckOut at clear) · 0.78–1.18 up · hold 1.22–1.62 · 1.66–2.02 down ·
+ *   2.02–2.2 in (magCheckIn at the well, magSeat at 2.2) · tug 2.24–2.36 · hand back 2.36–2.6
+ */
+function rifleCheck(speed: number, magStyle: 'rock' | 'straight', f: CheckFeel): Recipe {
+  return {
+    segs: [
+      { clip: 'ak.reloadTactical', t0: 0, t1: 0.62 },
+      { hold: 1.86 },
+      { clip: 'ak.reloadTactical', t0: 0.62, t1: 0.3 },
+      { blend: 0.3 },
+      { clip: 'ak.idle', t0: 0, t1: 0 },
+    ],
+    speed,
+    keepEvents: false,
+    events: [ev('magRelease', 0.42), ev('magCheckOut', 0.7), ev('magCheckIn', 2.1), ev('magSeat', 2.2)],
+    tilt: [
+      { t: 0.25, r: [0, 0, 0] },
+      { t: 0.75, r: f.tilt },
+      { t: 1.9, r: f.tilt },
+      { t: 2.2, r: [f.tilt[0] * 0.6, f.tilt[1] * 0.6, f.tilt[2] * 0.6] },
+      // Seat: the push rocks the gun up a touch.
+      { t: 2.26, r: [f.tilt[0] * 0.6 + 0.04, f.tilt[1] * 0.6, f.tilt[2] * 0.6] },
+      { t: 2.75, r: [0, 0, 0] },
+    ],
+    hold: [1.22, 1.62],
+    magStyle,
+    present: {
+      path: [
+        { t: 0.42, v: 0 },
+        { t: 0.5, v: 0.06 },
+        { t: 0.78, v: 1 },
+        { t: 1.18, v: 2 },
+        { t: 1.66, v: 2 },
+        { t: 2.02, v: 1 },
+        { t: 2.2, v: 0 },
+        { t: 2.26, v: 0 },
+        { t: 2.31, v: 0.015 },
+        { t: 2.37, v: 0 },
+      ],
+      hand: [
+        { t: 0.26, v: 0 },
+        { t: 0.42, v: 1 },
+        { t: 2.38, v: 1 },
+        { t: 2.6, v: 0 },
+      ],
+      pose: f.pose,
+      arc: f.arc,
+      grip: { clip: 'ak.reloadTactical', t: 0.63 },
+      gripTurn: f.gripTurn ?? -Math.PI / 2,
+      gripShift: f.gripShift ?? [0, -0.05, 0],
+      rock: f.rock,
+      rockSpan: 0.3,
+    },
+  };
+}
+
+/**
+ * Pistol mag check on the Beretta-pack arms: cant, thumb the release, the mag drops a few cm, the support hand
+ * catches it and strips it **fully out**, presents it close and low (back toward the camera: witness holes), hold,
+ * back in, palm push to seat, tug, support hand back on the grip.
+ */
+function pistolCheck(): Recipe {
+  const tilt: V3 = [0, -0.2, 0.3];
+  return {
+    segs: [
+      { clip: 'beretta.reloadTactical', t0: 0, t1: 0.3 },
+      { blend: 0.3 },
+      { clip: 'beretta.reloadTactical', t0: 1.2, t1: 1.2 },
+      { hold: 1.9 },
+      { blend: 0.32 },
+      { clip: 'beretta.idle', t0: 0, t1: 0 },
+    ],
+    keepEvents: false,
+    events: [ev('magRelease', 0.3), ev('magCheckOut', 0.74), ev('magCheckIn', 2.06), ev('magSeat', 2.16)],
+    tilt: [
+      { t: 0, r: [0, 0, 0] },
+      { t: 0.4, r: tilt },
+      { t: 2.16, r: tilt },
+      { t: 2.21, r: [tilt[0] + 0.05, tilt[1], tilt[2]] },
+      { t: 2.75, r: [0, 0, 0] },
+    ],
+    hold: [1.24, 1.64],
+    magStyle: 'straight',
+    present: {
+      path: [
+        { t: 0.3, v: 0 },
+        { t: 0.4, v: 0.18 },
+        { t: 0.6, v: 0.22 },
+        { t: 0.84, v: 1 },
+        { t: 1.18, v: 2 },
+        { t: 1.7, v: 2 },
+        { t: 2.0, v: 1 },
+        { t: 2.16, v: 0 },
+        { t: 2.21, v: 0 },
+        { t: 2.26, v: 0.012 },
+        { t: 2.31, v: 0 },
+      ],
+      hand: [
+        { t: 0.4, v: 0 },
+        { t: 0.6, v: 1 },
+        { t: 2.32, v: 1 },
+        { t: 2.52, v: 0 },
+      ],
+      pose: { p: [-0.1, -0.07, -0.21], r: [-0.15, 0.35, 0.2] },
+      arc: [-0.04, -0.04, -0.04],
+      grip: { clip: 'beretta.reloadTactical', t: 1.2 },
+    },
+  };
+}
+
 // ------------------------------------------------------------------------------------ shared rifle pieces
 
 /** AK-pack rifle clips with per-weapon modifiers. */
@@ -75,6 +207,7 @@ function rifle(o: {
   emptyReload: Recipe;
   magStyle: 'rock' | 'straight';
   locksBack: boolean;
+  check: CheckFeel;
 }): Record<ArmsAction, Recipe> {
   const swapOut: Recipe = {
     segs: [{ clip: 'ak.holster', t0: 0, t1: 0.4 }],
@@ -123,27 +256,7 @@ function rifle(o: {
     },
     reloadTactical: { segs: [{ clip: 'ak.reloadTactical' }], speed: o.speed, magStyle: o.magStyle },
     reloadEmpty: o.emptyReload,
-    magCheck: {
-      // Grip the mag, pull it a few cm and roll the gun toward the eye; hold; push back and seat.
-      segs: [
-        { clip: 'ak.reloadTactical', t0: 0, t1: 0.62 },
-        { hold: 0.9 },
-        { clip: 'ak.reloadTactical', t0: 0.62, t1: 0.3 },
-        { blend: 0.3 },
-        { clip: 'ak.idle', t0: 0, t1: 0 },
-      ],
-      speed: o.speed,
-      keepEvents: false,
-      events: [ev('magRelease', 0.43), ev('magCheckOut', 0.6), ev('magCheckIn', 1.7), ev('magSeat', 1.74)],
-      tilt: [
-        { t: 0.25, r: [0, 0, 0] },
-        { t: 0.7, r: [0.2, 0, -0.3] },
-        { t: 1.5, r: [0.2, 0, -0.3] },
-        { t: 1.85, r: [0, 0, 0] },
-      ],
-      hold: [0.75, 1.45],
-      magStyle: o.magStyle,
-    },
+    magCheck: rifleCheck(o.speed, o.magStyle, o.check),
     inspect: { segs: [{ clip: 'ak.inspect' }], speed: o.speed },
   };
 }
@@ -260,40 +373,7 @@ function pistol(): Record<ArmsAction, Recipe> {
     shootLast: { segs: [{ clip: 'beretta.shootLast' }], additive: true },
     reloadTactical: { segs: [{ clip: 'beretta.reloadTactical' }], speed: 1.1, magStyle: 'straight' },
     reloadEmpty: { segs: [{ clip: 'beretta.reloadEmpty' }], speed: 1.1, magStyle: 'straight' },
-    magCheck: {
-      // Cant the pistol, thumb the release, let the mag drop ~2.5 cm, look; support palm seats it.
-      segs: [
-        { clip: 'beretta.reloadTactical', t0: 0, t1: 0.3 },
-        { hold: 1.0 },
-        { clip: 'beretta.reloadTactical', t0: 0.3, t1: 0 },
-        { blend: 0.25 },
-        { clip: 'beretta.idle', t0: 0, t1: 0 },
-      ],
-      keepEvents: false,
-      events: [ev('magRelease', 0.3), ev('magCheckOut', 0.4), ev('magCheckIn', 1.22), ev('magSeat', 1.3)],
-      magOffset: [
-        { t: 0.3, p: [0, 0, 0] },
-        { t: 0.4, p: [0, -0.025, 0.002] },
-        { t: 1.2, p: [0, -0.025, 0.002] },
-        { t: 1.3, p: [0, 0, 0] },
-      ],
-      tilt: [
-        { t: 0, r: [0, 0, 0] },
-        { t: 0.4, r: [0.15, -0.15, -0.25] },
-        { t: 1.3, r: [0.15, -0.15, -0.25] },
-        { t: 1.6, r: [0, 0, 0] },
-      ],
-      handL: [
-        { t: 0.9, at: 'magwell', off: [0.0, -0.07, 0.03], w: 0 },
-        { t: 1.18, at: 'magwell', off: [0.0, -0.085, 0.03], w: 1 },
-        { t: 1.3, at: 'magwell', off: [0.0, -0.06, 0.03], w: 1 },
-        { t: 1.5, at: 'magwell', off: [0.0, -0.08, 0.03], w: 0 },
-      ],
-      // The hold loop must lie inside the static part: the support hand's magwell keys start at 0.9 (a loop
-      // to 1.1 snapped the rising hand back down on every wrap).
-      hold: [0.45, 0.85],
-      magStyle: 'straight',
-    },
+    magCheck: pistolCheck(),
     inspect: { segs: [{ clip: 'beretta.inspect' }] },
   };
 }
@@ -317,6 +397,13 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       emptyReload: akEmpty(1),
       magStyle: 'rock',
       locksBack: false,
+      check: {
+        pose: { p: [-0.085, -0.095, -0.3], r: [1.0, -0.9, 0.2] },
+        arc: [-0.05, -0.03, 0.03],
+        tilt: [0.2, 0, -0.3],
+        rock: 0.32,
+        gripShift: [0, -0.06, 0],
+      },
     }),
   },
   sb16: {
@@ -335,6 +422,11 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       emptyReload: arEmpty(1.05),
       magStyle: 'straight',
       locksBack: true,
+      check: {
+        pose: { p: [-0.085, -0.1, -0.3], r: [0.9, -1.25, 0.35] },
+        arc: [-0.05, -0.03, 0.03],
+        tilt: [0.2, 0, -0.3],
+      },
     }),
   },
   hb300: {
@@ -353,6 +445,11 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       emptyReload: arEmpty(1.15),
       magStyle: 'straight',
       locksBack: true,
+      check: {
+        pose: { p: [-0.085, -0.1, -0.3], r: [0.9, -1.25, 0.35] },
+        arc: [-0.05, -0.03, 0.03],
+        tilt: [0.2, 0, -0.3],
+      },
     }),
   },
   kp9: {
@@ -371,6 +468,11 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       emptyReload: hkEmpty(1.08),
       magStyle: 'straight',
       locksBack: false,
+      check: {
+        pose: { p: [-0.08, -0.1, -0.29], r: [0.35, -1.5, 0.4] },
+        arc: [-0.05, -0.03, 0.03],
+        tilt: [0.15, 0, -0.25],
+      },
     }),
   },
   p17: {

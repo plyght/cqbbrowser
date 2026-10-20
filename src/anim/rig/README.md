@@ -93,6 +93,22 @@ fire, slingDrop, holsterClear, swapMid`. Each fires on its frame through `onEven
 | kp9    | AK      | lock the charging handle back, change the mag, **HK slap** | straight | 1.08             |
 | p17    | Beretta | slide locked, new mag, overhand slide release              | straight | 1.1              |
 
+### Mag check (`present` layer)
+
+`magCheck` recipes carry a `present` layer (`PresentRecipe` in `library/compose.ts`, run by `ArmsRig.presentLayer`
+after the hand IK). It owns the seated mag and the support hand for its span:
+
+- `path` 0 → 1 slides the mag out of the well along its own axis (`magGeom.ts` measures the axis and how deep it
+  sits; the AK rocks about its front lug first) until it is clear by `MAG_GAP`. 1 → 2 swings it to `pose` in the
+  chest-cam frame (`rig.presentOffset`, kept current by the controller outside the check). Keys are monotone cubic.
+- `hand` weights the support hand onto the mag: two-bone IK onto the source clip's own mag-in-hand transform
+  (`grip`), moved around our mag by `gripTurn` / `gripShift` so the palm leaves the window, holes and lips in view.
+  The hand turn is kept continuous through 180°.
+- Families: pistols present close and low with the back (witness holes) toward the camera; rifles tilt it up toward
+  the face, side window / holes and lips in view. Events `magRelease, magCheckOut, magCheckIn, magSeat` fire at
+  release, clear-of-well, re-entry and seat; a tug follows the seat.
+- `ArmsRig.debug.present` / `debug.grip` override the pose for tuning (see `tests/e2e/magcheck.spec.ts`).
+
 Weapons that aren't in the table (a future revolver or shotgun) fall back by family in `weaponAnims(id)`.
 
 ## Dev page

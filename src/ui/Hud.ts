@@ -171,6 +171,34 @@ export class Hud {
     return this.box.isEmpty() ? a.getWorldPosition(out) : this.box.getCenter(out);
   }
 
+  /**
+   * Screen point just right of an object's projected bounds, level with its upper third: the mag-check readout sits
+   * beside the presented mag instead of over its rounds and witness holes.
+   */
+  private besideBox(a: Object3D, out: { x: number; y: number }): boolean {
+    a.updateWorldMatrix(true, true);
+    this.box.setFromObject(a);
+    if (this.box.isEmpty()) return false;
+    const b = this.box;
+    let x1 = -Infinity,
+      y0 = Infinity,
+      y1 = -Infinity,
+      n = 0;
+    const s = { x: 0, y: 0 };
+    for (let i = 0; i < 8; i++) {
+      this.v2.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z);
+      if (!this.toScreen(this.v2, s)) continue;
+      n++;
+      x1 = Math.max(x1, s.x);
+      y0 = Math.min(y0, s.y);
+      y1 = Math.max(y1, s.y);
+    }
+    if (!n) return false;
+    out.x = x1;
+    out.y = y0 + (y1 - y0) * 0.33;
+    return true;
+  }
+
   /** Critically-damped follow so the tag rides the mag without jittering with sway. */
   private follow(
     pos: { x: number; y: number; on: boolean },
@@ -228,7 +256,8 @@ export class Hud {
       const s = { x: 0, y: 0 };
       // The mag itself, else (mag still below/behind the chest cam) the weapon just ahead of the grip, so the
       // readout rides the gun and lands on the mag as soon as the check animation tilts it into frame.
-      if (magObj && this.toScreen(this.anchorPoint(magObj, new Vector3()), s)) target = s;
+      if (magObj && w.checking && this.besideBox(magObj, s)) target = s;
+      else if (magObj && this.toScreen(this.anchorPoint(magObj, new Vector3()), s)) target = s;
       else if (this.toScreen(e.model.root.localToWorld(this.v2.set(0, -0.04, -0.3)), s)) target = s;
     }
     if (target) this.clampToView(target);

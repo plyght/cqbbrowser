@@ -57,6 +57,7 @@ import { recoilFor, type RecoilFeel, type RecoilProfile } from '../anim/handling
 import { FOV_SPRING } from '../anim/handling/characterise';
 import { WeaponRigidBody, gainsFor } from '../anim/handling/sim';
 import { ArmsRig } from '../anim/rig/ArmsRig';
+import { MagRounds } from './models/magRounds';
 import { weaponAnims } from '../anim/library/library';
 import { ContactOverlay } from '../anim/contact/ContactOverlay';
 import { HandContact } from '../anim/contact/HandContact';
@@ -101,6 +102,8 @@ interface Equipped {
   cfg: ClassCfg;
   mags: Magazines;
   model: WeaponModel;
+  /** The rounds inside the mag (instanced; follows `mags.inGun.rounds`). */
+  rounds: MagRounds | null;
   mode: FireMode;
   /** Socket positions in the weapon frame. */
   sockets: Record<string, Vector3>;
@@ -137,8 +140,6 @@ const CAM_GRIP = new Vector3(-0.07, 0.015, 0.012);
 const ARM_CLEAR = 0.2;
 /** Rig camera fix: wrist target relative to the chest-cam mount (torso frame): just left of and below the lens. */
 const CAM_REACH = new Vector3(-0.05, -0.06, -0.09);
-/** Pistol mag check (rig): support wrist under and behind the dropped mag's base (weapon frame). */
-const MAG_CUP = new Vector3(-0.015, -0.16, 0.07);
 
 // Scratch (no per-frame allocation).
 const _v = new Vector3();
@@ -302,6 +303,7 @@ export class WeaponController implements System {
       cfg,
       mags: new Magazines(def.magCapacity, def.spareMags),
       model,
+      rounds: model.parts.mag ? new MagRounds(model, def.caliber, def.magCapacity) : null,
       mode: def.modes[0],
       sockets,
       mag,
@@ -490,8 +492,6 @@ export class WeaponController implements System {
     w2: new Vector3(),
   };
 
-  /** 0..1 pistol mag-check lift (rig). */
-  private checkLift = 0;
   /** Rig camera-fix timeline (s) and whether the mount was straightened this time. */
   private camFixT = 0;
   private camFixed = false;
@@ -528,9 +528,7 @@ export class WeaponController implements System {
     const f = ease('out', this.flinch);
     const t = ease('io', this.throwDip) * 0.85;
     const c = this.camFixW;
-    // Pistol mag check: the support hand comes up under the dropped mag (the clip leaves it at the hip).
-    const m = this.equipped.cls === 'pistol' ? ease('io', this.checkLift) : 0;
-    const k = Math.max(f, t, c, m);
+    const k = Math.max(f, t, c);
     if (k < 1e-3) return;
     const { armL, foreArmL, handL } = rig.bones;
     const r = this.rs;
@@ -540,8 +538,7 @@ export class WeaponController implements System {
     const l1 = r.sh.distanceTo(r.el),
       l2 = r.el.distanceTo(r.wr);
     const tw = this.player.torso.matrixWorld;
-    if (m >= f && m >= t && m >= c) r.tg.copy(MAG_CUP).applyMatrix4(this.equipped.model.root.matrixWorld);
-    else if (c >= f && c >= t) r.tg.copy(this.player.camLocal).add(CAM_REACH).applyMatrix4(tw);
+    if (c >= f && c >= t) r.tg.copy(this.player.camLocal).add(CAM_REACH).applyMatrix4(tw);
     else if (f >= t) r.tg.set(-0.05, 0.2, -0.26).applyMatrix4(tw);
     else r.tg.set(-0.22, 0.2, -0.1).applyMatrix4(tw);
     r.tg.lerpVectors(r.wr, r.tg, k);
@@ -576,6 +573,13 @@ export class WeaponController implements System {
       }
     }
     rig.root.updateMatrixWorld(true);
+    // The mag check presents the mag to the chest cam: keep the camera's place in rig space current, frozen while the
+    // mag is out (it rides the hands then).
+    if (this.planKind !== 'check') {
+      const cam = this.ctx.camera;
+      cam.updateMatrixWorld();
+      rig.presentOffset.copy(rig.root.matrixWorld).invert().multiply(cam.matrixWorld);
+    }
     // Mag seated (and chambered): the gun works, so trigger or aim cuts the clip's return-to-ready tail short
     // (it held the gun ~0.65 s past the seat, unable to fire or aim).
     if (this.planKind === 'reload' && this.reloadLive) {
@@ -594,6 +598,7 @@ export class WeaponController implements System {
     rig.root.updateMatrixWorld(true);
     this.rigGunInv.copy(e.model.root.matrixWorld).invert().multiply(rig.root.matrixWorld);
     this.rigGunValid = rig.weaponModel === e.model;
+    e.rounds?.set(e.mags.inGun?.rounds ?? 0);
     // Empty reloads: the rig's falling clone of the old mag is replaced by our physical floor mag.
     const spare = e.model.root.getObjectByName('spareMag');
     if (spare && this.planKind === 'reload') spare.visible = false;
@@ -820,6 +825,7 @@ export class WeaponController implements System {
     } else {
       this.updateParts(dt);
       this.updateHands(dt);
+      e.rounds?.set(e.mags.inGun?.rounds ?? 0);
     }
     this.updateAdsCamera();
     this.updateFire(dt, f.down.has('fire'));
@@ -880,15 +886,6 @@ export class WeaponController implements System {
       const w = ease('io', this.switchW);
       h.lerp(_v3.fromArray(e.cfg.away.p), w);
       r.lerp(_v3.fromArray(e.cfg.away.r), w);
-    }
-    // Pistol mag check on the rig: lift and tip the gun so the support hand working the mag is in frame.
-    const checkWant = this.rig && this.planKind === 'check' && e.cls === 'pistol' ? 1 : 0;
-    this.checkLift += (checkWant - this.checkLift) * damp(0.08, dt);
-    if (this.checkLift > 1e-3) {
-      const w = ease('io', this.checkLift);
-      h.y += 0.04 * w;
-      h.z += 0.02 * w;
-      r.x += 0.2 * w;
     }
     // Throw dip / flinch: the gun drops and cants away while the support hand is busy.
     const dip = Math.max(ease('io', this.throwDip), ease('out', this.flinch), this.camFixW * 0.35);
