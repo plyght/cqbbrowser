@@ -60,6 +60,11 @@ export const cameraSettings = settings.ns('camera', {
 export const CHEST_MOUNT = new Vector3(-0.04, 0, -0.16);
 /** Helmet side-rail mount, relative to the head pivot, in the look frame. */
 const HELMET_MOUNT = new Vector3(0.075, 0.09, -0.06);
+/**
+ * Helmet cams are angled down on their rail (rad): level with the eyes the rifle at high ready sat below the image
+ * circle and only its front sight showed.
+ */
+const HELMET_TILT = 0.16;
 
 /**
  * Body-first player. Input rotates the body (yaw) and torso (pitch) immediately; the chest camera rides the
@@ -563,7 +568,12 @@ export class Player implements System {
     const jitter = noise1(time * 7.3, 3) * 0.0008 * shake * (1 + this.stress * 3);
     const roll = this.stableHorizon ? 0 : leanRoll + this.camRoll.value + gaitRoll + this.knockRoll;
     this.tmpE.set(
-      this.pitch + this.camPitchJolt.value + jitter + this.carrier.value * 0.04 + this.knockPitch,
+      this.pitch +
+        this.camPitchJolt.value +
+        jitter +
+        this.carrier.value * 0.04 +
+        this.knockPitch -
+        (helmet ? HELMET_TILT : 0),
       this.yaw + this.camYawLag.value,
       roll,
     );
