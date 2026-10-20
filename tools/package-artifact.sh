@@ -12,7 +12,7 @@ cd "$A"
 # The artifact host doesn't serve .glb: ship models as .glb.wasm (binary type the host serves) (GLTFLoader sniffs the binary magic) and
 # rewrite the references in the built JS.
 find assets -name "*.glb" | while read g; do mv "$g" "$g.wasm"; done
-for j in assets/*.js; do sed -i 's/\.glb\([\x27"`]\)/.glb.wasm\1/g' "$j"; done
+for j in assets/*.js assets/models/weapons/catalog.json; do [ -f "$j" ] && sed -i 's/\.glb\([\x27"`]\)/.glb.wasm\1/g' "$j"; done
 JS=$(ls assets/main-*.js); CSS=$(ls assets/main-*.css)
 cat > index.html <<HTML
 <title>SHORTBARREL</title>
