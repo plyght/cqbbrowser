@@ -107,10 +107,10 @@ let ready = false;
 
 /**
  * Weapons that use the kit when it is loaded (the others keep their procedural meshes). Families are switched on
- * as they pass review: P-17 and the new P-92 by default; `?kit=all` turns everything on, `?kit=0` off, or a list
+ * as they pass review: P-17, the new P-92 and the SB-16 by default; `?kit=all` turns everything on, `?kit=0` off, or a list
  * (`?kit=p17,k47s`).
  */
-const DEFAULT_KIT_WEAPONS = ['p17', 'p92'];
+const DEFAULT_KIT_WEAPONS = ['p17', 'p92', 'sb16'];
 let kitWeapons: Set<string> | 'all' = new Set(DEFAULT_KIT_WEAPONS);
 {
   const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('kit') : null;
@@ -272,11 +272,11 @@ function special(name: string): Material {
     specials = {
       glass: new MeshStandardMaterial({
         name: 'glass',
-        color: 0x223033,
-        metalness: 0.9,
+        color: 0x3a4a4e,
+        metalness: 0.6,
         roughness: 0.05,
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.1,
         depthWrite: false,
         side: DoubleSide,
         envMap: weaponEnvMap(),
