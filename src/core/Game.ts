@@ -268,6 +268,8 @@ export class Game {
     this.gear.resupply();
   }
 
+  private reportedPresentationError = false;
+
   /** When true the rAF loop only renders; tests drive `step()` explicitly. */
   manual = false;
 
@@ -302,8 +304,15 @@ export class Game {
     }
     const alpha = this.acc / Physics.STEP;
     for (const s of this.systems) s.update?.(dt, alpha);
-    this.audio.update(dt);
-    this.haptics.update(dt);
+    // Audio and haptics are presentation: a throw there must never stop the frame from rendering (a NaN in the
+    // acoustics once made the mixer throw every frame and froze the game).
+    try {
+      this.audio.update(dt);
+      this.haptics.update(dt);
+    } catch (err) {
+      if (!this.reportedPresentationError) console.error('[game] audio/haptics update threw', err);
+      this.reportedPresentationError = true;
+    }
     this.hud.update(this.weapons);
     this.renderer.setAds(this.weapons.adsBlend);
     // Input turn rate drives CAM04 bitrate starvation alongside the measured camera rotation.
