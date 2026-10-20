@@ -25,6 +25,15 @@ interface Scenario {
   run(e: AudioEngine, ctx: OfflineAudioContext, cam: PerspectiveCamera): void | Promise<void>;
 }
 
+/** HB-300 9" SBR + comp on its default 220 gr subsonic load (what the weapon controller emits for that build). */
+const HB300_COMP = {
+  weaponId: 'hb300',
+  caliber: '300blk',
+  suppressed: false,
+  subsonic: true,
+  def: { muzzleDevice: 'comp', barrelLength: 9 * 0.0254 },
+};
+
 const shot = (e: AudioEngine, weaponId: string, caliber: string, at: number) =>
   e.gunshot({ weaponId, caliber, suppressed: false, at });
 
@@ -249,7 +258,51 @@ export const SCENARIOS: Record<string, Scenario> = {
     scene: outdoorRange(),
     run: (e) => supRun(e, 'hb300', true, [0.4, 0.65, 0.9], 0),
   },
-  /** Full-auto mag dump in a room with brass raining down: exercises voice stealing (≤ 32 voices). */
+  /**
+   * HB-300 built as a 9" SBR with a compensator, default 220 gr subsonic: an unsuppressed .300 BLK blast (deep,
+   * concussive, harsh side blast). It used to fall through to the suppressed stack.
+   */
+  'hb300-comp-outdoor': {
+    measureAt: 0.4,
+    shots: [0.4, 1.4],
+    seconds: 3,
+    scene: outdoorRange(),
+    run: (e) => {
+      for (const t of [0.4, 1.4]) e.gunshot({ ...HB300_COMP, at: t });
+      for (let i = 0; i < 5; i++) e.gunshot({ ...HB300_COMP, at: 2.2 + i * 0.075 });
+    },
+  },
+  'hb300-comp-room': {
+    seconds: 3,
+    scene: room(5, 4, 2.7, 'drywall'),
+    run: (e) => {
+      for (const t of [0.4, 1.4]) e.gunshot({ ...HB300_COMP, at: t });
+      for (let i = 0; i < 5; i++) e.gunshot({ ...HB300_COMP, at: 2.2 + i * 0.075 });
+    },
+  },
+  /** KP-9 (MP5-style 9 mm SMG): softer than the rifles, roller-delayed "chk", fast cyclic. */
+  'kp9-outdoor': {
+    measureAt: 0.4,
+    shots: [0.4],
+    seconds: 3,
+    scene: outdoorRange(),
+    run: (e) => {
+      shot(e, 'kp9', '9mm', 0.4);
+      for (let i = 0; i < 6; i++) shot(e, 'kp9', '9mm', 1.4 + i * 0.075);
+    },
+  },
+  /** K-47S short AK outdoors: harsh, brutal blast and a loose, clattery action. */
+  'k47s-outdoor': {
+    measureAt: 0.4,
+    shots: [0.4],
+    seconds: 3,
+    scene: outdoorRange(),
+    run: (e) => {
+      shot(e, 'k47s', '7.62x39', 0.4);
+      for (let i = 0; i < 6; i++) shot(e, 'k47s', '7.62x39', 1.4 + i * 0.092);
+    },
+  },
+  /** Full-auto mag dump in a room with brass raining down: overlapping tails within the voice budget. */
   'auto-room': {
     seconds: 4,
     scene: room(6, 5, 2.7),
@@ -358,10 +411,17 @@ async function renderOnce(
   return { L: out.getChannelData(0), R: out.getChannelData(1), engine };
 }
 
-export async function renderScenario(name: string): Promise<RenderResult> {
+/**
+ * Render a scenario. `linear` (analysis only): ambience off and the mic stage linear and −20 dB, so layer
+ * balance can be measured before the capsule overload / soft ceiling.
+ */
+export async function renderScenario(name: string, opts: { linear?: boolean } = {}): Promise<RenderResult> {
   const sc = SCENARIOS[name];
   if (!sc) throw new Error(`unknown scenario ${name}`);
-  const { L, R, engine } = await renderOnce(sc, { ambience: 0.7 });
+  const { L, R, engine } = await renderOnce(
+    sc,
+    opts.linear ? { ambience: 0, linear: true } : { ambience: 0.7 },
+  );
   let peak = 0,
     acc = 0,
     nan = 0,
@@ -378,7 +438,7 @@ export async function renderScenario(name: string): Promise<RenderResult> {
       if (a >= 0.999) clip++;
     }
   let metrics: ShotMetrics | undefined;
-  if (sc.measureAt !== undefined) {
+  if (sc.measureAt !== undefined && !opts.linear) {
     // Crest: the real mic stage, ambience off. Decay + wet/dry: the same events through a linear mic stage
     // (low level, saturators bypassed) rendered twice, once with every reflection muted.
     const real = await renderOnce(sc, { ambience: 0 });
