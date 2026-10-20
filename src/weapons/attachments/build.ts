@@ -13,6 +13,7 @@ import type {
   MuzzlePart,
   OpticKind,
   OpticPart,
+  ReticleKind,
   PartDef,
   PlatformDef,
   ProfilePart,
@@ -62,6 +63,14 @@ export interface AimMode {
   /** Roll of the weapon needed to use this sight (rad, + = cant right). */
   roll: number;
   eyeRelief: number;
+  /** Tube optics: body length ahead of the rear lens (m); the ADS near plane looks past it. */
+  tube?: number;
+  reticle?: ReticleKind;
+  /** Eye box radius (m) for the scope shadow. */
+  eyeBox?: number;
+  trueOneX?: boolean;
+  /** True-1x optics: how far forward of the eyepiece's eye position the head sits at 1x (m). */
+  oneXForward?: number;
 }
 
 export interface Layout {
@@ -242,12 +251,36 @@ export function isValid(build: WeaponBuild) {
 
 // ------------------------------------------------------------------ layout
 
+/** Rear lens z behind the mount's rear edge (tube optics sit back over the receiver; others: the mount rear). */
+export function eyepieceOf(p: OpticPart): number {
+  return p.kind === 'lpvo' ? (p.eyepiece ?? 0.06) : 0;
+}
+
 function place(rail: RailSeg, cursor: number, p: OpticPart, errors: BuildError[], slot: SlotId): Placement {
   const z0 = Math.min(cursor, p.preferredRear ?? cursor);
   const z1 = z0 - p.footprint;
   if (z1 < rail.z1 - 0.004)
     errors.push({ slot, code: 'railSpace', message: `not enough top rail for the ${p.name}` });
   return { z0, z1, railY: rail.y, axisY: rail.y + p.axisOverRail };
+}
+
+/**
+ * SBR grips: how far ahead of the support hand's grip point the grip's centre sits (m). Both index the hand from
+ * the front (the rig's support hand wraps the handguard, so a grip under the palm would sit in the fingers): the
+ * stubby is an index stop just ahead of the index finger, the wedge's rear ramp meets the index finger / web.
+ */
+export const SBR_GRIP_LEAD = { stubby: 0.044, wedge: 0.062 } as const;
+
+/**
+ * Nearest M-LOK slot centre to `z` on an AR free-float handguard (slots on a 40 mm pitch, centred on the guard:
+ * tools/blender/weapons/kit/lib.py `mlok_handguard`). `rear` = the handguard's rear z.
+ */
+export function mlokSlot(rear: number, length: number, z: number): number {
+  const L = length - 0.001;
+  const n = Math.max(1, Math.floor((L - 0.03) / 0.04));
+  const first = rear - 0.001 - (L - (n - 1) * 0.04) / 2;
+  const i = Math.min(n - 1, Math.max(0, Math.round((first - z) / 0.04)));
+  return first - i * 0.04;
 }
 
 /** Positions of every part and socket for a resolved build (pure; shared by stats and the model). */
@@ -355,7 +388,15 @@ export function layoutBuild(r: ResolvedBuild): Layout {
     else out.light = { zFront: hgFront + 0.004, side: params.lightSide };
   }
   if (laser && laser.style !== 'none') out.laser = { zFront: hgFront + 0.006, side: 'left' };
-  if (fg && fg.style !== 'none') {
+  // Where the support hand naturally rides the handguard (no foregrip).
+  const handZ = pd.platform === 'ar' ? hgFront + Math.min(0.08, hgLen * 0.35) : hgFront + hgLen * 0.5;
+  if (fg && (fg.style === 'stubby' || fg.style === 'wedge')) {
+    // SBR grips sit just ahead of that natural hold (the hand stays put), on an M-LOK slot when there is one.
+    let z = Math.max(hgFront + (fg.style === 'wedge' ? 0.042 : 0.026), handZ - SBR_GRIP_LEAD[fg.style]);
+    if (handguard && pd.platform === 'ar' && (hgPart?.style === 'mlok' || hgPart?.style === 'integral'))
+      z = mlokSlot(handguard.z0, hgPart.length, z);
+    out.foregrip = { z };
+  } else if (fg && fg.style !== 'none') {
     const k = fg.style === 'vertical' ? 0.34 : fg.style === 'angled' ? 0.45 : 0.12;
     out.foregrip = { z: hgFront + Math.max(0.03, hgLen * k) };
   }
@@ -364,11 +405,10 @@ export function layoutBuild(r: ResolvedBuild): Layout {
   if (pd.platform === 'glock') out.supportHand = [-0.018, BORE_Y - 0.06, 0.012];
   else if (out.foregrip && fg?.style === 'vertical') out.supportHand = [0, BORE_Y - 0.085, out.foregrip.z];
   else if (out.foregrip && fg?.style === 'angled') out.supportHand = [-0.004, BORE_Y - 0.04, out.foregrip.z];
+  else if (out.foregrip && (fg?.style === 'stubby' || fg?.style === 'wedge'))
+    out.supportHand = [-0.008, BORE_Y - 0.022, out.foregrip.z + SBR_GRIP_LEAD[fg.style]];
   else if (out.foregrip) out.supportHand = [-0.008, BORE_Y - 0.022, out.foregrip.z + 0.05];
-  else {
-    const z = pd.platform === 'ar' ? hgFront + Math.min(0.08, hgLen * 0.35) : hgFront + hgLen * 0.5;
-    out.supportHand = [-0.008, BORE_Y - 0.022, z];
-  }
+  else out.supportHand = [-0.008, BORE_Y - 0.022, handZ];
 
   // Aim modes: primary optic → magnified → offset → irons.
   const modes: AimMode[] = [];
@@ -377,9 +417,24 @@ export function layoutBuild(r: ResolvedBuild): Layout {
     optic: p.kind,
     magnification: p.magnification,
     sightHeight: pl.axisY - BORE_Y,
-    point: [0, pl.axisY, p.kind === 'lpvo' ? pl.z0 + 0.06 : pl.z0],
+    point: [0, pl.axisY, pl.z0 + eyepieceOf(p)],
     roll,
     eyeRelief: p.eyeRelief,
+    ...(p.kind === 'lpvo'
+      ? {
+          tube: p.bodyLength - 0.01,
+          reticle: p.reticle ?? 'duplex',
+          eyeBox: p.eyeBox ?? 0.006,
+          trueOneX: !!p.trueOneX,
+          // Both eyes open at 1x: the head sits where it would behind a micro red dot on this rail.
+          oneXForward:
+            p.trueOneX && main
+              ? pl.z0 +
+                eyepieceOf(p) -
+                Math.min(main.z0 - 0.002, getPart<OpticPart>('opt_reddot').preferredRear ?? 0)
+              : 0,
+        }
+      : {}),
   });
   if (optic && out.optic) modes.push(opticMode('primary', optic, out.optic));
   if (optic?.kind === 'rmr') {
@@ -474,7 +529,7 @@ function massBreakdown(r: ResolvedBuild, l = layoutBuild(r)) {
       case 'optic':
         return l.optic
           ? (part as OpticPart).kind === 'lpvo'
-            ? l.optic.z0 - 0.06
+            ? l.optic.z0 + eyepieceOf(part as OpticPart) - (part as OpticPart).bodyLength / 2
             : (l.optic.z0 + l.optic.z1) / 2
           : 0;
       case 'magnifier':

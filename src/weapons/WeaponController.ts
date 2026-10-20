@@ -778,6 +778,9 @@ export class WeaponController implements System {
     void hd;
     if (f.pressed.has('aimMode')) this.cycleAimMode();
     if (f.pressed.has('magnifier')) this.toggleMagnifier();
+    // Variable-power ring throw (~0.2 s low ↔ high).
+    const zw = this.zoomHigh.get(this.equipped) ? 1 : 0;
+    this.zoomK += clamp(zw - this.zoomK, -dt / 0.2, dt / 0.2);
     this.wSprint += ((p.sprinting && !this.beats.active ? 1 : 0) - this.wSprint) * damp(0.1, dt);
     this.wLow += ((p.ready === 'low' ? 1 : 0) - this.wLow) * damp(0.09, dt);
     this.wComp += ((p.ready === 'compressed' ? 1 : 0) - this.wComp) * damp(0.08, dt);
@@ -980,10 +983,48 @@ export class WeaponController implements System {
     if (n > 1) this.aimIndex = (this.aimIndex + 1) % n;
   }
 
+  /** Variable optics: wanted power per loadout weapon (true = top end); `zoomK` eases the ring 0..1. */
+  private zoomHigh = new WeakMap<object, boolean>();
+  private zoomK = 0;
+
+  private readonly eyeOff = { x: 0, y: 0 };
+  /**
+   * The eye's offset from the optic's axis in the view (m, + = right / up): the camera position off the axis
+   * plus its pointing error over the eye relief. 0 at full ADS; large while blending in / out.
+   */
+  private eyeOffset(cam: { position: Vector3; quaternion: Quaternion }): { x: number; y: number } {
+    _fwd.set(0, 0, -1).applyQuaternion(this.gunQuat);
+    _v.copy(cam.position).sub(this.eyeWorld);
+    _v.addScaledVector(_fwd, -_v.dot(_fwd));
+    // Pointing error: where the camera's forward ray is, one eye relief ahead, relative to the axis.
+    _v2.set(0, 0, -1).applyQuaternion(cam.quaternion).sub(_fwd).multiplyScalar(0.09);
+    _v.sub(_v2);
+    _v2.set(1, 0, 0).applyQuaternion(cam.quaternion);
+    _v3.set(0, 1, 0).applyQuaternion(cam.quaternion);
+    this.eyeOff.x = _v.dot(_v2);
+    this.eyeOff.y = _v.dot(_v3);
+    return this.eyeOff;
+  }
+
+  /** Current magnification of the sight line in use (variable optics follow the power ring). */
+  get magnification(): number {
+    const sl = this.sightLine;
+    if (!sl) return 1;
+    const [m0, m1] = sl.mode.magnification;
+    const lo = Math.max(1, m0);
+    if (sl.mode.optic !== 'lpvo' || m1 <= lo) return lo;
+    return lo * Math.pow(m1 / lo, ease('io', this.zoomK));
+  }
+
   private toggleMagnifier() {
     const lines = this.equipped.model.sightLines;
     const cur = this.sightLine;
     const mag = lines.findIndex((l) => l.mode.id === 'magnified');
+    // Variable optic (LPVO) without a flip magnifier: the magnifier bind throws the power ring low ↔ high.
+    if (mag < 0 && cur?.mode.optic === 'lpvo' && cur.mode.magnification[1] > cur.mode.magnification[0]) {
+      this.zoomHigh.set(this.equipped, !this.zoomHigh.get(this.equipped));
+      return;
+    }
     if (mag < 0) return;
     this.aimIndex =
       cur?.mode.id === 'magnified'
@@ -1010,9 +1051,15 @@ export class WeaponController implements System {
     const punch = this.fovPunch.value;
     let near = this.baseNear;
     let tube = 0;
+    let open1x = false;
     if (sl) {
       const i = Math.min(this.aimIndex, this.equipped.sightLocal.length - 1);
-      const eye = this.eyeDistance(sl);
+      let eye = this.eyeDistance(sl);
+      // A true-1x LPVO used both eyes open: the head sits where it would behind a red dot on that rail (the optic
+      // is hidden), easing back to the eyepiece's eye relief as the ring goes to the top end. At the full eye
+      // relief the camera sat back in the carrier's shoulder line with the plate bag in view (the 1-6x hides
+      // that behind its near clip).
+      if (sl.mode.trueOneX) eye -= (1 - ease('io', this.zoomK)) * (sl.mode.oneXForward ?? 0);
       this.eyeWorld.copy(this.equipped.sightLocal[i]);
       this.eyeWorld.z += eye;
       this.eyeWorld.applyMatrix4(this.gunMatrix);
@@ -1026,12 +1073,16 @@ export class WeaponController implements System {
         _m2.lookAt(_ao.set(0, 0, 0), _fwd, _v3);
         cam.quaternion.slerp(_aq.setFromRotationMatrix(_m2), k);
         cam.updateMatrixWorld();
-        const mag = Math.max(1, sl.mode.magnification[0]);
-        const adsFov = clamp((2 * Math.atan(Math.tan((75 * Math.PI) / 360) / mag) * 180) / Math.PI, 18, 75);
+        const mag = this.magnification;
+        const adsFov = clamp((2 * Math.atan(Math.tan((75 * Math.PI) / 360) / mag) * 180) / Math.PI, 12, 75);
         fov = this.baseFov + (Math.min(adsFov, this.baseFov) - this.baseFov) * k;
         // Clip whatever sits between the eye and the sight (folded BUIS, the eyepiece itself); tube optics are
         // solid models, so look past the tube and draw the eyepiece picture instead.
-        tube = sl.mode.optic === 'lpvo' ? 0.26 : sl.mode.optic === 'magnifier' ? 0.11 : 0;
+        tube = sl.mode.optic === 'lpvo' ? (sl.mode.tube ?? 0.26) : sl.mode.optic === 'magnifier' ? 0.11 : 0;
+        // A true-1x LPVO at the low end is used like a red dot, both eyes open: the tube drops out of the
+        // picture (the optic is hidden instead of clipped) and the gun stays in view.
+        open1x = !!sl.mode.trueOneX && mag < 1.25;
+        if (open1x) tube = 0;
         // Through a scope the barrel and support hand ahead of it are out of the picture too.
         const toMuzzle = this.equipped.sightLocal[i].z - this.equipped.muzzleLocal.z + eye + 0.03;
         const clipTo = tube ? Math.max(eye + tube + 0.004, toMuzzle) : Math.min(eye - 0.008, 0.08);
@@ -1046,7 +1097,18 @@ export class WeaponController implements System {
     }
     this.lastFov = cam.fov;
     this.lastNear = cam.near;
-    this.scope.update(cam, tube ? k : 0, 0.8, sl?.mode.optic === 'lpvo');
+    // Hide a both-eyes-open optic at ADS (the eye looks past it); a tube optic is clipped by the near plane.
+    const optic = this.equipped.model.parts.optic;
+    if (optic) optic.visible = !(open1x && k > 0.6);
+    const lpvo = sl?.mode.optic === 'lpvo';
+    const zk = ease('io', this.zoomK);
+    // Exit pupil: a true-1x LPVO opens past the screen edges at 1x (red-dot view), closes to the ocular at
+    // the top end. Off-axis eye (ADS in / out) pulls the scope shadow across; a generous eye box less so.
+    const pupil = lpvo && sl.mode.trueOneX ? 2.4 + (0.82 - 2.4) * zk : 0.8;
+    this.scope.update(cam, tube || open1x ? k : 0, pupil, lpvo ? (sl.mode.reticle ?? 'duplex') : null, {
+      eyeBox: sl?.mode.eyeBox ?? 0.006,
+      offset: this.eyeOffset(cam),
+    });
   }
 
   /**

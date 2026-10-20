@@ -221,6 +221,74 @@ export function lpvo(c: Ctx, p: Placement, col: Collector = c.s) {
   col.add(cylZ(0.0185, r0 + 0.0005, r0 - 0.0005, ax, 0, 24), M.glass);
 }
 
+/** Compact 1-3x24 on a low QD cantilever (procedural fallback of the kit's acc_lpvo3; same dimensions). */
+export function lpvo3(c: Ctx, p: Placement, part: OpticPart, col: Collector = c.s) {
+  const { M } = c;
+  const fin = M.finish.black;
+  const ax = p.axisY;
+  clamp(c, col, p.z0, p.z1, p.railY);
+  col.add(boxZ(0.02, 0.007, p.z0 - 0.002, p.z1 - 0.018, 0, p.railY + 0.0015, 0.0018), fin);
+  for (const zq of [p.z0 - 0.016, p.z1 + 0.016])
+    col.add(rbox(0.0035, 0.0075, 0.021, -0.0148, p.railY - 0.0015, zq, 0.0012), M.phosphate);
+  for (const zr of [p.z0 - 0.012, p.z1 - 0.008]) {
+    const h = ax - 0.0181 + 0.003 - p.railY;
+    col.add(boxZ(0.016, h, zr + 0.0065, zr - 0.0065, 0, p.railY + h / 2 + 0.002, 0.0015), fin);
+    col.add(
+      lathe(
+        [
+          [0.0151, zr + 0.007],
+          [0.0181, zr + 0.007],
+          [0.0181, zr - 0.007],
+          [0.0151, zr - 0.007],
+        ],
+        24,
+        ax,
+      ),
+      fin,
+    );
+  }
+  const r0 = p.z0 + (part.eyepiece ?? 0.075);
+  const L = part.bodyLength;
+  col.add(
+    lathe(
+      [
+        [0, r0 - 0.011],
+        [0.0158, r0 - 0.011],
+        [0.0158, r0 - 0.0012],
+        [0.0172, r0],
+        [0.0195, r0],
+        [0.0205, r0 - 0.003],
+        [0.0205, r0 - 0.046],
+        [0.0194, r0 - 0.051],
+        [0.0162, r0 - 0.066],
+        [0.015, r0 - 0.072],
+        [0.015, r0 - 0.184],
+        [0.0158, r0 - 0.192],
+        [0.0168, r0 - 0.199],
+        [0.0168, r0 - L + 0.002],
+        [0.0134, r0 - L],
+        [0.0128, r0 - L + 0.0015],
+        [0.0128, r0 - L + 0.016],
+        [0, r0 - L + 0.016],
+      ],
+      28,
+      ax,
+    ),
+    fin,
+  );
+  const zt = r0 - 0.115;
+  col.add(boxZ(0.031, 0.031, zt + 0.016, zt - 0.016, 0, ax, 0.007), fin);
+  col.add(new CylinderGeometry(0.0098, 0.0098, 0.01, 20).translate(0, ax + 0.0195, zt), fin);
+  col.add(new CylinderGeometry(0.0098, 0.0098, 0.01, 20).rotateZ(Math.PI / 2).translate(0.0195, ax, zt), fin);
+  col.add(
+    new CylinderGeometry(0.0105, 0.0105, 0.0117, 20).rotateZ(Math.PI / 2).translate(-0.0204, ax, zt),
+    fin,
+  );
+  col.add(cylZ(0.0128, r0 - L + 0.0031, r0 - L + 0.0025, ax, 0, 24), M.lensCoat);
+  col.add(cylZ(0.0157, r0 - 0.0018, r0 - 0.0024, ax, 0, 24), M.glass);
+  col.add(cylZ(0.00045, r0 - 0.01, r0 - 0.0104, ax, 0, 12), M.reticle);
+}
+
 // ------------------------------------------------------------------ magnifier (flip, animated part)
 
 export function magnifier(c: Ctx, p: Placement) {
@@ -369,6 +437,7 @@ export function buisFront(c: Ctx, p: Placement) {
 export function primaryOptic(c: Ctx, part: OpticPart, p: Placement) {
   if (part.kind === 'reddot') redDot(c, p);
   else if (part.kind === 'holo') holo(c, p);
+  else if (part.id === 'opt_lpvo3') lpvo3(c, p, part, c.part('optic', [0, p.railY, p.z0]));
   else if (part.kind === 'lpvo') lpvo(c, p);
 }
 
@@ -504,6 +573,29 @@ export function foregrip(c: Ctx, part: ForegripPart) {
       [z + 0.006, bottom - 0.013],
     ];
     c.s.add(profile(shape(pts), 0.022, 0.003), mat);
+  } else if (part.style === 'stubby') {
+    // Procedural fallback of acc_fg_stubby_*: 52 mm oval body under a short mount, flared toe.
+    const g = new CylinderGeometry(0.0128, 0.0122, 0.046, 18);
+    g.scale(1, 1, 1.3);
+    g.translate(0, bottom - 0.006 - 0.023, z - 0.002);
+    c.s.add(g, M.polymerGrip);
+    const toe = new CylinderGeometry(0.0118, 0.0137, 0.006, 18);
+    toe.scale(1, 1, 1.28);
+    toe.translate(0, bottom - 0.055, z - 0.004);
+    c.s.add(toe, M.polymerGrip);
+  } else if (part.style === 'wedge') {
+    // Procedural fallback of acc_fg_wedge_*: low wedge, indexing ramp at the rear.
+    const pts: P2[] = [
+      [z + 0.039, bottom],
+      [z + 0.039, bottom - 0.003],
+      [z + 0.012, bottom - 0.0165],
+      [z - 0.006, bottom - 0.0185],
+      [z - 0.028, bottom - 0.0172],
+      [z - 0.036, bottom - 0.0135],
+      [z - 0.039, bottom - 0.006],
+      [z - 0.039, bottom],
+    ];
+    c.s.add(profile(shape(pts), 0.026, 0.004), M.polymerGrip);
   }
 }
 
