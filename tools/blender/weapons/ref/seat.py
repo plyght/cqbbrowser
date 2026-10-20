@@ -1,7 +1,7 @@
 """Grip seat of the procedural model (where the authored hand clips hold the grip) → profiles/<w>_gripseat.json.
 
     bun tools/blender/weapons/dump_procedural.ts sb16          # → .cache/proc_sb16.glb
-    blender -b --python tools/blender/weapons/ref/seat.py -- sb16 z0 z1 ytop yfit ybot
+    blender -b --python tools/blender/weapons/ref/seat.py -- sb16 z0 z1 ytop yfit ybot [yband]
 
 Horizontal sections of the procedural static mesh between ytop and ybot inside the z window give the grip's side
 outline (front/back strap per height, three.js weapon frame). The kit grips are lofted on it (centreline and angle
@@ -18,6 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 argv = sys.argv[sys.argv.index("--") + 1:]
 w = argv[0]
 z0, z1, ytop, yfit, ybot = map(float, argv[1:6])
+yband = float(argv[6]) if len(argv) > 6 else ybot + 0.004  # bottom of the line-fit band (above the bottom taper)
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=os.path.join(HERE, "..", ".cache", f"proc_{w}.glb"))
 segs = []
@@ -43,7 +44,7 @@ while y >= ybot - 1e-9:
     y -= 0.002
 # Rows above yfit can include the trigger guard / receiver: fit front and back strap lines on the clean band and
 # extrapolate the front strap above it (the grip top is buried in the receiver anyway).
-band = [r for r in rows if yfit >= r[0] >= ybot + 0.004]
+band = [r for r in rows if yfit >= r[0] >= yband]
 
 
 def fit(pts):

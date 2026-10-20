@@ -82,7 +82,7 @@ test('kit: default builds load from the GLB kit on the bench', async ({ page }) 
 
 test('kit: chest cam idle + ADS in game', async ({ page }) => {
   test.setTimeout(900_000);
-  const errors = await boot(page, '/?kit=all');
+  const errors = await boot(page, process.env.KIT_URL ?? '/?kit=all');
   await page.evaluate(() => ((window as any).__sb.renderer.dynres.enabled = false));
   await play(page);
   await page
@@ -113,7 +113,7 @@ test('kit: chest cam idle + ADS in game', async ({ page }) => {
     await page.screenshot({ path: ads });
     files.push(idle, ads);
     const kit = await page.evaluate(() => !!(window as any).__sb.weapons.equipped.model.root.userData.kit);
-    expect(kit, model).toBe(true);
+    if (process.env.KIT_EXPECT !== '0') expect(kit, model).toBe(true);
   }
   await sheet(page, files, `${dir}/kit-sheet-ingame.png`, 2);
   expect(errors).toEqual([]);
