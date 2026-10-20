@@ -42,7 +42,7 @@ export const CONTACT = {
   maxOpen: 1.3,
   maxCurl: 1.5,
   /** Firing-palm gun offset / support-hand push bounds (m). */
-  maxGun: 0.04,
+  maxGun: 0.005,
   maxPush: 0.05,
   maxMag: 0.04,
   /** Release time constant (s). */
@@ -112,6 +112,23 @@ export interface ContactStats {
 
 export class HandContact {
   enabled = true;
+  /**
+   * `safe` (default, ships): no grip seat, the gun never moves in the hand, fingers only open to clear a
+   * penetration and ease back to the clip's angle, the support hand only depenetrates through arm IK.
+   * `full`: the baked grip solve (seat, hold offset, hand-poser fingers, wrap curls, gun give-way ≤ 5 mm).
+   */
+  static defaultMode: 'safe' | 'full' = 'safe';
+
+  /** In-game opt-in: `?handcontact=safe|full` (absent = off). */
+  static urlMode(): 'off' | 'safe' | 'full' {
+    try {
+      const v = new URLSearchParams(location.search).get('handcontact');
+      return v === 'full' ? 'full' : v === null ? 'off' : 'safe';
+    } catch {
+      return 'off';
+    }
+  }
+  mode: 'safe' | 'full' = HandContact.defaultMode;
   readonly hands: Record<Side, HandState>;
   col?: WeaponCollision;
   readonly toWeapon = new Matrix4();
@@ -163,7 +180,7 @@ export class HandContact {
     this.hands = { R: mk('R'), L: mk('L') };
     rig.seatProvider = (_r, model, id) => {
       this.bake = null;
-      if (!this.enabled || !this.seats || !this.ensure()) return null;
+      if (!this.enabled || !this.seats || this.mode === 'safe' || !this.ensure()) return null;
       const key = id + JSON.stringify(model.build);
       const hit = BAKED.get(key);
       if (hit !== undefined) {
@@ -321,7 +338,8 @@ export class HandContact {
     };
     lap(0);
     // 1. Firing palm → gun offset.
-    if (onHand) this.firingPalm(dt);
+    const safe = this.mode === 'safe';
+    if (onHand && !safe) this.firingPalm(dt);
     else this.gunOff.set(0, 0, 0);
     // Firing-hand fingers first: the support hand then yields to the final firing hand (hand↔hand).
     this.hands.L.proxy.update(this.toWeapon);
@@ -329,7 +347,7 @@ export class HandContact {
     this.fingers('R', dt);
     // Firing-hand residual (e.g. the thumb against a stock during an inspect): the gun gives way (on the hand)
     // or the hand backs off by IK (off the grip), then the fingers re-solve.
-    for (let it = 0; it < 1; it++) {
+    for (let it = 0; it < (safe && onHand ? 0 : 1); it++) {
       if (this.minGap.R >= -0.001) break;
       const pen = this.fingerResidual('R', _pos);
       if (pen <= 0.001) break;
@@ -896,7 +914,7 @@ export class HandContact {
   /** Open synergy that clears the chain: smallest |o| along `dir` (bisection, warm-started), else best effort. */
   private solveOpen(h: HandProxy, fi: number, skip: Group | null, maxO: number, prev: number): number {
     const C = CONTACT.clear;
-    for (const dir of [1, -1] as const) {
+    for (const dir of this.mode === 'safe' ? ([1] as const) : ([1, -1] as const)) {
       const max = dir > 0 ? maxO : 0.4;
       if (this.synergy(h, fi, max * dir, 0, skip) < C) continue;
       let lo = 0,
@@ -925,7 +943,7 @@ export class HandContact {
     // Nothing clears: the least penetrating opening (coarse scan).
     let best = -Infinity,
       out = 0;
-    for (let o = -0.4; o <= maxO + 1e-6; o += 0.1) {
+    for (let o = this.mode === 'safe' ? 0 : -0.4; o <= maxO + 1e-6; o += 0.1) {
       const g = this.synergy(h, fi, o, 0, skip);
       if (g > best + 1e-4) {
         best = g;
@@ -968,7 +986,7 @@ export class HandContact {
       // The thumb's synergy axis only approximates its flexion: keep its corrections small.
       const maxO = fi === 0 ? 0.9 : CONTACT.maxOpen;
       // Wrap intent (from the authored pose; not the trigger finger, not the thumb).
-      cs.wrap = fi !== 0 && !(firing && fi === 1) && cs.intent;
+      cs.wrap = this.mode === 'full' && fi !== 0 && !(firing && fi === 1) && cs.intent;
       // Steady state (one evaluation): last frame's correction still clears and, when wrapping, still touches —
       // keep it. Most hold frames end here.
       const gPrev = this.synergy(h, fi, cs.open[0], -cs.curl[0], skip);
@@ -1001,7 +1019,7 @@ export class HandContact {
       }
       // Index on the trigger while firing (fire state = the trigger channel): its pad curls onto the trigger
       // blade (first touch), eased in/out; at rest it lies along the frame (baked).
-      if (firing && fi === 1) {
+      if (firing && fi === 1 && this.mode === 'full') {
         const pull = this.rig.triggerPull;
         const trig = this.col!.groups.find((g) => g.part === 'trigger') ?? null;
         let k = 0;

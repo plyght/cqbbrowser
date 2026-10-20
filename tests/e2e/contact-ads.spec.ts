@@ -74,6 +74,6 @@ test('ADS evidence sheets: first person + left + below/front, raw vs contact', a
         <img src="${b64(`${dir}/contact-ads-${w}-support.png`)}" width="1280">
       </body>`,
     );
-    await p2.screenshot({ path: `${dir}/contact-ads-${w}-v2.png`, fullPage: true });
+    await p2.screenshot({ path: `${dir}/contact-ads-${w}-v3.png`, fullPage: true });
   }
 });

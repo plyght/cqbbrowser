@@ -342,7 +342,12 @@ export class WeaponController implements System {
 
   private useRig(rig: ArmsRig) {
     this.rig = rig;
+    // Off by default until the procedural grips/handguards match the clips' hand envelope (README): opt in
+    // with ?handcontact=safe|full. `?contact` alone draws the proxies over the raw hands.
     this.contact = new HandContact(rig);
+    const hc = HandContact.urlMode();
+    this.contact.enabled = hc !== 'off';
+    if (hc !== 'off') this.contact.mode = hc;
     if (ContactOverlay.enabled()) this.contactOverlay = new ContactOverlay(this.ctx.scene);
     this.rigPending = false;
     this.view.visible = true;

@@ -3,8 +3,11 @@ import { Matrix4, Vector3 } from 'three';
 import { AUDIT_WEAPONS, auditWeapon, formatTable, loadHeadlessRig, measureHand, type ClipRow } from './audit';
 
 /**
- * Hand–weapon hard contact, headless: every clip of every weapon at 60 Hz on the real ArmsRig with the contact
- * layer (src/anim/contact). See README.md for the metric and the known gaps.
+ * Hand–weapon contact, headless: every clip of every weapon at 60 Hz on the real ArmsRig.
+ *
+ * What ships is `safe` mode (README): the guarantee here is that it is never worse than the raw clip — no
+ * weapon × clip gets deeper or more often penetrating, no intended contact lifts off — and it removes what it
+ * can (support hand, fingers). The `full` grip solve is audited and printed, not asserted (not shipped).
  */
 const rig = await loadHeadlessRig();
 const { buildModel } = await import('../../weapons/models');
@@ -12,55 +15,61 @@ const { HandContact } = await import('./HandContact');
 const { collect } = await import('./weaponCollision');
 const contact = new HandContact(rig);
 
-/** Clips where a hand holds the weapon throughout: the hard guarantee. */
-const HOLD = new Set(['idle', 'shoot', 'shootLast', 'swapOut', 'swapIn']);
+const raw: ClipRow[] = [];
+const safe: ClipRow[] = [];
+const key = (r: ClipRow) => `${r.weapon}.${r.clip}`;
 
-const rows: ClipRow[] = [];
-
-/**
- * KNOWN GAP (README): k47s — the firing thumb's thenar sits in the folded stock / receiver rear and no thumb
- * or gun motion clears it without taking the palm off the grip (5–11 mm). Excluded from the strict checks
- * below and reported in the audit table until the stock proxy / thumb pose is fixed.
- */
-const KNOWN = new Set(['k47s']);
-const strict = (r: ClipRow) => !KNOWN.has(r.weapon);
-
-describe('hand-weapon contact', () => {
-  test('audit runs every clip of every weapon', () => {
-    for (const w of AUDIT_WEAPONS)
-      rows.push(...auditWeapon(rig, contact, w, buildModel(w, { detailParts: true }), true));
-    console.log(formatTable(rows, 'contact audit (resolved)'));
-    expect(rows.length).toBe(AUDIT_WEAPONS.length * 9);
+describe('hand-weapon contact (safe mode)', () => {
+  test('audit raw and safe: every clip of every weapon', () => {
+    contact.mode = 'safe';
+    for (const w of AUDIT_WEAPONS) {
+      raw.push(...auditWeapon(rig, contact, w, buildModel(w, { detailParts: true }), false));
+      safe.push(...auditWeapon(rig, contact, w, buildModel(w, { detailParts: true }), true));
+    }
+    console.log(formatTable(raw, 'BEFORE (raw rig)'));
+    console.log(formatTable(safe, 'AFTER (contact, safe mode)'));
+    expect(safe.length).toBe(AUDIT_WEAPONS.length * 9);
   }, 300_000);
 
-  test('hold clips: no penetration > 2 mm, ≤ 0.5 % of frames > 1 mm', () => {
-    const bad = rows.filter((r) => strict(r) && HOLD.has(r.clip) && (r.max > 0.002 || r.over1 > 0.005));
-    for (const r of bad) console.log('FAIL', r.weapon, r.clip, (r.max * 1000).toFixed(1), r.pair);
+  test('never worse than raw: max penetration and frames > 2 mm, per weapon × clip', () => {
+    const r = new Map(raw.map((x) => [key(x), x]));
+    const bad: string[] = [];
+    for (const s of safe) {
+      const b = r.get(key(s))!;
+      if (s.max > b.max + 0.0005 || s.over2 > b.over2 + 0.005)
+        bad.push(`${key(s)} ${(b.max * 1000).toFixed(1)}→${(s.max * 1000).toFixed(1)} mm`);
+    }
+    if (bad.length) console.log('WORSE', bad.join(' | '));
     expect(bad).toEqual([]);
   });
 
-  test('reload / mag check / inspect: regression ceiling only (KNOWN GAP, see README)', () => {
-    for (const r of rows.filter((x) => strict(x) && !HOLD.has(x.clip))) {
-      expect(r.max).toBeLessThan(0.03);
-      expect(r.over2).toBeLessThan(0.5);
-    }
-    // kp9 inspect (was 25 % of frames > 2 mm) stays under 5 %.
-    expect(rows.find((r) => r.weapon === 'kp9' && r.clip === 'inspect')!.over2).toBeLessThan(0.05);
+  test('removes penetration: total depth over all clips drops', () => {
+    const sum = (a: ClipRow[]) => a.reduce((t, x) => t + x.max, 0);
+    console.log(
+      'sum of max penetration mm raw',
+      (sum(raw) * 1000).toFixed(0),
+      'safe',
+      (sum(safe) * 1000).toFixed(0),
+    );
+    expect(sum(safe)).toBeLessThan(sum(raw) * 0.9);
   });
 
-  test('intended contacts at idle: support hand on the gun, firing palm on the backstrap (≤ 3 mm)', () => {
-    for (const r of rows.filter((x) => x.clip === 'idle')) {
-      // sb16 support hand sits 3.8 mm off its handguard (KNOWN GAP): ceiling 4 mm.
-      if (r.supportGap !== undefined) expect(r.supportGap).toBeLessThanOrEqual(0.004);
-      expect(r.palmGap!).toBeLessThanOrEqual(r.weapon === 'k47s' ? 0.006 : 0.003);
+  test('no intended contact lifts off at idle (palm, fingers, palm ≤ raw + 3 mm; a finger opened or a hand backed off to clear its deepest point ≤ raw + 5 mm)', () => {
+    const r = new Map(raw.map((x) => [key(x), x]));
+    for (const s of safe.filter((x) => x.clip === 'idle')) {
+      const b = r.get(key(s))!;
+      expect(s.palmGap!).toBeLessThanOrEqual(Math.max(0, b.palmGap!) + 0.003);
+      s.fingerGaps!.forEach((g, i) => expect(g).toBeLessThanOrEqual(Math.max(0, b.fingerGaps![i]) + 0.005));
+      if (s.supportGap !== undefined)
+        expect(s.supportGap).toBeLessThanOrEqual(Math.max(0, b.supportGap!) + 0.005);
     }
   });
 
-  test('ADS transition (hip → ADS → hip, 10 steps): hand-gun and hand-hand ≤ 2 mm every step', () => {
+  test('ADS transition (hip → ADS → hip, 10 steps): never worse than raw', () => {
     // ADS moves only the rig root (the handling layer): sample the transition as root motion over the idle hold.
     const hip = new Vector3(0.02, -0.03, 0.02),
       ads = new Vector3(-0.09, 0.05, 0.06);
-    for (const w of AUDIT_WEAPONS.filter((x) => !KNOWN.has(x))) {
+    for (const w of AUDIT_WEAPONS) {
       rig.attachWeapon(buildModel(w, { detailParts: true }), w);
       rig.play('idle', { fade: 0 });
       for (let i = 0; i <= 10; i++) {
@@ -68,61 +77,51 @@ describe('hand-weapon contact', () => {
         rig.root.position.lerpVectors(hip, ads, k * k * (3 - 2 * k));
         rig.root.rotation.set(0.02 * k, -0.03 * k, 0.05 * k);
         rig.root.updateMatrixWorld(true);
-        for (let f = 0; f < 3; f++) {
-          rig.update(1 / 60);
-          contact.apply(1 / 60);
-        }
+        rig.update(1 / 60);
         contact.sync();
-        for (const side of ['R', 'L'] as const) {
-          const m = measureHand(contact, contact.hands[side].proxy);
-          if (m.pen > 0.002) console.log('ADS', w, i, side, (m.pen * 1000).toFixed(1), m.pair);
-          expect(m.pen).toBeLessThanOrEqual(0.002);
-        }
+        const before = ['R', 'L'].map((s) => measureHand(contact, contact.hands[s as 'R'].proxy).pen);
+        contact.apply(1 / 60);
+        contact.sync();
+        ['R', 'L'].forEach((s, j) =>
+          expect(measureHand(contact, contact.hands[s as 'R'].proxy).pen).toBeLessThanOrEqual(
+            Math.max(0, before[j]) + 0.0005,
+          ),
+        );
       }
       rig.root.position.set(0, 0, 0);
       rig.root.rotation.set(0, 0, 0);
     }
   });
 
-  test('wrap: firing palm, ring and pinky pads within 3 mm of the grip at idle (middle ≤ 8 mm, p17 ring 3.5 / pinky 7.5 mm: KNOWN GAPS)', () => {
-    const bad: string[] = [];
-    for (const r of rows.filter((x) => strict(x) && x.clip === 'idle')) {
-      const g = [r.palmGap!, r.fingerGaps![3], r.fingerGaps![4]];
-      // p17 pinky rides the mag base plate's edge (~7 mm): same ceiling as the middle finger.
-      const lim = [0.003, r.weapon === 'p17' ? 0.0035 : 0.003, r.weapon === 'p17' ? 0.0075 : 0.003];
-      const middle = r.fingerGaps![2];
-      if (g.some((x, i) => x > lim[i]) || middle > 0.008)
-        bad.push(
-          `${r.weapon} palm/R/P ${g.map((x) => (x * 1000).toFixed(1)).join('/')} M ${(middle * 1000).toFixed(1)}`,
-        );
-    }
-    if (bad.length) console.log('WRAP', bad.join(' | '));
-    expect(bad).toEqual([]);
-  });
-
   test('perf: mean solver cost per frame (headless bun) stays bounded', () => {
-    const ms = rows.reduce((a, r) => a + (r.ms ?? 0), 0) / rows.length;
-    console.log('mean contact ms/frame', ms.toFixed(3));
-    expect(ms).toBeLessThan(5);
+    const ms = safe.reduce((a, r) => a + (r.ms ?? 0), 0) / safe.length;
+    console.log('mean contact ms/frame (safe)', ms.toFixed(3));
+    expect(ms).toBeLessThan(2);
   });
 
-  test(
-    'weapon proxies hug the meshes: ≤ 0.5 % of surface samples outside by > 2 mm',
-    { timeout: 120_000 },
-    () => {
-      for (const w of AUDIT_WEAPONS) {
-        const m = buildModel(w, { detailParts: true });
-        rig.attachWeapon(m, w);
-        rig.update(0);
-        contact.sync();
-        const pts = { p: [] as number[] };
-        collect(m.root, new Matrix4().copy(m.root.matrixWorld).invert(), () => false, pts, 0.01);
-        const v = new Vector3();
-        let out = 0;
-        for (let i = 0; i < pts.p.length; i += 3)
-          if (contact.col!.sdf(v.set(pts.p[i], pts.p[i + 1], pts.p[i + 2])) > 0.002) out++;
-        expect(out / (pts.p.length / 3)).toBeLessThan(0.005);
-      }
-    },
-  );
+  test('full grip solve (not shipped): audited and printed', () => {
+    contact.mode = 'full';
+    const full: ClipRow[] = [];
+    for (const w of AUDIT_WEAPONS)
+      full.push(...auditWeapon(rig, contact, w, buildModel(w, { detailParts: true }), true));
+    console.log(formatTable(full, 'AFTER (contact, full mode — not shipped)'));
+    contact.mode = 'safe';
+    expect(full.length).toBe(AUDIT_WEAPONS.length * 9);
+  }, 300_000);
+
+  test('weapon proxies hug the meshes: ≤ 0.5 % of surface samples outside by > 2 mm', () => {
+    for (const w of AUDIT_WEAPONS) {
+      const m = buildModel(w, { detailParts: true });
+      rig.attachWeapon(m, w);
+      rig.update(0);
+      contact.sync();
+      const pts = { p: [] as number[] };
+      collect(m.root, new Matrix4().copy(m.root.matrixWorld).invert(), () => false, pts, 0.01);
+      const v = new Vector3();
+      let out = 0;
+      for (let i = 0; i < pts.p.length; i += 3)
+        if (contact.col!.sdf(v.set(pts.p[i], pts.p[i + 1], pts.p[i + 2])) > 0.002) out++;
+      expect(out / (pts.p.length / 3)).toBeLessThan(0.005);
+    }
+  }, 120_000);
 });

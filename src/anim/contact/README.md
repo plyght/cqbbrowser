@@ -1,5 +1,29 @@
 # Hand–weapon hard contact (ArmsRig)
 
+## Status
+
+**Off in game by default.** Opt in with `?handcontact=safe` or `?handcontact=full`. `?contact` draws the
+proxies over the raw hands.
+
+Root cause of the sinking: our procedural grips are far bigger than the guns the clips were authored on.
+
+- The firing palm centre sits on the right grip panel, 15–18 mm right of the grip centre. Its 16 mm
+  half-thickness then sinks about 11 mm into our grip.
+- The grip proxies measure k47s 28×54 mm, sb16 26×57, hb300 29×61, kp9 31×73 and p17 31×64. That is a
+  159–202 mm circumference.
+- The source AK-74U grip, measured on its mesh with horizontal slices so the figures are approximate, is about
+  24 mm wide and 25–27 mm deep, roughly 95 mm around.
+
+Any solve that seats the hand on our grips therefore has to move the hand ~1 cm sideways or open the fingers a
+lot, and both read worse than the raw sinking.
+
+- `safe` mode: no seat, no gun yield, finger opening only, support-hand IK depenetration. It is
+  never worse than raw by the numbers (CI), but the opened fingers and the dropped support hand look worse.
+- `full` mode: the grip seat and gun yield move the hand off-centre on these grips.
+
+The fix is at the source: bring the grip and handguard meshes into the clips' envelope (see the coordinator
+note), then turn this layer on.
+
 The authored rig hands (`src/anim/rig`) were made around the source packs' guns. On our procedural guns they sink
 into grips, handguards, magwells and mags by up to ~3 cm. This layer measures that against collision proxies
 and blocks it. It runs every frame after `ArmsRig.update` and the arm layers, before rendering
