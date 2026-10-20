@@ -172,7 +172,8 @@ def export_family(fam, extra_materials=None):
         export_extras=False, export_attributes=False,
     )
     dst = os.path.join(OUT, f"{fam}.glb")
-    subprocess.run(["bunx", "--bun", "gltfpack", "-i", raw, "-o", dst, "-cc", "-kn", "-km", "-noq"],
+    # -kv: the materials carry no textures (the runtime binds the atlases), so without it gltfpack drops TEXCOORD_0
+    subprocess.run(["bunx", "--bun", "gltfpack", "-i", raw, "-o", dst, "-cc", "-kn", "-km", "-kv", "-noq"],
                    check=True, cwd=ROOT, stdout=subprocess.DEVNULL)
     FAMILIES[fam]["glb"] = f"assets/models/weapons/{fam}.glb"
     FAMILIES[fam]["bytes"] = os.path.getsize(dst)

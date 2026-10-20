@@ -223,14 +223,14 @@
     ]
    },
    "frame": {
-    "boltFaceZ": -0.00711,
+    "boltFaceZ": -0.0071099999999999774,
     "ironRear": {
      "y": 0.04457,
-     "z": 0.05381
+     "z": 0.053810000000000004
     },
     "railBottomY": 0.00627,
     "railY": 0.04181,
-    "receiverFrontZ": -0.12091,
+    "receiverFrontZ": -0.12090999999999998,
     "receiverRearZ": 0.06424
    },
    "gripAngle": 22.0,
@@ -414,7 +414,7 @@
  },
  "families": {
   "acc": {
-   "bytes": 315608,
+   "bytes": 547316,
    "glb": "assets/models/weapons/acc.glb",
    "materials": {
     "kit_acc": {
@@ -427,7 +427,7 @@
    }
   },
   "ar": {
-   "bytes": 1848000,
+   "bytes": 3127652,
    "glb": "assets/models/weapons/ar.glb",
    "materials": {
     "kit_ar": {
@@ -441,12 +441,13 @@
      "kind": "source",
      "map": "assets/models/weapons/m4cc0_c.webp",
      "normal": "assets/models/weapons/m4cc0_n.webp",
-     "orm": "assets/models/weapons/m4cc0_orm.webp"
+     "orm": "assets/models/weapons/m4cc0_orm.webp",
+     "recolor": true
     }
    }
   },
   "k47": {
-   "bytes": 808720,
+   "bytes": 1202980,
    "glb": "assets/models/weapons/k47.glb",
    "materials": {
     "Krinkov": {
@@ -474,7 +475,7 @@
    }
   },
   "kp9": {
-   "bytes": 544424,
+   "bytes": 856772,
    "glb": "assets/models/weapons/kp9.glb",
    "materials": {
     "kit_kp9": {
@@ -487,7 +488,7 @@
    }
   },
   "p17": {
-   "bytes": 377356,
+   "bytes": 618848,
    "glb": "assets/models/weapons/p17.glb",
    "materials": {
     "kit_p17": {
@@ -500,7 +501,7 @@
    }
   },
   "p92": {
-   "bytes": 136612,
+   "bytes": 179468,
    "glb": "assets/models/weapons/p92.glb",
    "materials": {
     "beretta": {
@@ -5219,42 +5220,6 @@
     }
    ],
    "tris": 748
-  },
-  "p17_rmr": {
-   "bounds": [
-    [
-     -0.013,
-     0.04031,
-     -0.04688
-    ],
-    [
-     0.013,
-     0.06631,
-     -0.00188
-    ]
-   ],
-   "family": "p17",
-   "pivot": [
-    0.0,
-    0.0,
-    -0.0
-   ],
-   "proxies": [
-    {
-     "c": [
-      0.0,
-      0.05331,
-      -0.02438
-     ],
-     "h": [
-      0.013,
-      0.013,
-      0.0225
-     ],
-     "type": "box"
-    }
-   ],
-   "tris": 496
   },
   "p17_slide": {
    "bounds": [
