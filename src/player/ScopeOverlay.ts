@@ -8,6 +8,7 @@ import {
   type PerspectiveCamera,
   type Scene,
 } from 'three';
+import { RETICLE_RED, reticleMaterial } from '../render/reticle';
 
 /**
  * Eyepiece picture for tube optics (LPVO, magnifier). The optic models are solid, so at ADS the camera's near
@@ -32,12 +33,11 @@ export class ScopeOverlay {
     depthTest: false,
     depthWrite: false,
   });
-  private dotMat = new MeshBasicMaterial({
-    color: new Color(3.5, 0.3, 0.12),
+  // Illuminated centre dot: exposure-locked (a fixed HDR value bloomed into a blob in the dark / under NVG).
+  private dotMat = reticleMaterial(RETICLE_RED.clone(), {
     transparent: true,
     depthTest: false,
     depthWrite: false,
-    toneMapped: false,
   });
 
   constructor(scene: Scene) {
@@ -58,7 +58,8 @@ export class ScopeOverlay {
     bar(0.7, 0.006, -0.6, 0);
     bar(0.002, 0.5, 0, 0);
     bar(0.5, 0.002, 0, 0);
-    const dot = new Mesh(new RingGeometry(0, 0.012, 20), this.dotMat);
+    // ~0.5 MOA-class illuminated dot (floored at ~3 px at 720p: the true size is well under a pixel).
+    const dot = new Mesh(new RingGeometry(0, 0.006, 20), this.dotMat);
     dot.renderOrder = 1003;
     this.reticle.add(dot);
     this.root.add(this.reticle);
@@ -81,10 +82,13 @@ export class ScopeOverlay {
     this.retMat.opacity = a * 0.95;
     this.dotMat.opacity = a;
     this.reticle.visible = reticle;
-    const halfH = Math.tan((cam.fov * Math.PI) / 360) * DIST;
+    // Past the near plane: through a scope it is pushed out beyond the muzzle (~0.5–0.7 m), which used to clip
+    // the whole eyepiece picture (no ring, no reticle).
+    const dist = Math.max(DIST, cam.near * 1.5);
+    const halfH = Math.tan((cam.fov * Math.PI) / 360) * dist;
     this.root.position.copy(cam.position);
     this.root.quaternion.copy(cam.quaternion);
-    this.root.translateZ(-DIST);
+    this.root.translateZ(-dist);
     this.root.scale.setScalar(halfH * pupil);
     this.root.updateMatrixWorld(true);
   }

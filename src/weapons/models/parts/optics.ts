@@ -4,6 +4,24 @@ import type { ForegripPart, LightPart, OpticPart, SlingPart } from '../../attach
 import type { Ctx } from '../core';
 import { boxZ, Collector, cylZ, lathe, profile, rbox, shape, sweep, xform, type P2 } from '../geom';
 
+/**
+ * Reticle sizes (m, physical, at each sight's ADS eye distance; must match tools/blender/weapons/kit/fam_acc.py).
+ * At 720p and the 75° ADS view one pixel is ~2.1 mrad (~7 MOA), so true 1–4 MOA dots are a fraction of a pixel:
+ * dots are floored at a few px keeping the real ordering (holo 1 MOA < micro 2 MOA < RMR 3.25 MOA), the holo ring
+ * is the real 65 MOA (eye ~0.154 m from the holo's reticle plane).
+ */
+export const RETICLE = {
+  /** Micro dot (eye ~0.128 m): ~2.5 px. */
+  microDot: 0.00036,
+  /** Holo: 65 MOA ring (inner/outer radius, ~1.3 px line) and centre dot (~1.7 px). */
+  holoRing: [0.00128, 0.00162] as const,
+  holoDot: 0.00028,
+  /** Pistol RMR (eye ~0.45 m): ~3 px. */
+  pistolDot: 0.0014,
+  /** 45° offset RMR on a rifle (eye ~0.115 m): ~3 px. */
+  offsetDot: 0.00037,
+};
+
 /** Rail clamp block common to all rail mounts. */
 function clamp(c: Ctx, col: Collector, z0: number, z1: number, railY: number, w = 0.026) {
   col.add(boxZ(w, 0.011, z0, z1, 0, railY - 0.0035, 0.0018), c.M.finish.black);
@@ -75,7 +93,8 @@ export function redDot(c: Ctx, p: Placement, col: Collector = c.s) {
   );
   col.add(cylZ(ri, zb1 + 0.0028, zb1 + 0.0018, p.axisY, 0, 20), M.lensCoat);
   col.add(cylZ(ri, zb0 - 0.001, zb0 - 0.0018, p.axisY, 0, 20), M.glass);
-  col.add(rbox(0.0011, 0.0011, 0.0004, 0, p.axisY, zb1 + 0.004, 0), M.reticle);
+  // 2 MOA-class dot, floored at ~2.5 px at 720p / ADS (the true 2 MOA is a fraction of a pixel).
+  col.add(cylZ(RETICLE.microDot, zb1 + 0.0042, zb1 + 0.0038, p.axisY, 0, 16), M.reticle);
 }
 
 // ------------------------------------------------------------------ holographic
@@ -110,10 +129,13 @@ export function holo(c: Ctx, p: Placement, col: Collector = c.s) {
   // Windows (front coated, rear clear) and reticle (65 MOA ring + dot).
   col.add(rbox(0.039, 0.029, 0.0012, 0, p.axisY + 0.001, p.z1 + 0.006, 0), M.lensCoat);
   col.add(rbox(0.039, 0.028, 0.0012, 0, p.axisY + 0.001, za - 0.002, 0), M.glass);
-  const ring = new RingGeometry(0.0052, 0.0058, 28);
+  const ring = new RingGeometry(RETICLE.holoRing[0], RETICLE.holoRing[1], 40);
   ring.translate(0, p.axisY, (za + p.z1) / 2);
   col.add(ring, M.reticle);
-  col.add(rbox(0.0009, 0.0009, 0.0003, 0, p.axisY, (za + p.z1) / 2, 0), M.reticle);
+  col.add(
+    cylZ(RETICLE.holoDot, (za + p.z1) / 2 + 0.0002, (za + p.z1) / 2 - 0.0002, p.axisY, 0, 12),
+    M.reticle,
+  );
   // QD levers on the left.
   for (const z of [p.z0 - 0.02, p.z1 + 0.02])
     col.add(rbox(0.003, 0.007, 0.018, -0.0235, rail - 0.002, z, 0.001), M.phosphate);
@@ -237,12 +259,12 @@ export function magnifier(c: Ctx, p: Placement) {
 // ------------------------------------------------------------------ RMR-style dot (pistol + 45° offset)
 
 /** RMR housing with its base on y = baseY, footprint z0 → z1. */
-export function rmr(c: Ctx, col: Collector, z0: number, z1: number, baseY: number) {
+export function rmr(c: Ctx, col: Collector, z0: number, z1: number, baseY: number, dotR = RETICLE.pistolDot) {
   const { M } = c;
   const fin = M.finish.black;
   const len = z0 - z1;
   col.add(boxZ(0.026, 0.008, z0, z1, 0, baseY + 0.004, 0.0018), fin);
-  col.add(boxZ(0.019, 0.009, z0, z0 - len * 0.32, 0, baseY + 0.011, 0.003), fin);
+  col.add(boxZ(0.019, 0.0062, z0, z0 - len * 0.32, 0, baseY + 0.0096, 0.0025), fin);
   const zf = z1 + 0.0145;
   const hoop = shape(
     [
@@ -268,7 +290,7 @@ export function rmr(c: Ctx, col: Collector, z0: number, z1: number, baseY: numbe
     }),
     M.lensCoat,
   );
-  col.add(rbox(0.0008, 0.0008, 0.0003, 0, baseY + 0.0155, zf - 0.004, 0), M.reticle);
+  col.add(cylZ(dotR, zf - 0.0038, zf - 0.0042, baseY + 0.0155, 0, 16), M.reticle);
 }
 
 export function offsetDot(c: Ctx, p: Placement & { side: 'left' | 'right' }) {
@@ -276,7 +298,7 @@ export function offsetDot(c: Ctx, p: Placement & { side: 'left' | 'right' }) {
   const s = p.side === 'right' ? 1 : -1;
   // Local frame: origin at rail centre, +y = out along the 45° line.
   tmp.add(boxZ(0.02, 0.022, p.z0, p.z1, 0, 0.012, 0.0025), c.M.finish.black);
-  rmr(c, tmp, p.z0 + 0.008, p.z1 - 0.008, 0.024);
+  rmr(c, tmp, p.z0 + 0.008, p.z1 - 0.008, 0.024, RETICLE.offsetDot);
   const m = new Matrix4().makeRotationZ((-s * Math.PI) / 4);
   m.setPosition(0, p.railY - 0.005, 0);
   tmp.drain(c.s, m);
