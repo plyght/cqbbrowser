@@ -224,12 +224,13 @@ def build():
     kit.node(pdwh, FAM)
 
     # ------------------------------------------------------------------ grips: lofted rounded sections
-    # Sections perpendicular to the grip axis on the procedural grip seat (profiles/sb16_gripseat.json: where the
+    # Sections perpendicular to the grip axis on the procedural grip seat (profiles/<w>_gripseat.json: where the
     # authored hand clips hold the grip; centreline and angle kept), thinned to the hand envelope (≤ 43 mm deep,
     # 25-28 mm wide), A2 finger nub on the front strap, superellipse cross-section (the ergo grip is fuller).
-    gp, seat_ang = seat_outline("sb16")
-    for gid, w, n_se, ang, swell, nub in (("ar_grip_a2", 0.0258, 2.5, seat_ang, 0.0, 0.0028),
-                                          ("ar_grip_ergo", 0.0275, 2.2, seat_ang, 0.0012, 0.0)):
+    # Each grip on its own procedural seat: the A2 on the SB-16's, the ergo on the HB-300's (its default grip).
+    for gid, seat, w, n_se, swell, nub in (("ar_grip_a2", "sb16", 0.0258, 2.5, 0.0, 0.0028),
+                                           ("ar_grip_ergo", "hb300", 0.0275, 2.2, 0.0012, 0.0)):
+        gp, ang = seat_outline(seat)
         rings = seat_rings(gp, ang, w, n_se, swell, nub)
         g = lib.loft(gid, rings, mat="polyGrip")
         node = join(gid, [g])
@@ -436,7 +437,7 @@ def build():
     nose = lathe("nose", [(R * 1.04, -L + 0.004), (R * 1.04, -L), (R * 0.92, -L - 0.008), (R * 0.7, -L - 0.013),
                           (0.0062, -L - 0.0145), (0.006, -L - 0.01), (0, -L - 0.01)], 32, B, 0, "anod", 0.0005)
     hb = join("hb_hg_int", parts + [nose])
-    kit.node(hb, FAM, sockets={"muzzle": (0, B, RECV_FRONT - 0.001 - L - 0.0145)},
+    kit.node(hb, FAM, sockets={"muzzle": (0, B, -0.001 - L - 0.0145)},  # anchor hgRear (node-local)
              proxies=[dict(type="capsule", a=[0, B, 0], b=[0, B, -L - 0.014], r=0.022)])
     kit.part("hb_hg_int", kit.entry("hb_hg_int", anchor="hgRear"))
     can = cyl("hb_can", 0.0165, -0.12, -0.41, B, 0, 20, "can", 0.0005)
@@ -444,7 +445,6 @@ def build():
     kit.part("hb_can_int", kit.entry("hb_can_int"))
     for gid in ("ar_grip_vert",):
         kit.part(gid, kit.entry("ar_grip_ergo"))
-    print("[ar] grip bbox", gz0, gz1, gy0, gy1)
     # CC0 M4A1 base mesh for the receivers, A2 grip, carbine stock, 30-rd mags, birdcage and moving parts.
     from . import m4cc0
 
