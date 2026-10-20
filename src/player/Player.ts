@@ -52,6 +52,8 @@ export const cameraSettings = settings.ns('camera', {
   mount: 'chest' as CameraMount,
   /** Removes roll only. */
   stableHorizon: false,
+  /** The support hand straightens a knocked mount at the next idle moment (manual fix-cam always works). */
+  autoFixCam: true,
 });
 
 /** Chest cam: on the plate carrier, left of centre, just in front of the plate bag (torso-local). */

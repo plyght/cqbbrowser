@@ -2,7 +2,7 @@ import { Euler, Group, Matrix4, type Mesh, Object3D, Quaternion, Vector3 } from 
 import type { Context, System } from '../core/Context';
 import { Spring, clamp, damp, noise1, rng } from '../core/math';
 import { ReloadGesture } from '../input/ReloadGesture';
-import { CHEST_MOUNT, type Player } from '../player/Player';
+import { cameraSettings, CHEST_MOUNT, type Player } from '../player/Player';
 import { ScopeOverlay } from '../player/ScopeOverlay';
 import { settings } from '../settings/Settings';
 import { CFG, type ClassCfg, type Hold } from '../anim/holds';
@@ -1352,7 +1352,13 @@ export class WeaponController implements System {
   private maybeFixCam(manual: boolean, _dt: number) {
     const p = this.player;
     if (this.beats.active || this.switching) return;
-    const auto = p.knock > 0.035 && this.idleTime > 1.2 && !p.aiming && p.speed < 2.5 && this.sinceShot > 1.5;
+    const auto =
+      cameraSettings.get().autoFixCam &&
+      p.knock > 0.035 &&
+      this.idleTime > 1.2 &&
+      !p.aiming &&
+      p.speed < 2.5 &&
+      this.sinceShot > 1.5;
     if (!(manual || auto)) return;
     if (this.rig) {
       // Rig: the support hand reaches the mount through the IK layer (rigArmLayer), straightens it, lets go.
