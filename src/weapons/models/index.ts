@@ -20,6 +20,7 @@ import type {
 } from '../attachments/types';
 import { Ctx, type BuildOptions, type PartName, type SocketName } from './core';
 import { triangles } from './geom';
+import { assembleKit, kitCollision, kitResolve } from './kit';
 import { buildAK } from './parts/ak';
 import { buildAR } from './parts/ar';
 import { buildGlock } from './parts/glock';
@@ -38,6 +39,7 @@ import {
 
 export type { BuildOptions, PartName, SocketName } from './core';
 export { setWeaponEnvMap, weaponMaterials } from './materials';
+export { KIT, kitProxies, preloadWeaponAssets, weaponAssetsReady } from './kit';
 
 export interface SightLine {
   mode: AimMode;
@@ -100,7 +102,14 @@ export type CollisionProxy =
       r: number;
     };
 
-const LEGACY: Record<string, WeaponId> = { ar: 'sb16', pdw: 'hb300', ak: 'k47s', pistol: 'p17', smg: 'kp9' };
+const LEGACY: Record<string, WeaponId> = {
+  ar: 'sb16',
+  pdw: 'hb300',
+  ak: 'k47s',
+  pistol: 'p17',
+  smg: 'kp9',
+  beretta: 'p92',
+};
 
 /** Resolve a model key: weapon id, preset id, legacy key, or `build:{json}` (from `applyBuild`). */
 export function buildFromKey(key: string): WeaponBuild {
@@ -119,7 +128,7 @@ export function buildModelFromBuild(build: WeaponBuild, opts: BuildOptions = {})
   const errors = validateBuild(build);
   if (errors.length)
     throw new Error(`invalid ${build.weapon} build: ${errors.map((e) => e.message).join('; ')}`);
-  const r = resolveBuild(build);
+  const r = kitResolve(resolveBuild(build));
   const l = layoutBuild(r);
   const c = new Ctx(r, l, opts);
   const pd = r.platform;
@@ -182,6 +191,10 @@ export function buildModelFromBuild(build: WeaponBuild, opts: BuildOptions = {})
     return { mode, node: o };
   });
 
+  // Blender parts kit (when preloaded and every part of the build has an asset).
+  const kit = assembleKit(c, root, parts, sockets, !!opts.detailParts);
+  if (kit) for (const [k, v] of parts) partsRec[k] = v;
+
   let drawCalls = 0,
     tris = 0;
   root.traverse((o) => {
@@ -209,6 +222,7 @@ export function buildModelFromBuild(build: WeaponBuild, opts: BuildOptions = {})
     length: stats.length,
     massKg: stats.mass,
     stats: { drawCalls, triangles: tris },
+    collision: kit ? kitCollision(root, partsRec) : undefined,
     dispose() {
       root.traverse((o) => {
         const m = o as Mesh;

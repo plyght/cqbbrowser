@@ -3,7 +3,7 @@
  * so the catalog, validation and stat math are unit-testable and usable from menus/loadout code.
  */
 
-export type WeaponId = 'sb16' | 'hb300' | 'k47s' | 'kp9' | 'p17';
+export type WeaponId = 'sb16' | 'hb300' | 'k47s' | 'kp9' | 'p17' | 'p92';
 export type Platform = 'ar' | 'ak' | 'mp5' | 'glock';
 
 export type SlotId =

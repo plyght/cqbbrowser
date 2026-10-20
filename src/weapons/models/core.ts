@@ -17,7 +17,8 @@ export type PartName =
   | 'safety'
   | 'stock'
   | 'magnifier'
-  | 'dustCover';
+  | 'dustCover'
+  | 'hammer';
 
 export type SocketName =
   | 'muzzle'

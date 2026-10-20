@@ -83,8 +83,8 @@ export const PLATFORMS: Record<WeaponId, PlatformDef> = {
       boltFaceZ: -0.08,
       receiverFrontZ: -0.105,
       receiverRearZ: 0.085,
-      receiverRail: { z0: 0.068, z1: -0.104, y: 0.061 },
-      railY: 0.061,
+      receiverRail: { z0: 0.068, z1: -0.104, y: 0.0575 },
+      railY: 0.0575,
       magwellZ: -0.064,
       magTopY: -0.014,
       ironRear: { z: 0.05, y: 0.096 },
@@ -138,8 +138,8 @@ export const PLATFORMS: Record<WeaponId, PlatformDef> = {
       boltFaceZ: -0.08,
       receiverFrontZ: -0.105,
       receiverRearZ: 0.085,
-      receiverRail: { z0: 0.068, z1: -0.104, y: 0.061 },
-      railY: 0.061,
+      receiverRail: { z0: 0.068, z1: -0.104, y: 0.0575 },
+      railY: 0.0575,
       magwellZ: -0.064,
       magTopY: -0.014,
       ironRear: { z: 0.05, y: 0.096 },
@@ -240,7 +240,8 @@ export const PLATFORMS: Record<WeaponId, PlatformDef> = {
       railY: 0.092,
       magwellZ: -0.052,
       magTopY: -0.006,
-      ironRear: { z: 0.055, y: 0.086 },
+      // Rear drum aperture of the photo-traced KP-9 kit model (tools/blender/weapons/profiles/kp9.json).
+      ironRear: { z: 0.008, y: 0.0801 },
     },
   },
   p17: {
@@ -263,14 +264,48 @@ export const PLATFORMS: Record<WeaponId, PlatformDef> = {
     provides: ['irons', 'pistolRail'],
     baseAds: 0.17,
     roundMass: 0.0118,
+    // Measured on the photo-traced P-17 kit model (tools/blender/weapons/profiles/p17.json).
     frame: {
-      boltFaceZ: -0.044,
-      receiverFrontZ: -0.158,
-      receiverRearZ: 0.028,
-      railY: 0.047,
+      boltFaceZ: -0.057,
+      receiverFrontZ: -0.171,
+      receiverRearZ: 0.0142,
+      railY: 0.0418,
       magwellZ: 0.022,
       magTopY: 0.012,
-      ironRear: { z: 0.02, y: 0.053 },
+      ironRear: { z: 0.004, y: 0.0446 },
+    },
+  },
+  /**
+   * Beretta-pattern 9 mm sidearm. The model is the CC-BY BURNER Beretta (tools/blender/weapons/kit/fam_p92.py); frame
+   * numbers are measured on it in the kit frame (the source is a little under life size; stats use real specs).
+   */
+  p92: {
+    weapon: 'p92',
+    platform: 'glock',
+    name: 'P-92',
+    caliber: '9mm',
+    slots: ['slide', 'barrel', 'muzzle', 'optic', 'light', 'magazine'],
+    defaults: {
+      slide: 'p92_slide',
+      barrel: 'p92_b_std',
+      muzzle: 'p92_bare',
+      optic: 'p92_irons',
+      light: 'light_none',
+      magazine: 'p92_mag15',
+    },
+    baseMass: 0.62,
+    baseComZ: -0.005,
+    provides: ['irons'],
+    baseAds: 0.18,
+    roundMass: 0.0118,
+    frame: {
+      boltFaceZ: 0.0444,
+      receiverFrontZ: -0.0844,
+      receiverRearZ: 0.0863,
+      railY: 0.0367,
+      magwellZ: 0.0604,
+      magTopY: 0.0,
+      ironRear: { z: 0.0722, y: 0.0407 },
     },
   },
 };
@@ -960,7 +995,7 @@ const mounts: MountPart[] = [
     fits: ['kp9'],
     mass: 0.12,
     style: 'claw',
-    rail: { z0: 0.045, z1: -0.09, y: 0.094 },
+    rail: { z0: 0.0, z1: -0.135, y: 0.094 },
     provides: ['topRail', 'topRailReceiver'],
   },
 ];
@@ -1374,7 +1409,7 @@ const optics: OpticPart[] = [
 ];
 
 const lights: LightPart[] = [
-  { id: 'light_none', slot: 'light', name: 'None', fits: [...RIFLES, 'p17'], mass: 0, style: 'none' },
+  { id: 'light_none', slot: 'light', name: 'None', fits: [...RIFLES, 'p17', 'p92'], mass: 0, style: 'none' },
   {
     id: 'light_scout',
     slot: 'light',
@@ -1607,6 +1642,47 @@ const slings: SlingPart[] = [
   },
 ];
 
+/** P-92 (Beretta-pattern) parts: the factory configuration of the source model. */
+const p92Parts: PartDef[] = [
+  { id: 'p92_slide', slot: 'slide', name: 'Open-top slide', fits: ['p92'], mass: 0, rmrCut: false },
+  { id: 'p92_b_std', slot: 'barrel', name: '4.9" barrel', fits: ['p92'], mass: 0.12, length: 4.9 * IN },
+  {
+    id: 'p92_bare',
+    slot: 'muzzle',
+    name: 'None',
+    fits: ['p92'],
+    mass: 0,
+    kind: 'bare',
+    length: 0,
+    radius: 0.007,
+    flash: 1,
+    report: 1,
+  },
+  {
+    id: 'p92_irons',
+    slot: 'optic',
+    name: 'Factory irons',
+    fits: ['p92'],
+    mass: 0,
+    kind: 'irons',
+    footprint: 0,
+    axisOverRail: 0,
+    magnification: [1, 1],
+    eyeRelief: 0.55,
+    bodyLength: 0,
+  },
+  {
+    id: 'p92_mag15',
+    slot: 'magazine',
+    name: '15-rd steel',
+    fits: ['p92'],
+    mass: 0.1,
+    capacity: 15,
+    material: 'steel',
+    drop: 0,
+  },
+];
+
 export const PARTS: PartDef[] = [
   ...finishes,
   ...barrels,
@@ -1622,6 +1698,7 @@ export const PARTS: PartDef[] = [
   ...lights,
   ...mags,
   ...slings,
+  ...p92Parts,
 ];
 
 export const PART_BY_ID: Record<string, PartDef> = Object.fromEntries(PARTS.map((p) => [p.id, p]));

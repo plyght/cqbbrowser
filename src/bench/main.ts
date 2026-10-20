@@ -31,7 +31,12 @@ import {
   type WeaponBuild,
   type WeaponId,
 } from '../weapons/attachments';
-import { buildModelFromBuild, setWeaponEnvMap, type WeaponModel } from '../weapons/models';
+import {
+  buildModelFromBuild,
+  preloadWeaponAssets,
+  setWeaponEnvMap,
+  type WeaponModel,
+} from '../weapons/models';
 
 /**
  * Weapon bench (dev page, later the loadout bench): orbit a configured weapon, toggle every slot,
@@ -325,4 +330,11 @@ if (caption) document.body.append(el('div', { id: 'caption', textContent: captio
     return model?.stats;
   },
 };
-document.body.dataset.ready = '1';
+// Blender parts kit: rebuild once the GLBs are in (`?kit=0` keeps the procedural models).
+(q.get('kit') === '0'
+  ? Promise.resolve()
+  : preloadWeaponAssets().catch((e) => console.warn('weapon kit', e))
+).finally(() => {
+  rebuild(true);
+  document.body.dataset.ready = '1';
+});
