@@ -230,9 +230,10 @@ export class Player implements System {
     this.yaw -= f.look.yaw;
     this.pitch = clamp(this.pitch + f.look.pitch + this.applyViewRecoil(dt), -1.45, 1.45);
 
-    const leanTarget =
+    let leanTarget =
       clamp((f.down.has('leanRight') ? 1 : 0) - (f.down.has('leanLeft') ? 1 : 0) + f.leanAxis, -1, 1) *
       (this.sprinting ? 0 : 1);
+    leanTarget *= this.leanRoom(Math.sign(leanTarget || this.lean));
     this.lean += (leanTarget - this.lean) * damp(0.07, dt);
     if (f.pressed.has('crouch')) this.crouchToggle = !this.crouchToggle;
     const crouchTarget = this.crouchToggle ? 1 : 0;
@@ -244,6 +245,22 @@ export class Player implements System {
 
     this.renderPos.lerpVectors(this.prevPos, this.position, alpha);
     this.updateCamera(dt);
+  }
+
+  /**
+   * How much of a full lean fits toward `side` (-1 left, +1 right) before the chest cam would reach the wall:
+   * a full lean carries the camera ~0.47 m sideways, and leaning into a wall used to put it through the wall.
+   */
+  private leanRoom(side: number): number {
+    if (!side) return 1;
+    const o = this.sampleOrigin.set(
+      this.position.x,
+      this.position.y + this.tuning.chestHeight - this.tuning.crouchDrop * this.crouch,
+      this.position.z,
+    );
+    const dir = this.tmpV2.set(Math.cos(this.yaw) * side, 0, -Math.sin(this.yaw) * side);
+    const hit = this.ctx.physics.raycast(o, dir, LEAN_REACH + LEAN_MARGIN, this.body);
+    return hit ? clamp((hit.distance - LEAN_MARGIN) / LEAN_REACH, 0, 1) : 1;
   }
 
   fixedUpdate(dt: number) {
@@ -558,6 +575,9 @@ export class Player implements System {
 /** Rapier collision groups: membership in the high 16 bits, filter in the low 16. */
 export const GROUP_PLAYER = 0x0004;
 export const GROUP_DEBRIS = 0x0002;
+/** Sideways travel of the chest cam at full lean (offset + roll over the spine), and the gap kept to walls (m). */
+const LEAN_REACH = 0.47;
+const LEAN_MARGIN = 0.22;
 const PLAYER_GROUPS = (GROUP_PLAYER << 16) | 0xffff;
 /** The character controller walks through dropped mags instead of climbing them. */
 const KCC_FILTER = (0xffff << 16) | (0xffff & ~GROUP_DEBRIS);
