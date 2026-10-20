@@ -438,6 +438,11 @@ export class ArmsRig {
     return !l.done || !!l.clip.holdLast;
   }
 
+  /** True while an additive shot layer is still kicking. */
+  get shooting(): boolean {
+    return !!this.shot && !this.shot.done;
+  }
+
   /** Current action time / duration (0..1). */
   get progress(): number {
     const l = this.layer;
