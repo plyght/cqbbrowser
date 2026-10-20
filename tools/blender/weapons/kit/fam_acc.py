@@ -187,6 +187,19 @@ def foregrips():
     return out
 
 
+def p17_rmr():
+    """P-17 slide red dot (rides with the slide): RMR footprint just ahead of the rear sight, on the slide top
+    (profiles/p17.json marks, P-17 asset frame; the P-17 base offset moves it with the pistol)."""
+    from .photo import Profile, bbox
+
+    P = Profile("p17")
+    top = P.m("slideTop")[1]
+    rz0 = bbox(P.outer("rearSight"))[0]
+    dot = join("acc_p17_rmr", rmr_parts(rz0 - 0.001, rz0 - 0.046, top - 0.0015), pivot=(0, 0, 0))
+    kit.node(dot, FAM)
+    kit.part("p17_rmr", kit.entry("acc_p17_rmr", part="slide"))
+
+
 def build():
     lib.set_collection(FAM)
     kit.node(red_dot(), FAM)
@@ -214,6 +227,7 @@ def build():
              kit.entry("acc_mag3x", anchor="magnifier", part="magnifier"))
     kit.node(offset_dot(), FAM)
     kit.part("off_dot45", kit.entry("acc_offset_dot", anchor="offset"))
+    p17_rmr()
     for combo, pid in ((False, "p17_light"), (True, "p17_combo")):
         n = pistol_light(combo)
         kit.node(n, FAM, sockets={"light": (0, -0.0175, 0)})
