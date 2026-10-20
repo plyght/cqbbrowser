@@ -278,7 +278,7 @@ def build():
     rods = [cyl("rod", 0.0042, -0.012, -0.17, B + 0.009, x, 12, "steel", 0.0003) for x in (-0.0115, 0.0115)]
     yoke = box("yoke", 0.036, 0.016, -0.006, -0.032, 0, B + 0.01, mat="anod", bevel=0.002)
     butt = prism("pb", [(0, B + 0.02), (0, B - 0.088), (-0.008, B - 0.094), (-0.016, B - 0.086), (-0.014, B - 0.004),
-                        (-0.03, B + 0.004), (-0.03, B + 0.018)], 0.034, mat="poly", bevel=0.0015)
+                        (-0.03, B + 0.004), (-0.03, B + 0.018)], 0.034, mat="anod", bevel=0.0015)  # finish-coloured
     lib.round_edges(butt, lambda m, a, b: (abs(a[0]) > 0.9) != (abs(b[0]) > 0.9), 0.004, 3)
     ppad = box("pp", 0.036, 0.098, 0.002, -0.006, 0, B - 0.04, mat="rubber", bevel=0.003)
     pdw = join("ar_stock_pdw", [*rods, yoke, butt, ppad])
