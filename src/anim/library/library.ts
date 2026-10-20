@@ -136,7 +136,7 @@ function rifleCheck(speed: number, magStyle: 'rock' | 'straight', f: CheckFeel):
       arc: f.arc,
       grip: { clip: 'ak.reloadTactical', t: 0.63 },
       gripTurn: f.gripTurn ?? -Math.PI / 2,
-      gripShift: f.gripShift ?? [0, -0.05, 0],
+      gripShift: f.gripShift ?? [0, -0.085, 0],
       rock: f.rock,
       rockSpan: 0.3,
     },
