@@ -164,7 +164,8 @@ export interface GripPart extends PartBase {
 
 export interface ForegripPart extends PartBase {
   slot: 'foregrip';
-  style: 'none' | 'vertical' | 'angled' | 'handstop';
+  /** `stubby`: short vertical (index stop); `wedge`: low-profile angled with a heel ramp. */
+  style: 'none' | 'vertical' | 'angled' | 'handstop' | 'stubby' | 'wedge';
 }
 
 export interface OpticPart extends PartBase {

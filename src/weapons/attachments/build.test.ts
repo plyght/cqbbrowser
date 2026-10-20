@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { BASE_WEAPONS, WEAPONS } from '../defs';
+import { mlokSlot, SBR_GRIP_LEAD } from './build';
+import { PART_BY_ID } from './catalog';
 import {
   applyBuild,
   BuildValidationError,
@@ -274,6 +276,47 @@ describe('layout + aim modes', () => {
     const sSmall = stats(b('sb16', { optic: 'opt_lpvo3', buis: 'buis_none' }));
     expect(sSmall.mass).toBeLessThan(sBig.mass - 0.15);
     expect(sSmall.handling.adsTime).toBeLessThan(sBig.handling.adsTime);
+  });
+  test('SBR grips: ahead of the support hand, on an M-LOK slot, on the handguard', () => {
+    const cases: [WeaponId, string][] = [
+      ['sb16', 'ar_hg_mlok7'],
+      ['sb16', 'ar_hg_mlok95'],
+      ['sb16', 'ar_hg_quad9'],
+      ['hb300', 'hb_hg_mlok5'],
+      ['hb300', 'hb_hg_mlok8'],
+      ['k47s', 'ak_hg_quad'],
+      ['k47s', 'ak_hg_mlok'],
+    ];
+    for (const fg of ['fg_stubby', 'fg_wedge'] as const) {
+      for (const [w, hg] of cases) {
+        const parts: Partial<Record<SlotId, string>> = { handguard: hg, foregrip: fg };
+        if (w === 'hb300') Object.assign(parts, { barrel: 'hb_b9', muzzle: 'ar_fh_3p' });
+        const x = b(w, parts);
+        expect({ w, hg, fg, e: codes(x) }).toEqual({ w, hg, fg, e: [] });
+        const l = layoutBuild(resolveBuild(x));
+        const z = l.foregrip!.z;
+        const lead = SBR_GRIP_LEAD[fg === 'fg_stubby' ? 'stubby' : 'wedge'];
+        // The hand grips just behind it.
+        expect(l.supportHand[2] - z).toBeCloseTo(lead, 6);
+        // The whole grip stays on the handguard (stubby 23 mm, wedge 39 mm half-length).
+        expect(z).toBeLessThan(l.handguard!.z0 - 0.02);
+        expect(z - (fg === 'fg_stubby' ? 0.023 : 0.039)).toBeGreaterThan(l.handguard!.z1 - 1e-9);
+        if (w !== 'k47s' && hg.includes('mlok')) {
+          const h = PART_BY_ID[hg] as { length: number };
+          expect(mlokSlot(l.handguard!.z0, h.length, z)).toBeCloseTo(z, 9);
+        }
+      }
+    }
+    // Wood AK handguard: nowhere to mount it.
+    expect(codes(b('k47s', { foregrip: 'fg_stubby' }))).toEqual(['requires']);
+  });
+  test('M-LOK slots: 40 mm pitch, centred on the handguard', () => {
+    const len = 9.5 * 0.0254;
+    const s = [0, 1, 2, 3, 4].map((i) => mlokSlot(0, len, -0.03 - i * 0.04));
+    expect(s[1] - s[0]).toBeCloseTo(-0.04, 9);
+    expect((s[0] + s[4]) / 2).toBeCloseTo(-0.001 - (len - 0.001) / 2, 9);
+    expect(mlokSlot(0, len, 1)).toBeCloseTo(s[0], 9);
+    expect(mlokSlot(0, len, -1)).toBeCloseTo(s[4], 9);
   });
   test('AK irons: kept with a gas-tube dot, lost under a railed top cover', () => {
     expect(layoutBuild(resolveBuild(PRESETS.k47s_railed)).aimModes.map((m) => m.id)).toEqual([

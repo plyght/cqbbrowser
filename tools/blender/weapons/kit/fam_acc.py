@@ -258,6 +258,58 @@ def foregrips():
     return out
 
 
+def fg_mount(rail, L, w=0.024):
+    """Short-grip mount at the handguard's bottom face (y = 0, hanging toward -y), centred on z = 0.
+    rail 'mlok': flat base with two T-nut lugs reaching into one M-LOK slot; 'pic': clamp with jaws around the
+    1913 dovetail, a cross bolt on the right and a recoil lug."""
+    out = []
+    if rail == "mlok":
+        out.append(box("fgb", w, 0.0042, L / 2, -L / 2, 0, -0.0021, mat="poly", bevel=0.0009))
+        for zl in (0.008, -0.008):
+            out.append(rbox("tnut", 0.0068, 0.0032, 0.011, 0, 0.0016, zl, mat="steel", bevel=0.0005))
+    else:
+        out.append(box("fgc", w + 0.004, 0.0062, L / 2, -L / 2, 0, -0.0031, mat="poly", bevel=0.0011))
+        for sx in (-1, 1):
+            out.append(box("jaw", 0.0032, 0.0058, L / 2, -L / 2, sx * (0.0108 + 0.0016), 0.0027, mat="poly",
+                           bevel=0.0006))
+        out.append(cyl_x("bolt", 0.0034, 0.0126, 0.0158, 0.0016, 0.0, 14, "steel", 0.0004))
+        out.append(cyl_x("nut", 0.0031, -0.0156, -0.0126, 0.0016, 0.0, 6, "steel", 0.0003))
+    return out
+
+
+def fg_stubby(rail):
+    """Stubby vertical grip, ~58 mm overall: slim oval body swept slightly forward, flared toe, stippled."""
+    parts = fg_mount(rail, 0.046)
+    top = -0.0035 if rail == "mlok" else -0.0058
+    secs = [(0.0, 0.0126, 0.0168), (0.12, 0.0123, 0.0162), (0.45, 0.0117, 0.0152), (0.78, 0.0121, 0.0157),
+            (0.88, 0.0136, 0.0174), (0.94, 0.0137, 0.0176), (0.985, 0.0118, 0.0154), (1.0, 0.0084, 0.0112)]
+    H = 0.0545 if rail == "mlok" else 0.0522
+    rings = []
+    for t, a, b in secs:
+        y = top - H * t
+        cz = -0.0045 * t  # forward sweep
+        rings.append([(u, y, cz + v) for u, v in lib.superellipse(a, b, 2.3, 28)])
+    parts.append(lib.loft("fgs", rings, mat="polyGrip", bevel=0.0006))
+    # front index ridge under the mount (stops the index finger riding onto the grip)
+    parts.append(rbox("ridge", 0.016, 0.0022, 0.003, 0, top - 0.0015, -0.0175, mat="poly", bevel=0.0009))
+    return join(f"acc_fg_stubby_{rail}", parts)
+
+
+def fg_wedge(rail):
+    """Low-profile angled grip (~78 mm, 19 mm deep): the rear ramp indexes the support hand, short front lip."""
+    top = 0.0 if rail == "mlok" else -0.004
+    pts = [(0.039, top), (0.039, top - 0.003), (0.012, top - 0.0165), (-0.006, top - 0.0185), (-0.028, top - 0.0172),
+           (-0.036, top - 0.0135), (-0.039, top - 0.006), (-0.039, top)]
+    w = prism("fgw", pts, 0.026, mat="polyGrip", bevel=0.0008)
+    lib.round_edges(w, lambda m, n0, n1: (abs(n0[0]) > 0.9) != (abs(n1[0]) > 0.9), 0.0055, 3)
+    parts = [w]
+    if rail == "mlok":
+        for zl in (0.008, -0.008):
+            parts.append(rbox("tnut", 0.0068, 0.0032, 0.011, 0, 0.0016, zl, mat="steel", bevel=0.0005))
+    else:
+        parts += fg_mount("pic", 0.07, 0.022)
+    return join(f"acc_fg_wedge_{rail}", parts)
+
 def p17_rmr():
     """P-17 slide red dot (rides with the slide): RMR footprint just ahead of the rear sight, on the slide top
     (profiles/p17.json marks, P-17 asset frame; the P-17 base offset moves it with the pistol)."""
@@ -294,6 +346,11 @@ def build():
     for n, pid in zip(foregrips(), ("fg_vertical", "fg_angled", "fg_handstop")):
         kit.node(n, FAM, proxy_slices=2)
         kit.part(pid, kit.entry(n.name, anchor="foregrip"))
+    # SBR grips: one node per rail interface; the catalog entry picks it by the handguard ({hgRail})
+    for fn, pid in ((fg_stubby, "fg_stubby"), (fg_wedge, "fg_wedge")):
+        for rail in ("mlok", "pic"):
+            kit.node(fn(rail), FAM, proxy_slices=2)
+        kit.part(pid, kit.entry(f"acc_{pid}_{{hgRail}}", anchor="foregrip"))
     base, flip = magnifier()
     kit.node(base, FAM)
     kit.node(flip, FAM)

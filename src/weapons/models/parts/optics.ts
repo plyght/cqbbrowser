@@ -573,6 +573,29 @@ export function foregrip(c: Ctx, part: ForegripPart) {
       [z + 0.006, bottom - 0.013],
     ];
     c.s.add(profile(shape(pts), 0.022, 0.003), mat);
+  } else if (part.style === 'stubby') {
+    // Procedural fallback of acc_fg_stubby_*: 52 mm oval body under a short mount, flared toe.
+    const g = new CylinderGeometry(0.0128, 0.0122, 0.046, 18);
+    g.scale(1, 1, 1.3);
+    g.translate(0, bottom - 0.006 - 0.023, z - 0.002);
+    c.s.add(g, M.polymerGrip);
+    const toe = new CylinderGeometry(0.0118, 0.0137, 0.006, 18);
+    toe.scale(1, 1, 1.28);
+    toe.translate(0, bottom - 0.055, z - 0.004);
+    c.s.add(toe, M.polymerGrip);
+  } else if (part.style === 'wedge') {
+    // Procedural fallback of acc_fg_wedge_*: low wedge, indexing ramp at the rear.
+    const pts: P2[] = [
+      [z + 0.039, bottom],
+      [z + 0.039, bottom - 0.003],
+      [z + 0.012, bottom - 0.0165],
+      [z - 0.006, bottom - 0.0185],
+      [z - 0.028, bottom - 0.0172],
+      [z - 0.036, bottom - 0.0135],
+      [z - 0.039, bottom - 0.006],
+      [z - 0.039, bottom],
+    ];
+    c.s.add(profile(shape(pts), 0.026, 0.004), M.polymerGrip);
   }
 }
 

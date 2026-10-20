@@ -169,6 +169,15 @@ describe('options', () => {
     expect(slotOptions(defaultBuild('kp9'), 'optic').some((x) => x.part.id === 'opt_lpvo3')).toBe(false);
   });
 
+  test('SBR grips are offered on the railed rifles', () => {
+    for (const w of ['sb16', 'hb300'] as const)
+      for (const id of ['fg_stubby', 'fg_wedge']) {
+        const o = slotOptions(defaultBuild(w), 'foregrip').find((x) => x.part.id === id)!;
+        expect(o.result.ok).toBe(true);
+        expect(validateBuild(o.result.build)).toEqual([]);
+      }
+  });
+
   test('ammo options show per-barrel velocity', () => {
     const o = ammoOptions(defaultBuild('hb300'));
     expect(o.map((x) => x.id).sort()).toEqual(['blk110', 'blk220']);
