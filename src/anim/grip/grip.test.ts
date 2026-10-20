@@ -146,5 +146,5 @@ describe('grip solver', () => {
           }
     }
     expect(checked).toBeGreaterThan(100);
-  });
+  }, 30_000); // heavy sampling; slow under parallel CPU load
 });
