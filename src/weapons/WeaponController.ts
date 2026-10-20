@@ -610,6 +610,11 @@ export class WeaponController implements System {
     if (this.switching && this.switching.phase === 'in' && rig.action !== 'swapIn') this.switching = null;
   }
 
+  /** Model roots of loadout weapons not currently in the scene (for the renderer's prewarm). */
+  spareModels(): Object3D[] {
+    return this.loadout.map((e) => e.model.root).filter((r) => !r.parent);
+  }
+
   /** Start a sling/holster → draw switch (or reverse one in progress). */
   equip(i: number) {
     if (this.rig) return this.equipRig(i);
