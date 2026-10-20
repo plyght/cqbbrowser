@@ -36,6 +36,37 @@ def clip(o, z0=None, z1=None, y0=None, y1=None):
     return o
 
 
+GRIP_HALF_D = 0.0215  # ≤ 43 mm grip depth (normal to the grip axis) at hand height
+
+
+def seat_outline(w, top=-0.012):
+    """Procedural grip seat outline [(z, y)] (profiles/<w>_gripseat.json) extended up to `top` (buried in the
+    lower) along its fitted strap lines, and its centreline angle (deg)."""
+    import json
+    import os
+
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "profiles", f"{w}_gripseat.json")) as f:
+        d = json.load(f)
+    rows = [tuple(r) for r in d["rows"]]
+    band = rows[len(rows) // 4: -3]
+
+    def line(k):
+        n = len(band)
+        my = sum(r[0] for r in band) / n
+        mz = sum(r[k] for r in band) / n
+        b = sum((r[0] - my) * (r[k] - mz) for r in band) / sum((r[0] - my) ** 2 for r in band)
+        return lambda y: mz + b * (y - my)
+
+    fl, bl = line(1), line(2)
+    ext = []
+    y = top
+    while y > rows[0][0] + 1e-6:
+        ext.append((y, fl(y), bl(y)))
+        y -= 0.002
+    rows = ext + rows
+    return [(r[1], r[0]) for r in rows] + [(r[2], r[0]) for r in reversed(rows)], d["angle"]
+
+
 def thin(o, poly, w):
     for sx in (-1, 1):
         cut(o, prism("thin", poly, 0.03, x=sx * (w / 2 + 0.015), mat=None, bevel=0))
@@ -156,11 +187,13 @@ def build():
     kit.node(pdwh, FAM)
 
     # ------------------------------------------------------------------ grips: lofted rounded sections
-    # Sections perpendicular to the grip axis, front/back from the photo A2 outline (finger nub included),
-    # superellipse cross-section (A2 ~25 mm wide; the ergonomic grip is fuller and rounder).
-    gp = P.outer("grip")
+    # Sections perpendicular to the grip axis on the procedural grip seat (profiles/sb16_gripseat.json: where the
+    # authored hand clips hold the grip; centreline and angle kept), thinned to the hand envelope (≤ 43 mm deep,
+    # 25-28 mm wide), A2 finger nub on the front strap, superellipse cross-section (the ergo grip is fuller).
+    gp, seat_ang = seat_outline("sb16")
     gz0, gz1, gy0, gy1 = bbox(gp)
-    for gid, w, n_se, ang, swell in (("ar_grip_a2", 0.0252, 2.5, 22, 0.0), ("ar_grip_ergo", 0.0275, 2.2, 22, 0.0018)):
+    for gid, w, n_se, ang, swell, nub in (("ar_grip_a2", 0.0258, 2.5, seat_ang, 0.0, 0.0028),
+                                          ("ar_grip_ergo", 0.0275, 2.2, seat_ang, 0.0012, 0.0)):
         a = math.radians(ang)
         d = (math.sin(a), -math.cos(a))
         nrm = (math.cos(a), math.sin(a))
@@ -183,15 +216,19 @@ def build():
             if i == 0:
                 s0, s1 = s0 - 0.002, s1 + 0.002
             last = (s0, s1)
-            mid, half = (s0 + s1) / 2, (s1 - s0) / 2
-            ww = w / 2 + swell * math.sin(math.pi * i / steps)
+            mid, half = (s0 + s1) / 2, min((s1 - s0) / 2, GRIP_HALF_D)
+            u = i / steps
+            if nub:  # finger nub between the middle and ring finger (front strap = -nrm side)
+                bump = nub * math.exp(-(((u - 0.47) / 0.07) ** 2))
+                mid, half = mid - bump / 2, half + bump / 2
+            ww = w / 2 + swell * math.sin(math.pi * u)
             loop = lib.superellipse(ww, half, n_se, 28)
             rings.append([(u, c[1] + nrm[1] * (mid + v), c[0] + nrm[0] * (mid + v)) for u, v in loop])
         g = lib.loft(gid, rings, mat="polyGrip")
         node = join(gid, [g])
-        fit = lib.fit_grip(node, 0.027, 0.043, 22, -0.05)
+        fit = lib.fit_grip(node, 0.028, 0.045, ang, -0.06)
         print("[ar] %s w×d %.1f×%.1f → %.1f×%.1f mm" % ((gid,) + tuple(x * 1000 for x in fit)))
-        kit.node(node, FAM, proxies=lib.obb_proxies(node, 3, angle_deg=22))
+        kit.node(node, FAM, proxies=lib.obb_proxies(node, 3, angle_deg=ang))
         kit.part(gid, kit.entry(gid))
     kit.BASES["sb16"]["sockets"] = {}
 

@@ -37,7 +37,9 @@ def red_dot():
     parts = clamp(0, -0.04)
     riser_top = ax - ro + 0.003
     parts.append(box("riser", 0.02, riser_top - 0.003, -0.002, -0.038, 0, (riser_top + 0.003) / 2, mat="anod", bevel=0.0012))
-    parts.append(box("base", 0.023, 0.011, zb0 - 0.004, zb1 + 0.004, 0, ax - ro + 0.005, mat="anod", bevel=0.002))
+    # saddle under the tube: its top stays below the bore (ax - ri) so the view through the tube is clear
+    by0, by1 = riser_top - 0.001, ax - ri - 0.0006
+    parts.append(box("base", 0.023, by1 - by0, zb0 - 0.004, zb1 + 0.004, 0, (by0 + by1) / 2, mat="anod", bevel=0.0015))
     body = lathe("body", [(ri, zb0), (ro - 0.0006, zb0), (ro, zb0 - 0.0015), (ro, zb1 + 0.0035), (ro + 0.0009, zb1 + 0.002),
                           (ro + 0.0009, zb1), (ri, zb1), (ri, zb0)], 32, ax, 0, "anod", 0.0003)
     parts.append(body)

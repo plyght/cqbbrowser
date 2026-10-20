@@ -136,9 +136,12 @@ def lathe(name, pts, segs=24, y=B, x=0.0, mat="steel", bevel=0.0, seg=2, angle=3
             except ValueError:
                 pass
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-7)
-    # cap open ends (first/last profile point with r > 0)
+    # cap open ends (first/last profile point with r > 0); a closed profile (hollow tube, ring) has no ends,
+    # and filling its boundary loops would cap the bore (e.g. an opaque disc inside an optic tube)
     bm.verts.ensure_lookup_table()
-    bmesh.ops.holes_fill(bm, edges=bm.edges, sides=0)
+    closed = abs(pts[0][0] - pts[-1][0]) < 1e-7 and abs(pts[0][1] - pts[-1][1]) < 1e-7
+    if not closed:
+        bmesh.ops.holes_fill(bm, edges=bm.edges, sides=0)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     o = obj_from_bm(name, bm, mat)
     o["bevel"] = (bevel, seg, angle)
