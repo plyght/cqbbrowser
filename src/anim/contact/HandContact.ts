@@ -43,7 +43,7 @@ export interface SupportPose {
 }
 export const PISTOL_SUPPORT: Record<string, SupportPose> = {
   p17: {
-    offset: [-0.022, 0.012, 0.006],
+    offset: [-0.017, 0.012, 0.006],
     turn: [0, 0, 0.2],
     fingers: [0, 0, 0, 0.1, 0.1, 0.05, 0.1, 0.1, 0.05, 0.1, 0.1, 0.05, 0.1, 0.1, 0.05],
   },
@@ -138,15 +138,18 @@ export class HandContact {
    */
   static defaultMode: 'safe' | 'full' = 'safe';
 
-  /** In-game opt-in: `?handcontact=safe|full` (absent = off). */
-  static urlMode(): 'off' | 'safe' | 'full' {
+  /** In-game override: `?handcontact=off|safe|full` (null = no override: per-weapon default). */
+  static urlMode(): 'off' | 'safe' | 'full' | null {
     try {
       const v = new URLSearchParams(location.search).get('handcontact');
-      return v === 'full' ? 'full' : v === null ? 'off' : 'safe';
+      return v === null ? null : v === 'full' ? 'full' : v === 'off' || v === '0' ? 'off' : 'safe';
     } catch {
-      return 'off';
+      return null;
     }
   }
+
+  /** Per-weapon on/off, evaluated on every attach (e.g. on for pistols only). */
+  autoEnable?: (weaponId: string) => boolean;
   mode: 'safe' | 'full' = HandContact.defaultMode;
   readonly hands: Record<Side, HandState>;
   col?: WeaponCollision;
@@ -200,6 +203,7 @@ export class HandContact {
     rig.seatProvider = (_r, model, id) => {
       this.bake = null;
       this.weaponId = id;
+      if (this.autoEnable) this.enabled = this.autoEnable(id);
       if (!this.enabled || !this.seats || this.mode === 'safe' || !this.ensure()) return null;
       const key = id + JSON.stringify(model.build);
       const hit = BAKED.get(key);

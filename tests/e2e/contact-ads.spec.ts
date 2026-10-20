@@ -9,7 +9,9 @@ import { boot, play } from './helpers';
  * In the rig, ADS moves only the rig root (handling layer), so the hands-on-gun pose is the idle hold.
  */
 const dir = 'screenshots';
-const WEAPONS = ['sb16', 'k47s', 'hb300', 'kp9', 'p17'];
+// ADS_WEAPONS=p17 ADS_TAG=v5 re-renders a subset under a new tag.
+const WEAPONS = process.env.ADS_WEAPONS?.split(',') ?? ['sb16', 'k47s', 'hb300', 'kp9', 'p17'];
+const TAG = process.env.ADS_TAG ?? 'v4';
 
 async function sim(page: Page, n: number, input?: Record<string, unknown>, every = 15) {
   await page.evaluate(
@@ -74,6 +76,6 @@ test('ADS evidence sheets: first person + left + below/front, raw vs contact', a
         <img src="${b64(`${dir}/contact-ads-${w}-support.png`)}" width="1280">
       </body>`,
     );
-    await p2.screenshot({ path: `${dir}/contact-ads-${w}-v4.png`, fullPage: true });
+    await p2.screenshot({ path: `${dir}/contact-ads-${w}-${TAG}.png`, fullPage: true });
   }
 });
