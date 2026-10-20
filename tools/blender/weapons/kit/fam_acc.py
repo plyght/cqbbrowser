@@ -6,7 +6,7 @@ Local frames (anchors resolved by src/weapons/models/kit.ts):
   light / laser              — lens centre at the origin looking -z, mount toward -y (the anchor rolls it around the bore)
   foregrips                  — rail contact at y = 0, centred on z = 0, hanging toward -y
 Dimensions follow the catalog parts (footprint, axisOverRail) and published sizes (T-2 ~ 62 mm long, EXPS ~ 96 mm,
-1-6x24 LPVO ~ 260 mm, scout light 1" body).
+1-6x24 LPVO ~ 260 mm, compact 1-3x24 ~ 215 mm, scout light 1" body).
 """
 import math
 
@@ -122,6 +122,69 @@ def lpvo():
     return join("acc_lpvo", parts)
 
 
+def lpvo3():
+    """Compact 1-3x24 LPVO on a low QD cantilever mount. footprint 0.07, axis 0.036; eyepiece rear at z0 + 0.075.
+
+    ~215 mm overall (vs ~256 mm for the 1-6x), 30 mm tube, 41 mm eyepiece, 24 mm objective in a bell barely over the
+    tube. The rear ring sits over the clamp, the front ring is cantilevered forward of it. Lenses are recessed: the
+    coated objective and the clear ocular sit in front of a dark baffle, with the illuminated circle-dot visible
+    through the eyepiece (the ADS picture itself is the eyepiece overlay, src/player/ScopeOverlay.ts).
+    """
+    ax = 0.036
+    z0, z1 = 0.0, -0.07
+    r0 = z0 + 0.075
+    L = 0.215
+    # --- mount: low clamp base, two QD levers on the left, rear ring over the base, cantilevered front ring
+    parts = clamp(z0, z1, 0.026, knob=False)
+    parts.append(box("mbase", 0.02, 0.007, z0 - 0.002, z1 - 0.018, 0, 0.0015, mat="anod", bevel=0.0018))
+    for zq in (z0 - 0.016, z1 + 0.016):
+        parts.append(rbox("qd", 0.0035, 0.0075, 0.021, -0.0148, -0.0015, zq, mat="phos", bevel=0.0012))
+        parts.append(cyl_x("qdp", 0.0026, -0.0175, -0.0128, -0.0015, zq + 0.008, 14, "phos", 0.0004))
+    ro, ri = 0.0181, 0.0151
+    for zr in (z0 - 0.012, z1 - 0.008):
+        h = ax - ro + 0.003
+        parts.append(box("ringst", 0.016, h, zr + 0.0065, zr - 0.0065, 0, h / 2 + 0.002, mat="anod", bevel=0.0015))
+        parts.append(lathe("ring", [(ri, zr + 0.007), (ro - 0.0004, zr + 0.007), (ro, zr + 0.0055), (ro, zr - 0.0055),
+                                    (ro - 0.0004, zr - 0.007), (ri, zr - 0.007), (ri, zr + 0.007)], 32, ax, 0, "anod",
+                           0.0003))
+        parts.append(rbox("cap", 0.011, 0.0035, 0.011, 0, ax + ro - 0.0002, zr, mat="anod", bevel=0.0011))
+    # --- body: one lathe, rear to front. Eyepiece (power ring + ocular), taper, 30 mm tube, small 24 mm bell.
+    re_, rt, rb = 0.0205, 0.015, 0.0168
+    body = [(0.0, r0 - 0.011), (0.0158, r0 - 0.011), (0.0158, r0 - 0.0012), (0.0172, r0), (0.0195, r0),
+            (re_, r0 - 0.003), (re_, r0 - 0.046), (0.0194, r0 - 0.051), (0.0162, r0 - 0.066), (rt, r0 - 0.072),
+            (rt, r0 - 0.184), (0.0158, r0 - 0.192), (rb, r0 - 0.199), (rb, r0 - L + 0.002), (rb - 0.0008, r0 - L),
+            (0.0134, r0 - L), (0.0128, r0 - L + 0.0015), (0.0128, r0 - L + 0.016), (0.0, r0 - L + 0.016)]
+    parts.append(lathe("tube", body, 36, ax, 0, "anod", 0.0004))
+    # power ring: rubber ribs + a short throw fin on the right
+    for i in range(4):
+        z = r0 - 0.015 - i * 0.0062
+        parts.append(lathe("kn", [(re_ - 0.0001, z + 0.0018), (re_ + 0.0009, z + 0.0009), (re_ + 0.0009, z - 0.0009),
+                                  (re_ - 0.0001, z - 0.0018), (re_ - 0.0001, z + 0.0018)], 36, ax, 0, "rubber", 0))
+    parts.append(rbox("throw", 0.006, 0.013, 0.008, re_ + 0.0018, ax + 0.006, r0 - 0.024, mat="anod", bevel=0.0018))
+    # eyepiece rubber lip
+    parts.append(lathe("lip", [(0.0172, r0 + 0.0022), (0.0196, r0 + 0.0022), (0.0199, r0 + 0.0008), (0.0196, r0 - 0.0012),
+                               (0.0172, r0 - 0.0012), (0.0172, r0 + 0.0022)], 36, ax, 0, "rubber", 0))
+    # turret saddle + capped low turrets (elevation top, windage right), illumination dial + battery left
+    zt = r0 - 0.115
+    parts.append(box("saddle", 0.031, 0.031, zt + 0.016, zt - 0.016, 0, ax, mat="anod", bevel=0.007, seg=3))
+    parts.append(cyl_y("tE", 0.0098, ax + 0.0145, ax + 0.0245, 0, zt, 28, "anod", 0.0009))
+    parts.append(cyl_x("tW", 0.0098, 0.0145, 0.0245, ax, zt, 28, "anod", 0.0009))
+    parts.append(cyl_x("tI", 0.0105, -0.0262, -0.0145, ax, zt, 24, "anod", 0.0009))
+    for i in range(3):  # illumination dial grip ribs
+        x = -0.0245 + i * 0.0035
+        parts.append(cyl_x("tIr", 0.0109, x, x - 0.0012, ax, zt, 24, "rubber", 0))
+    # --- optics: coated objective in its recess, clear ocular, dark baffles, emissive circle-dot behind the ocular
+    zo = r0 - L + 0.0028
+    parts.append(cyl("oF", 0.0128, zo + 0.0003, zo - 0.0003, ax, 0, 36, "lens", 0))
+    parts.append(cyl("bF", 0.0127, r0 - L + 0.0158, r0 - L + 0.0154, ax, 0, 24, "dark", 0))
+    parts.append(cyl("oR", 0.0157, r0 - 0.0018, r0 - 0.0024, ax, 0, 36, "glass", 0))
+    parts.append(cyl("bR", 0.0156, r0 - 0.0106, r0 - 0.0110, ax, 0, 24, "dark", 0))
+    zr_ = r0 - 0.0102
+    parts.append(lathe("retRing", [(0.0034, zr_ + 0.0002), (0.0039, zr_ + 0.0002), (0.0039, zr_ - 0.0002),
+                                   (0.0034, zr_ - 0.0002), (0.0034, zr_ + 0.0002)], 40, ax, 0, "reticle", 0))
+    parts.append(cyl("retDot", 0.00045, zr_ + 0.0002, zr_ - 0.0002, ax, 0, 14, "reticle", 0))
+    return join("acc_lpvo3", parts)
+
 def buis(front):
     """Flip-up BUIS (rear aperture / front post tower), footprint 0.028, axis 0.035."""
     ax = 0.035
@@ -216,6 +279,9 @@ def build():
     kit.part("opt_holo", kit.entry("acc_holo", anchor="optic"))
     kit.node(lpvo(), FAM)
     kit.part("opt_lpvo", kit.entry("acc_lpvo", anchor="optic"))
+    kit.node(lpvo3(), FAM, proxy_slices=3)
+    # own part group: at 1x ADS (both eyes open) the controller hides it instead of clipping the view past it
+    kit.part("opt_lpvo3", kit.entry("acc_lpvo3", anchor="optic", part="optic"))
     kit.node(buis(False), FAM)
     kit.node(buis(True), FAM)
     kit.part("buis_flip", kit.entry("acc_buis_rear", anchor="buisRear"), kit.entry("acc_buis_front", anchor="buisFront"))

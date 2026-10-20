@@ -13,6 +13,7 @@ import type {
   MuzzlePart,
   OpticKind,
   OpticPart,
+  ReticleKind,
   PartDef,
   PlatformDef,
   ProfilePart,
@@ -62,6 +63,14 @@ export interface AimMode {
   /** Roll of the weapon needed to use this sight (rad, + = cant right). */
   roll: number;
   eyeRelief: number;
+  /** Tube optics: body length ahead of the rear lens (m); the ADS near plane looks past it. */
+  tube?: number;
+  reticle?: ReticleKind;
+  /** Eye box radius (m) for the scope shadow. */
+  eyeBox?: number;
+  trueOneX?: boolean;
+  /** True-1x optics: how far forward of the eyepiece's eye position the head sits at 1x (m). */
+  oneXForward?: number;
 }
 
 export interface Layout {
@@ -242,6 +251,11 @@ export function isValid(build: WeaponBuild) {
 
 // ------------------------------------------------------------------ layout
 
+/** Rear lens z behind the mount's rear edge (tube optics sit back over the receiver; others: the mount rear). */
+export function eyepieceOf(p: OpticPart): number {
+  return p.kind === 'lpvo' ? (p.eyepiece ?? 0.06) : 0;
+}
+
 function place(rail: RailSeg, cursor: number, p: OpticPart, errors: BuildError[], slot: SlotId): Placement {
   const z0 = Math.min(cursor, p.preferredRear ?? cursor);
   const z1 = z0 - p.footprint;
@@ -377,9 +391,24 @@ export function layoutBuild(r: ResolvedBuild): Layout {
     optic: p.kind,
     magnification: p.magnification,
     sightHeight: pl.axisY - BORE_Y,
-    point: [0, pl.axisY, p.kind === 'lpvo' ? pl.z0 + 0.06 : pl.z0],
+    point: [0, pl.axisY, pl.z0 + eyepieceOf(p)],
     roll,
     eyeRelief: p.eyeRelief,
+    ...(p.kind === 'lpvo'
+      ? {
+          tube: p.bodyLength - 0.01,
+          reticle: p.reticle ?? 'duplex',
+          eyeBox: p.eyeBox ?? 0.006,
+          trueOneX: !!p.trueOneX,
+          // Both eyes open at 1x: the head sits where it would behind a micro red dot on this rail.
+          oneXForward:
+            p.trueOneX && main
+              ? pl.z0 +
+                eyepieceOf(p) -
+                Math.min(main.z0 - 0.002, getPart<OpticPart>('opt_reddot').preferredRear ?? 0)
+              : 0,
+        }
+      : {}),
   });
   if (optic && out.optic) modes.push(opticMode('primary', optic, out.optic));
   if (optic?.kind === 'rmr') {
@@ -474,7 +503,7 @@ function massBreakdown(r: ResolvedBuild, l = layoutBuild(r)) {
       case 'optic':
         return l.optic
           ? (part as OpticPart).kind === 'lpvo'
-            ? l.optic.z0 - 0.06
+            ? l.optic.z0 + eyepieceOf(part as OpticPart) - (part as OpticPart).bodyLength / 2
             : (l.optic.z0 + l.optic.z1) / 2
           : 0;
       case 'magnifier':

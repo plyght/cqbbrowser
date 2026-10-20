@@ -1272,6 +1272,9 @@ const optics: OpticPart[] = [
     magnification: [1, 6],
     eyeRelief: 0.09,
     bodyLength: 0.27,
+    eyepiece: 0.06,
+    reticle: 'duplex',
+    eyeBox: 0.006,
     provides: ['magnifiedOptic'],
     requires: [
       {
@@ -1281,6 +1284,35 @@ const optics: OpticPart[] = [
       },
     ],
     mods: { adsMul: 1.18, swayMul: 1.04 },
+  },
+  {
+    // Compact 1-3x24 on a low QD cantilever: ~215 mm tube, 24 mm objective (bell barely over the 30 mm tube).
+    id: 'opt_lpvo3',
+    slot: 'optic',
+    name: 'Wren 1-3x compact',
+    blurb: '1-3x24 compact LPVO, low QD mount. True 1x, daylight-bright circle-dot, forgiving eye box.',
+    fits: LONG_RAIL,
+    mass: 0.5,
+    kind: 'lpvo',
+    footprint: 0.07,
+    axisOverRail: 0.036,
+    preferredRear: 0.045,
+    magnification: [1, 3],
+    eyeRelief: 0.09,
+    bodyLength: 0.215,
+    eyepiece: 0.075,
+    reticle: 'circleDot',
+    eyeBox: 0.011,
+    trueOneX: true,
+    provides: ['magnifiedOptic'],
+    requires: [
+      {
+        kind: 'feature',
+        feature: 'topRailReceiver',
+        reason: 'needs a top rail over the receiver for eye relief (not a scout/gas-tube rail)',
+      },
+    ],
+    mods: { adsMul: 1.09, swayMul: 1.02 },
   },
   {
     id: 'mag_none',

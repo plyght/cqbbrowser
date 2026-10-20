@@ -63,6 +63,16 @@ describe('validation', () => {
     expect(codes(b('k47s', { optic: 'opt_lpvo', mount: 'ak_mount_side' }))).toEqual([]);
   });
 
+  test('compact 1-3x LPVO: receiver rail on SB-16 / HB-300, AK side or cover mount', () => {
+    for (const w of ['sb16', 'hb300'] as const)
+      expect(codes(b(w, { optic: 'opt_lpvo3', buis: 'buis_none' }))).toEqual([]);
+    expect(codes(b('k47s', { optic: 'opt_lpvo3', mount: 'ak_mount_side' }))).toEqual([]);
+    expect(codes(b('k47s', { optic: 'opt_lpvo3', mount: 'ak_mount_cover' }))).toEqual([]);
+    expect(codes(b('k47s', { optic: 'opt_lpvo3', handguard: 'ak_hg_quad' }))).toEqual(['requires']);
+    expect(codes(b('sb16', { optic: 'opt_lpvo3', buis: 'buis_flip' }))).toEqual(['requires']);
+    expect(codes(b('kp9', { optic: 'opt_lpvo3' }))).toEqual(['fit']);
+  });
+
   test('offset dot needs top rail space; magnifier needs a unity optic', () => {
     expect(
       codes(b('k47s', { optic: 'opt_reddot', handguard: 'ak_hg_quad', offsetOptic: 'off_dot45' })),
@@ -235,6 +245,35 @@ describe('layout + aim modes', () => {
     expect(off.point[0]).toBeGreaterThan(0.02);
     expect(l.offset!.z0).toBeLessThan(l.optic!.z1);
     expect(l.aimModes.map((m) => m.id)).toEqual(['primary', 'offset']);
+  });
+  test('compact LPVO: eyepiece over the receiver, variable 1-3x, true 1x, no irons', () => {
+    for (const id of ['sb16_lpvo3', 'hb300_lpvo3']) {
+      const l = layoutBuild(resolveBuild(PRESETS[id]));
+      const m = l.aimModes[0];
+      expect(l.aimModes.map((x) => x.id)).toEqual(['primary']);
+      expect(m.optic).toBe('lpvo');
+      expect(m.magnification).toEqual([1, 3]);
+      expect(m.reticle).toBe('circleDot');
+      expect(m.trueOneX).toBe(true);
+      // Rear lens 75 mm behind the mount's rear edge, on the axis 36 mm over the rail.
+      expect(m.point[2]).toBeCloseTo(l.optic!.z0 + 0.075, 6);
+      expect(m.point[1]).toBeCloseTo(l.optic!.railY + 0.036, 6);
+      expect(m.tube).toBeCloseTo(0.205, 6);
+      expect(m.eyeBox!).toBeGreaterThan(0.006);
+      // At 1x (both eyes open) the head sits where it would behind a micro red dot on the same rail.
+      const p = PRESETS[id];
+      const dot = layoutBuild(resolveBuild(b(p.weapon, { ...p.parts, optic: 'opt_reddot' }))).aimModes[0];
+      expect(m.point[2] - m.oneXForward!).toBeCloseTo(dot.point[2], 6);
+    }
+    // Same eye position as the big LPVO on the same rail, ~5 cm shorter, lighter, quicker to the eye.
+    const big = layoutBuild(resolveBuild(PRESETS.sb16_lpvo)).aimModes[0];
+    const small = layoutBuild(resolveBuild(b('sb16', { optic: 'opt_lpvo3', buis: 'buis_none' }))).aimModes[0];
+    expect(Math.abs(big.point[2] - small.point[2])).toBeLessThan(0.01);
+    expect(big.tube! - small.tube!).toBeCloseTo(0.055, 6);
+    const sBig = stats(b('sb16', { optic: 'opt_lpvo', buis: 'buis_none' }));
+    const sSmall = stats(b('sb16', { optic: 'opt_lpvo3', buis: 'buis_none' }));
+    expect(sSmall.mass).toBeLessThan(sBig.mass - 0.15);
+    expect(sSmall.handling.adsTime).toBeLessThan(sBig.handling.adsTime);
   });
   test('AK irons: kept with a gas-tube dot, lost under a railed top cover', () => {
     expect(layoutBuild(resolveBuild(PRESETS.k47s_railed)).aimModes.map((m) => m.id)).toEqual([
