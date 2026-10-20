@@ -94,6 +94,45 @@ describe('hand-weapon contact (safe mode)', () => {
     }
   });
 
+  test('pistol under fire: support hand steady (no back-off flicking), jitter < 10 mm/frame²', () => {
+    // 30 P17 shots, 12 frames apart, the support hand in the weapon frame. Before the eased back-off the
+    // finger-residual push was re-solved from scratch per frame: 58.6 mm/frame² (the hand flicked ~3 cm).
+    const run = (on: boolean) => {
+      const m = buildModel('p17', { detailParts: true });
+      contact.mode = 'safe';
+      contact.autoEnable = () => on;
+      rig.attachWeapon(m, 'p17');
+      rig.play('idle', { fade: 0 });
+      const inv = new Matrix4();
+      const v = new Vector3();
+      const tr: Vector3[] = [];
+      for (let i = 0; i < 400; i++) {
+        if (i >= 30 && (i - 30) % 12 === 0 && i < 30 + 12 * 30) rig.play('shoot');
+        rig.update(1 / 60);
+        if (contact.enabled) contact.apply(1 / 60);
+        inv.copy(m.root.matrixWorld).invert();
+        tr.push(rig.bones.handL.getWorldPosition(v).applyMatrix4(inv).clone());
+      }
+      let mx = 0;
+      for (let i = 30; i < tr.length - 1; i++)
+        mx = Math.max(
+          mx,
+          tr[i + 1]
+            .clone()
+            .addScaledVector(tr[i], -2)
+            .add(tr[i - 1])
+            .length() * 1000,
+        );
+      return mx;
+    };
+    const raw = run(false);
+    const on = run(true);
+    contact.autoEnable = undefined;
+    contact.enabled = true;
+    console.log('pistol support-hand jitter mm/frame² raw', raw.toFixed(2), 'contact', on.toFixed(2));
+    expect(on).toBeLessThan(10);
+  });
+
   test('perf: mean solver cost per frame (headless bun) stays bounded', () => {
     const ms = safe.reduce((a, r) => a + (r.ms ?? 0), 0) / safe.length;
     console.log('mean contact ms/frame (safe)', ms.toFixed(3));

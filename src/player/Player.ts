@@ -301,7 +301,9 @@ export class Player implements System {
     desired.z = this.velocity.z * dt;
     this.kcc.computeColliderMovement(this.collider, desired, undefined, KCC_FILTER);
     const m = this.kcc.computedMovement();
+    const wasGrounded = this.grounded;
     this.grounded = this.kcc.computedGrounded();
+    if (this.grounded && !wasGrounded && this.vy < -2) this.ctx.bus.emit('land', { speed: -this.vy });
     const cur = this.body.translation();
     const next = this.next;
     next.x = cur.x + m.x;

@@ -179,6 +179,8 @@ export class Game {
     });
     // Warm up one physics step so bodies settle before first frame.
     physics.step();
+    // Shaders for everything that first appears mid-game (shot FX pools), off the first trigger pull.
+    void this.renderer.prewarm();
     requestAnimationFrame(this.frame);
   }
 
@@ -232,6 +234,8 @@ export class Game {
 
   enter(canvas?: HTMLCanvasElement) {
     this.audio.resume();
+    // Loadout swaps and the rig (loaded async) may have added materials since boot.
+    void this.renderer.prewarm();
     this.menu.show(false);
     this.paused = false;
     this.renderer.camPowerOn();

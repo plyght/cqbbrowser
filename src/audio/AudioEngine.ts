@@ -130,6 +130,36 @@ export class AudioEngine {
     this.buildStatic();
     this.ready = this.load();
     if (bus) this.subscribe(bus);
+    // Live engine only (offline renders pass their own context and synthesise on demand).
+    if (!deps.ctx) void this.ready.then(() => this.prewarm());
+  }
+
+  /**
+   * Generate every procedural stand-in the recorded sets didn't provide, one key per idle slice, after loading.
+   * They used to be built lazily on first use: the first pistol shot spent ~47 ms synthesising its report,
+   * mechanics, crack, body, roll and thump inside the shot event (a visible hitch on the first trigger pull).
+   * Shot-path keys go first. Returns when all are built.
+   */
+  prewarm(): Promise<void> {
+    const first = ['report.synth', 'mech.pistol', 'mech.ar', 'mech.ak', 'crack', 'blast.body', 'blast.roll'];
+    const keys = [...first, 'shot.thump', 'pressure', ...this.synthGen.keys()].filter(
+      (k, i, a) => a.indexOf(k) === i && this.synthGen.has(k),
+    );
+    const idle = (cb: () => void) => {
+      const ric = (globalThis as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => void })
+        .requestIdleCallback;
+      if (ric) ric(cb, { timeout: 200 });
+      else setTimeout(cb, 0);
+    };
+    return new Promise((resolve) => {
+      const next = () => {
+        const k = keys.shift();
+        if (!k) return resolve();
+        if (!this.bank.has(k)) this.pick(k);
+        idle(next);
+      };
+      idle(next);
+    });
   }
 
   // --- Setup ----------------------------------------------------------------------------------------
