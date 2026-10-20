@@ -1,7 +1,17 @@
 import { Euler, Matrix4, Quaternion, Vector3, type Bone } from 'three';
 import type { WeaponModel } from '../../weapons/models';
+import { weaponAnims } from '../library/library';
 import type { ArmsRig } from '../rig/ArmsRig';
 import { HandProxy, PALM, WRIST, type Side } from './handProxy';
+import {
+  GRIP_SHIP,
+  applyJoints,
+  applySupport,
+  gripFor,
+  supportGripFor,
+  type GripBake,
+  type SupportGrip,
+} from './grip';
 import { solveSeat, type SeatAnchor } from './seat';
 import { WeaponCollision, collect, type Group } from './weaponCollision';
 
@@ -154,6 +164,15 @@ export class HandContact {
     }
   }
 
+  /**
+   * Shipping default per weapon (the in-game `autoEnable` without a URL override): which mode the contact layer
+   * runs in, or off (raw clip).
+   */
+  static defaultFor(weaponId: string): 'off' | 'safe' | 'grip' {
+    if (GRIP_SHIP.has(weaponId)) return 'grip';
+    return weaponAnims(weaponId).family === 'pistol' ? 'safe' : 'off';
+  }
+
   /** Per-weapon on/off, evaluated on every attach (e.g. on for pistols only). */
   autoEnable?: (weaponId: string) => boolean;
   mode: 'safe' | 'full' = HandContact.defaultMode;
@@ -210,6 +229,16 @@ export class HandContact {
       this.bake = null;
       this.weaponId = id;
       if (this.autoEnable) this.enabled = this.autoEnable(id);
+      // Offline-baked grip (gripData.json): seat + finger wraps + support hold, blended in by `apply`.
+      this.grip =
+        this.enabled && this.useGrip && (!this.shipping || GRIP_SHIP.has(id)) ? gripFor(id, model) : null;
+      // A weapon that ships on its baked grip runs raw without one (e.g. a procedural fallback model).
+      if (!this.grip && this.gripOnly(id)) this.enabled = false;
+      this.style = this.supportGripOverride ?? supportGripFor(model);
+      if (this.grip) {
+        this.ensure();
+        return new Matrix4().fromArray(this.grip.seat);
+      }
       if (!this.enabled || !this.seats || this.mode === 'safe' || !this.ensure()) return null;
       const key = id + JSON.stringify(model.build);
       const hit = BAKED.get(key);
@@ -240,6 +269,59 @@ export class HandContact {
       return baked.seat;
     };
   }
+
+  /** True when the in-game default for this weapon is the baked grip only (no URL override). */
+  private gripOnly(id: string): boolean {
+    return (
+      !!this.autoEnable &&
+      HandContact.urlMode() === null &&
+      HandContact.defaultFor(id) === 'grip' &&
+      this.shipping
+    );
+  }
+
+  /** Set by the game: `autoEnable` follows the shipping defaults (tools and tests force it). */
+  shipping = false;
+
+  /** Use the offline-baked grip data when the weapon has it (gripData.json). */
+  useGrip = true;
+  /** Baked grip of the attached weapon (null = none / raw). */
+  grip: GripBake | null = null;
+  /** Support-hand hold style in use (from the build's foregrip, or `supportGripOverride`). */
+  style: SupportGrip = 'handguard';
+  /** Attachments hook: force a support-hand style (e.g. a foregrip with its own socket); null = from the build. */
+  supportGripOverride: SupportGrip | null = null;
+
+  /** Blend the baked grip onto the clip pose: firing fingers (+ trigger curl), support hold + fingers. */
+  private applyGrip(dt: number): boolean {
+    const g = this.grip;
+    if (!g || !this.model) return false;
+    const rig = this.rig;
+    const wr = rig.gunOnHand;
+    if (wr > 0.001) {
+      applyJoints(rig, g.R, wr);
+      // Index onto the trigger blade with the trigger channel (eased: the channel itself is smooth).
+      // The trigger channel steps at each shot: the finger goes onto the blade over ~5 frames and stays there
+      // through a string (slow release), rate-limited so it never pops.
+      const want = rig.triggerPull > 0.02 ? 1 : 0;
+      const k = 1 - Math.exp(-dt / (want > this.trig ? 0.03 : 0.15));
+      const step = Math.max(-0.15, Math.min(0.15, (want - this.trig) * k));
+      this.trig = Math.max(0, Math.min(1, this.trig + step));
+      if (this.trig > 0.001) applyJoints(rig, g.trigger, wr * this.trig);
+    }
+    const L = g.L[this.style] ?? g.L.handguard;
+    const wl = Math.min(1, Math.max(0, rig.anchorWeight('L', 'grip')));
+    if (L && wl > 0.001) {
+      const k = wl * wl * (3 - 2 * wl);
+      rig.root.updateMatrixWorld(true);
+      applySupport(rig, this.model, L.offset, L.turn, k);
+      applyJoints(rig, L.joints, k);
+    }
+    rig.root.updateMatrixWorld(true);
+    return true;
+  }
+
+  private trig = 0;
 
   /** Per weapon build: idle hold score raw vs solved (lower is better; see `holdScore`). */
   readonly gate = new Map<string, { raw: number; solved: number }>();
@@ -316,6 +398,7 @@ export class HandContact {
 
   /** Forget all eased / warm-started solver state (a new weapon in the hands). */
   reset() {
+    this.trig = 0;
     this.gunOff.set(0, 0, 0);
     this.magOff.set(0, 0, 0);
     this.heldPush.set(0, 0, 0);
@@ -369,6 +452,12 @@ export class HandContact {
     if (!this.enabled) return;
     const t0 = performance.now();
     this.stats.reachMiss = 0;
+    if (this.grip) {
+      // Baked grip: the hold is solved offline against the true meshes; per frame it only blends in.
+      if (this.ensure()) this.applyGrip(dt);
+      this.stats.ms = performance.now() - t0;
+      return;
+    }
     if (!this.sync()) return;
     // Wrap intent from the authored pose (before any correction moves the hands): fingers the clip puts on
     // (or into) a surface mean to hold it, so they re-close to contact after the hand is pushed out.

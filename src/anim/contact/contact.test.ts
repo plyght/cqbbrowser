@@ -1,6 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import { Matrix4, Vector3 } from 'three';
+import { formatSpikes, runScenario, scenarios, type SpikeRow } from '../rig/poseAudit';
+import { setKitWeapons } from '../../weapons/models/kit';
 import { AUDIT_WEAPONS, auditWeapon, formatTable, loadHeadlessRig, measureHand, type ClipRow } from './audit';
+import {
+  GRIP_SHIPPED,
+  GRIP_WEAPONS,
+  GripTruth,
+  faceOf,
+  loadHeadlessKit,
+  runState,
+  wrapFailures,
+  type HandTruth,
+  type Pad,
+} from './gripAudit';
 
 /**
  * Hand–weapon contact, headless: every clip of every weapon at 60 Hz on the real ArmsRig.
@@ -164,4 +177,140 @@ describe('hand-weapon contact (safe mode)', () => {
       expect(out / (pts.p.length / 3)).toBeLessThan(0.005);
     }
   }, 120_000);
+});
+
+/**
+ * The shipped hold on the Blender kit weapons, judged on the TRUE meshes (glove skin vs the weapon's render
+ * triangles, `truth.ts`) rather than proxies: the baked grip (gripData.json) vs the raw clip at idle, ADS and
+ * under fire, the side-aware wrap of both hands, and pose continuity with the grip blended in.
+ */
+describe('grip truth on the kit weapons (baked grip)', () => {
+  const gripRows: { w: string; state: string; raw: number[]; grip: number[]; fails: string[] }[] = [];
+
+  test('side-aware wrap metric: a pad counts only on its own face, facing it, within 3 mm', () => {
+    const n = new Vector3();
+    const mk = (region: string, d: number, face: string, facing = -0.9) =>
+      ({ region, d, face, facing, near: true }) as Pad;
+    const h = (pads: Pad[]): HandTruth => ({ side: 'R', pads, pen: 0 });
+    expect(wrapFailures(h([mk('Ring3', 0.001, 'left')]))).toEqual([]);
+    expect(wrapFailures(h([mk('Ring3', 0.001, 'front')]))).toEqual([]);
+    // Touching, but on the near panel (the hand slid round the grip), or not facing it, or floating / sunk.
+    expect(wrapFailures(h([mk('Ring3', 0.001, 'right')]))).toEqual(['R.Ring3 on right']);
+    expect(wrapFailures(h([mk('Ring3', 0.001, 'left', 0.2)]))[0]).toContain('not facing');
+    expect(wrapFailures(h([mk('Ring3', 0.0045, 'left')]))[0]).toContain('gap');
+    expect(wrapFailures(h([mk('Ring3', -0.003, 'left')]))[0]).toContain('pen');
+    expect(faceOf(n.set(-1, 0, 0), 0.3)).toBe('left');
+    expect(faceOf(n.set(0, -0.3, -1).normalize(), 0.3)).toBe('front');
+  });
+
+  test('audit raw vs baked grip at idle / ADS / fire (true mesh)', async () => {
+    await loadHeadlessKit();
+    setKitWeapons(GRIP_WEAPONS);
+    const truth = new GripTruth(rig);
+    for (const w of GRIP_WEAPONS)
+      for (const on of [false, true]) {
+        const model = buildModel(w, { detailParts: true });
+        contact.autoEnable = () => on;
+        rig.attachWeapon(model, w);
+        expect(!!contact.grip).toBe(on);
+        truth.refresh(model);
+        for (const state of ['idle', 'ads', 'fire'] as const) {
+          let pR = 0,
+            pL = 0;
+          runState(rig, contact, state, (i) => {
+            if (i % 4) return;
+            pR = Math.max(pR, truth.measure(model, 'R').pen);
+            pL = Math.max(pL, truth.measure(model, 'L').pen);
+          });
+          const fails = [
+            ...wrapFailures(truth.measure(model, 'R')),
+            ...(model.parts.slide ? [] : wrapFailures(truth.measure(model, 'L'))),
+          ];
+          let row = gripRows.find((r) => r.w === w && r.state === state);
+          if (!row) gripRows.push((row = { w, state, raw: [], grip: [], fails: [] }));
+          if (on) {
+            row.grip = [pR, pL];
+            row.fails = fails;
+          } else row.raw = [pR, pL];
+        }
+        rig.setGripSeat(null);
+      }
+    contact.autoEnable = undefined;
+    console.log(
+      'TRUE-MESH PENETRATION mm (firing / support), raw → baked grip\n' +
+        gripRows
+          .map(
+            (r) =>
+              `${r.w.padEnd(6)} ${r.state.padEnd(5)} R ${(r.raw[0] * 1000).toFixed(1)} → ${(r.grip[0] * 1000).toFixed(1)}  L ${(r.raw[1] * 1000).toFixed(1)} → ${(r.grip[1] * 1000).toFixed(1)}  wrap fails: ${r.fails.join('; ') || 'none'}`,
+          )
+          .join('\n'),
+    );
+    expect(gripRows.length).toBe(GRIP_WEAPONS.length * 3);
+  }, 600_000);
+
+  test('never worse than raw: true-mesh penetration per hand, weapon × state', () => {
+    const bad = gripRows.flatMap((r) =>
+      [0, 1]
+        .filter((k) => r.grip[k] > r.raw[k] + 0.0005)
+        .map(
+          (k) =>
+            `${r.w}.${r.state}.${'RL'[k]} ${(r.raw[k] * 1000).toFixed(1)}→${(r.grip[k] * 1000).toFixed(1)}`,
+        ),
+    );
+    expect(bad).toEqual([]);
+  });
+
+  test('shipped weapons hold: side-aware wrap of both hands at idle / ADS / fire', () => {
+    const bad = gripRows
+      .filter((r) => GRIP_SHIPPED.includes(r.w))
+      .flatMap((r) => r.fails.map((f) => `${r.w}.${r.state} ${f}`));
+    expect(bad).toEqual([]);
+  });
+
+  test('pose continuity with the baked grip blended in (no snaps)', () => {
+    const rows: SpikeRow[] = [];
+    contact.autoEnable = () => true;
+    for (const w of GRIP_SHIPPED) {
+      const mk = () => buildModel(w, { detailParts: true });
+      for (const sc of scenarios(rig, w, mk))
+        rows.push(runScenario(rig, w, mk(), sc, (dt) => contact.enabled && contact.apply(dt)));
+    }
+    contact.autoEnable = undefined;
+    console.log(formatSpikes(rows, 'POSE CONTINUITY (baked grip)'));
+    const lim = (s: string) =>
+      s.startsWith('swap')
+        ? { deg: 12, mm: 25 }
+        : /^(idle|shoot|shootLast|shot string|rapid string)/.test(s)
+          ? { deg: 10, mm: 12 }
+          : { deg: 24, mm: 50 };
+    const bad = rows
+      .filter((r) => r.pop > lim(r.scenario).deg || r.popMm > lim(r.scenario).mm)
+      .map(
+        (r) =>
+          `${r.weapon}.${r.scenario} ${r.pop.toFixed(1)}° ${r.popAt}@${r.popFrame} ${r.popMm.toFixed(1)} mm`,
+      );
+    expect(bad).toEqual([]);
+  }, 600_000);
+
+  test('perf: the baked grip costs ≤ 0.6 ms/frame (headless)', () => {
+    contact.autoEnable = () => true;
+    let ms = 0,
+      n = 0;
+    for (const w of GRIP_SHIPPED) {
+      rig.attachWeapon(buildModel(w, { detailParts: true }), w);
+      runState(rig, contact, 'fire', () => {
+        ms += contact.stats.ms;
+        n++;
+      });
+    }
+    contact.autoEnable = undefined;
+    console.log('baked grip ms/frame', (ms / n).toFixed(3));
+    expect(ms / n).toBeLessThan(0.6);
+  }, 120_000);
+
+  test('restore the procedural guns for later test files', () => {
+    rig.setGripSeat(null);
+    setKitWeapons([]);
+    expect(buildModel('sb16').root.userData.kit).toBeFalsy();
+  });
 });
