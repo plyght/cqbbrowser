@@ -43,6 +43,18 @@ export class Physics {
     return this.tags.get(c.handle) ?? { surface: 'concrete' };
   }
 
+  /**
+   * Ground slab (top at `y`) covering ±`extent` m, built from `tile`-sized cuboids. One huge cuboid broke the
+   * character controller: on a 1 km box it lost ground contact to f32 precision, so the player sank into the
+   * dirt step by step and got stuck.
+   */
+  ground(y: number, extent: number, tag: ColliderTag, tile = 100) {
+    const h = tile / 2;
+    for (let x = -extent; x < extent; x += tile)
+      for (let z = -extent; z < extent; z += tile)
+        this.box({ x: x + h, y: y - 0.5, z: z + h }, { x: h, y: 0.5, z: h }, tag);
+  }
+
   /** Static axis-aligned box helper (centre + half extents). */
   box(
     center: { x: number; y: number; z: number },
