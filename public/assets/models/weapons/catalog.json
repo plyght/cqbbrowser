@@ -406,7 +406,7 @@
  },
  "families": {
   "acc": {
-   "bytes": 307488,
+   "bytes": 315608,
    "glb": "assets/models/weapons/acc.glb",
    "materials": {
     "kit_acc": {
@@ -1139,6 +1139,42 @@
     ]
    },
    "tris": 1472
+  },
+  "acc_p17_rmr": {
+   "bounds": [
+    [
+     -0.013,
+     0.04031,
+     -0.04688
+    ],
+    [
+     0.013,
+     0.06631,
+     -0.00188
+    ]
+   ],
+   "family": "acc",
+   "pivot": [
+    0.0,
+    0.0,
+    -0.0
+   ],
+   "proxies": [
+    {
+     "c": [
+      0.0,
+      0.05331,
+      -0.02438
+     ],
+     "h": [
+      0.013,
+      0.013,
+      0.0225
+     ],
+     "type": "box"
+    }
+   ],
+   "tris": 496
   },
   "acc_reddot": {
    "bounds": [
@@ -6227,7 +6263,7 @@
   "p17_rmr": [
    {
     "anchor": "origin",
-    "node": "p17_rmr",
+    "node": "acc_p17_rmr",
     "part": "slide"
    }
   ],

@@ -103,7 +103,7 @@ test('kit: chest cam idle + ADS in game', async ({ page }) => {
       },
       [slot, model] as const,
     );
-    await steps(page, 140); // swap-in done
+    await steps(page, Number(process.env.KIT_SWAP_STEPS ?? 140)); // swap-in done
     await settle(page);
     const idle = `${dir}/${PREFIX}-${model}-hip.png`;
     await page.screenshot({ path: idle });
