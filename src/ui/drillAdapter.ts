@@ -65,6 +65,8 @@ export function toRunResult(r: DrillResult, info?: EngineDrill): RunResult {
     points: s.points,
     maxPoints: s.maxPoints,
     bands: bands(info?.par),
+    // No replay recorder yet: "Watch footage" stays disabled instead of opening a placeholder.
+    hasFootage: false,
   };
   return out;
 }
