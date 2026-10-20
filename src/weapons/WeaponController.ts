@@ -388,10 +388,11 @@ export class WeaponController implements System {
     rig.root.position.set(0, 0, 0);
     rig.root.quaternion.identity();
     rig.root.updateMatrixWorld(true);
-    rig.play('idle', { fade: 0 });
-    rig.update(0);
-    e.model.root.updateMatrixWorld(true);
-    e.rigRefInv = new Matrix4().copy(e.model.root.matrixWorld).invert();
+    // Mid-swap (swapMid) this runs between the swap-out and the draw: measure at idle without disturbing them.
+    rig.atIdle(() => {
+      e.model.root.updateMatrixWorld(true);
+      e.rigRefInv = new Matrix4().copy(e.model.root.matrixWorld).invert();
+    });
     rig.root.position.copy(keepP);
     rig.root.quaternion.copy(keepQ);
     rig.root.updateMatrixWorld(true);

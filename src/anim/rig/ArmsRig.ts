@@ -86,6 +86,12 @@ function readXf(a: ArrayLike<number>, o: number, p: Vector3, q: Quaternion) {
 }
 
 export class ArmsRig {
+  /** Fade-out of a shot's kick when the next shot cuts in (s). */
+  static SHOT_XFADE = 0.07;
+  /** Fire cancelling a draw / inspect: crossfade back to the idle hold (s). */
+  static CANCEL_XFADE = 0.14;
+  /** Crossfade from the swap-out's held last pose into the next weapon's draw (s). */
+  static SWAP_XFADE = 0.2;
   /** Dev toggles (anim.html?noik=1&nomerge=1). */
   static debug = { noIK: false, noMerge: false };
   /** Rig space (eye). Add to the scene / camera; the handling layer moves this. */
@@ -113,11 +119,21 @@ export class ArmsRig {
   private readonly pose: Float32Array;
   private readonly from: Float32Array;
   private readonly tmp: Float32Array;
-  private readonly addRef: Float32Array;
+  private addRef: Float32Array;
   private layer?: Layer;
   private fade = 0;
   private fadeDur = 0;
+  /**
+   * The clip being faded out keeps playing during the crossfade (its pose is sampled into `from` every frame).
+   * A frozen snapshot stopped the outgoing motion dead on the fade's first frame — idle sway froze, and a
+   * cancelled inspect / finished reload jerked (a velocity pop) into the next clip.
+   */
+  private outgoing?: { clip: Clip; t: number; speed: number };
   private shot?: Layer;
+  /** The shot a newer shot cut into: keeps playing while it fades out (no snap of its kick back to zero). */
+  private shotPrev?: Layer;
+  private shotPrevW = 0;
+  private prevRef: Float32Array;
   private holding = false;
   private lockedBack = false;
   private boneList: (Bone | undefined)[];
@@ -192,6 +208,7 @@ export class ArmsRig {
     this.from = new Float32Array(this.layout.stride);
     this.tmp = new Float32Array(this.layout.stride);
     this.addRef = new Float32Array(this.layout.stride);
+    this.prevRef = new Float32Array(this.layout.stride);
     this.root.updateMatrixWorld(true);
     const wp = (x: Bone) => x.getWorldPosition(new Vector3());
     this.armLen.R = [
@@ -301,27 +318,48 @@ export class ArmsRig {
     this.seatIdentity = true;
     if (this.seatProvider) {
       // Measure the idle hold of this weapon without the seat, then restore the playback state.
-      const keep = {
-        layer: this.layer,
-        shot: this.shot,
-        fadeDur: this.fadeDur,
-        fade: this.fade,
-        holding: this.holding,
-      };
-      const pose = this.pose.slice();
-      const from = this.from.slice();
-      const onBeat = this.onBeat;
-      this.onBeat = undefined;
-      this.play('idle', { fade: 0 });
-      this.update(0);
-      const s = this.seatProvider(this, model, weaponId);
+      const s = this.atIdle(() => this.seatProvider!(this, model, weaponId));
+      if (s) this.setGripSeat(s);
+    }
+    if (!this.layer) this.play('idle', { fade: 0 });
+  }
+
+  /**
+   * Run `fn` with the rig posed at idle frame 0 (no events), then restore the playback state exactly — layer,
+   * shot layers, crossfade, hold — and put the restored pose back on the bones and the weapon. Measurements made
+   * mid-action (a mid-swap attach, the controller's idle gun frame) must never show the idle hold for a frame.
+   */
+  atIdle<T>(fn: () => T): T {
+    const keep = {
+      layer: this.layer,
+      shot: this.shot,
+      shotPrev: this.shotPrev,
+      shotPrevW: this.shotPrevW,
+      fadeDur: this.fadeDur,
+      fade: this.fade,
+      outgoing: this.outgoing,
+      holding: this.holding,
+      lockedBack: this.lockedBack,
+    };
+    const pose = this.pose.slice();
+    const from = this.from.slice();
+    const onBeat = this.onBeat;
+    this.onBeat = undefined;
+    this.shot = this.shotPrev = undefined;
+    this.play('idle', { fade: 0 });
+    this.update(0);
+    try {
+      return fn();
+    } finally {
       this.onBeat = onBeat;
       Object.assign(this, keep);
       this.pose.set(pose);
       this.from.set(from);
-      if (s) this.setGripSeat(s);
+      if (keep.layer) {
+        this.applyBones();
+        this.syncWeapon();
+      }
     }
-    if (!this.layer) this.play('idle', { fade: 0 });
   }
 
   /**
@@ -408,7 +446,16 @@ export class ArmsRig {
     if (clip.additive) {
       // Fire cancels draws/inspects (but not reloads — the controller gates those).
       if (this.layer && CANCELLABLE.includes(this.layer.clip.action) && this.layer.clip.action !== 'idle')
-        this.play('idle', { fade: 0.08 });
+        this.play('idle', { fade: ArmsRig.CANCEL_XFADE });
+      // A shot still kicking hands over to a fade-out slot: its delta eases to zero over SHOT_XFADE instead of
+      // snapping back when the new shot restarts the layer.
+      if (this.shot) {
+        this.shotPrev = this.shot;
+        this.shotPrevW = 1;
+        const r = this.prevRef;
+        this.prevRef = this.addRef;
+        this.addRef = r;
+      }
       samplePose(clip, 0, this.addRef);
       this.shot = { clip, t: 0, speed: opts.speed ?? 1, onEvent: opts.onEvent, done: false };
       if (action === 'shootLast' && this.anims?.locksBack) this.lockedBack = true;
@@ -420,10 +467,16 @@ export class ArmsRig {
     if (action.startsWith('reload') || action === 'swapIn') this.lockedBack = false;
     const fade = opts.fade ?? 0.15;
     if (this.layer && fade > 0) {
+      // Mid-fade the outgoing pose is itself a blend: freeze that; otherwise keep the outgoing clip playing.
       this.from.set(this.pose);
+      const l = this.layer;
+      this.outgoing = this.fadeDur > 0 ? undefined : { clip: l.clip, t: l.t, speed: l.speed };
       this.fade = 0;
       this.fadeDur = fade;
-    } else this.fadeDur = 0;
+    } else {
+      this.fadeDur = 0;
+      this.outgoing = undefined;
+    }
     this.layer = { clip, t: 0, speed: opts.speed ?? 1, onEvent: opts.onEvent, done: false };
     this.holding = !!opts.hold && !!clip.hold;
     this.fireEvents(this.layer, -1, 0);
@@ -441,7 +494,6 @@ export class ArmsRig {
 
   private fireEvents(l: Layer, t0: number, t1: number) {
     for (const e of l.clip.events) if (e.t > t0 && e.t <= t1 + 1e-9) this.emit(e.name, l.onEvent);
-    if (t0 < 0) for (const e of l.clip.events) if (e.t === 0) this.emit(e.name, l.onEvent);
   }
 
   update(dt: number): void {
@@ -471,11 +523,20 @@ export class ArmsRig {
     }
     samplePose(l.clip, l.t, this.pose);
     if (this.fadeDur > 0) {
+      const o = this.outgoing;
+      if (o) {
+        o.t += dt * o.speed;
+        o.t = o.clip.loop ? o.t % o.clip.duration : Math.min(o.t, o.clip.duration);
+        samplePose(o.clip, o.t, this.from);
+      }
       this.fade += dt;
       const k = Math.min(1, this.fade / this.fadeDur);
       blendPose(L, this.tmp, this.from, 0, this.pose, 0, k * k * (3 - 2 * k));
       this.pose.set(this.tmp);
-      if (k >= 1) this.fadeDur = 0;
+      if (k >= 1) {
+        this.fadeDur = 0;
+        this.outgoing = undefined;
+      }
     }
     // Additive shot on top.
     const s = this.shot;
@@ -489,6 +550,17 @@ export class ArmsRig {
         addPose(L, this.pose, this.addRef, this.tmp, 1);
       }
     }
+    const sp = this.shotPrev;
+    if (sp) {
+      sp.t += dt * sp.speed;
+      this.shotPrevW -= dt / ArmsRig.SHOT_XFADE;
+      if (this.shotPrevW <= 0 || sp.t >= sp.clip.duration) this.shotPrev = undefined;
+      else {
+        const k = this.shotPrevW;
+        samplePose(sp.clip, sp.t, this.tmp);
+        addPose(L, this.pose, this.prevRef, this.tmp, k * k * (3 - 2 * k));
+      }
+    }
     if (this.lockedBack) this.pose[L.ch.bolt] = Math.max(this.pose[L.ch.bolt], 1);
     this.applyBones();
     this.syncWeapon();
@@ -499,7 +571,9 @@ export class ArmsRig {
         this.pendingSwap = undefined;
         this.attachWeapon(p.model, p.id);
         this.emit('swapMid', p.opts.onEvent);
-        this.play('swapIn', { ...p.opts, fade: 0.06 });
+        // The swap-out's last pose and the draw's first are far apart (≈ 60 cm at the support hand): a 0.06 s
+        // fade moved the arm through view in 3–4 frames. Both ends are below the frame; 0.2 s keeps it continuous.
+        this.play('swapIn', { ...p.opts, fade: ArmsRig.SWAP_XFADE });
       } else if (!l.clip.holdLast && !l.clip.loop) this.play('idle', { fade: 0.2 });
     }
   }

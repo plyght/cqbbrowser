@@ -63,8 +63,14 @@ export const CONTACT = {
   maxGun: 0.005,
   maxPush: 0.05,
   maxMag: 0.04,
+  /** Support-hand back-off for a finger nothing else clears (m). */
+  maxBack: 0.02,
   /** Release time constant (s). */
   tau: 0.025,
+  /** Finger opening: ease in / release time constants (s) and the largest change per frame (rad). */
+  tauOpen: 0.03,
+  tauRelease: 0.08,
+  maxOpenStep: 0.06,
 };
 
 /** Finger synergy weights per joint (MCP, PIP, DIP): opening (knuckle-led) and wrap curl (PIP/DIP-led). */
@@ -303,18 +309,35 @@ export class HandContact {
       this.col = c.col;
       this.magPts = c.magPts;
       this.model = model;
-      this.gunOff.set(0, 0, 0);
-      this.magOff.set(0, 0, 0);
-      for (const s of ['L', 'R'] as const) {
-        this.hands[s].push.set(0, 0, 0);
-        for (const ch of this.hands[s].chains) {
-          ch.open.fill(0);
-          ch.curl.fill(0);
-          ch.wrap = false;
-        }
-      }
+      this.reset();
     }
     return true;
+  }
+
+  /** Forget all eased / warm-started solver state (a new weapon in the hands). */
+  reset() {
+    this.gunOff.set(0, 0, 0);
+    this.magOff.set(0, 0, 0);
+    this.heldPush.set(0, 0, 0);
+    this.gunHint = { dir: 0 };
+    this.heldHint = { dir: 0 };
+    this.frame = 0;
+    for (const s of ['L', 'R'] as const) {
+      const h = this.hands[s];
+      h.push.set(0, 0, 0);
+      h.dir = 0;
+      h.dist = undefined;
+      this.resOff[s].set(0, 0, 0);
+      this.resGoal[s].set(0, 0, 0);
+      for (const ch of h.chains) {
+        ch.open.fill(0);
+        ch.curl.fill(0);
+        ch.wrap = false;
+        ch.trig = 0;
+        ch.stuck = -1;
+        ch.intent = false;
+      }
+    }
   }
 
   /** Refresh the weapon-frame view of the weapon and both hands (no resolution). */
@@ -415,7 +438,7 @@ export class HandContact {
       _d.set(sp.offset[0] * wl, sp.offset[1] * wl, sp.offset[2] * wl).transformDirection(
         this.model!.root.matrixWorld,
       );
-      _d.multiplyScalar(Math.hypot(...sp.offset) * wl);
+      _d.multiplyScalar(Math.hypot(sp.offset[0], sp.offset[1], sp.offset[2]) * wl);
       rig.bones.handL.getWorldPosition(_p2).add(_d);
       rig.reachHand('L', _p2, _q);
       this.hands.L.proxy.update(this.toWeapon);
@@ -441,21 +464,17 @@ export class HandContact {
     else this.heldPush.set(0, 0, 0);
     lap(2);
     // 4. Support-hand fingers (the firing hand is already final: hand↔hand obstacle).
+    // Support-hand fingers that no joint motion clears (a tip deep in a surface) back the whole hand off along
+    // the surface normal (two-bone IK). The back-off is persistent state, eased and with hysteresis: it grows
+    // while a finger is still > 1 mm in, holds inside the band, and only lets go once every finger is clear by
+    // > 3 mm. (It used to be re-solved from scratch every frame: up to 2 cm on or off depending on which side
+    // of 1 mm the deepest tip landed and on which surface's gradient it read, so under recoil the support hand
+    // flicked between two poses ~3 cm apart — the pistol "glitching".)
     this.hands.L.proxy.update(this.toWeapon);
     this.handShape();
     this.fingers('L', dt);
-    // Support-hand fingers that no joint motion clears (a tip deep in a surface): the hand backs off along the
-    // surface normal by the residual (two-bone IK), then the fingers re-solve. Twice at most.
-    for (let it = 0; it < 1; it++) {
-      if (this.minGap.L >= -0.001) break;
-      const pen = this.fingerResidual('L', _pos);
-      if (pen <= 0.001) break;
-      this.col!.gradient(_pos, _g, null);
-      _d.copy(_g)
-        .transformDirection(this.model!.root.matrixWorld)
-        .multiplyScalar(Math.min(pen + CONTACT.clear, 0.02));
-      rig.bones.handL.getWorldPosition(_p2).add(_d);
-      rig.reachHand('L', _p2);
+    this.updateBackOff('L', dt);
+    if (this.backOff('L')) {
       this.hands.L.proxy.update(this.toWeapon);
       this.fingers('L', 0);
     }
@@ -752,6 +771,42 @@ export class HandContact {
     this.stats.reachMiss = Math.max(this.stats.reachMiss, _p.distanceTo(_p2));
     h.update(this.toWeapon);
   }
+
+  /** Apply the support hand's eased finger-residual back-off (weapon frame) through the arm IK. */
+  private backOff(side: Side): boolean {
+    const r = this.resOff[side];
+    if (r.lengthSq() < 1e-12) return false;
+    const hand = side === 'L' ? this.rig.bones.handL : this.rig.bones.handR;
+    _d.copy(r).transformDirection(this.model!.root.matrixWorld).multiplyScalar(r.length());
+    hand.getWorldPosition(_p2).add(_d);
+    this.rig.reachHand(side, _p2);
+    return true;
+  }
+
+  /**
+   * This frame's back-off from this frame's finger residual: grows (τ 50 ms) toward clearing a finger still
+   * > 1 mm in, holds while the worst finger is within −1…+3 mm, releases (τ 250 ms) once all are clear by 3 mm.
+   */
+  private updateBackOff(side: Side, dt: number) {
+    const r = this.resOff[side];
+    const t = this.resGoal[side];
+    const g = this.minGap[side];
+    if (g < -0.001) {
+      const pen = this.fingerResidual(side, _pos);
+      if (pen > 0.001) {
+        this.col!.gradient(_pos, _g, null);
+        t.copy(r).addScaledVector(_g, pen + CONTACT.clear);
+        clampLen(t, CONTACT.maxBack);
+      }
+    } else if (g > 0.003) t.set(0, 0, 0);
+    else t.copy(r);
+    const k = 1 - Math.exp(-dt / (t.lengthSq() >= r.lengthSq() ? 0.05 : 0.25));
+    r.lerp(t, k);
+    if (r.lengthSq() < 1e-10 && t.lengthSq() === 0) r.set(0, 0, 0);
+  }
+
+  private resOff: Record<Side, Vector3> = { L: new Vector3(), R: new Vector3() };
+  private resGoal: Record<Side, Vector3> = { L: new Vector3(), R: new Vector3() };
 
   // ------------------------------------------------------------------------------------------ 3. mag rules
 
@@ -1054,11 +1109,12 @@ export class HandContact {
         if (this.synergy(h, fi, 0, 0, skip) < CONTACT.clear * 0.5)
           open = this.solveOpen(h, fi, skip, maxO, cs.open[0]);
         cs.stuck = Number.isNaN(this.stuckGap) ? -1 : this.stuckGap;
+        // Eased both ways and rate-limited: a hard (same-frame) opening flicked a finger 15–45° in one frame
+        // whenever recoil or the clip brushed it into the grip, then let it fall back — finger jitter under fire.
+        // A few mm of penetration for 2–3 frames reads far better than a flick.
         const prev = cs.open[0];
-        cs.open[0] =
-          open >= 0
-            ? Math.max(open, prev > 0 ? ease(prev, open, dt) : 0)
-            : Math.min(open, prev < 0 ? ease(prev, open, dt) : 0);
+        const want = Math.abs(open) > Math.abs(prev) ? ease(prev, open, dt, CONTACT.tauOpen) : ease(prev, open, dt, CONTACT.tauRelease);
+        cs.open[0] = prev + Math.max(-CONTACT.maxOpenStep, Math.min(CONTACT.maxOpenStep, want - prev));
         if (Math.abs(cs.open[0]) < 1e-5) cs.open[0] = 0;
         // 2. Wrap: curl the middle/tip joints to the first touch (eased in), never into a surface.
         const curlT = cs.wrap ? this.solveCurl(h, fi, cs.open[0], skip, CONTACT.touch) : 0;

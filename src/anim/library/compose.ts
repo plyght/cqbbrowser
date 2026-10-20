@@ -1,6 +1,6 @@
 import { Euler, Quaternion } from 'three';
 import type { ClipEvent, V3 } from '../rig/clipData';
-import { blendPose, qmul, samplePose, type Clip, type HandKey, type Layout } from '../rig/pose';
+import { blendPose, despike, qmul, samplePose, settleToStart, type Clip, type HandKey, type Layout } from '../rig/pose';
 
 /**
  * Clip composition: build a weapon-specific clip from segments of the baked source clips (trim, speed,
@@ -241,7 +241,7 @@ export function compose(id: string, action: string, recipe: Recipe, clips: Recor
     }
   }
   const scaleKeys = (ks?: HandKey[]) => ks?.map((k) => ({ ...k, t: k.t / speed }));
-  return {
+  const clip: Clip = {
     id,
     action,
     pack,
@@ -259,4 +259,10 @@ export function compose(id: string, action: string, recipe: Recipe, clips: Recor
     additive: recipe.additive,
     holdLast: recipe.holdLast,
   };
+  // Piece joins can step; the sources' retarget flips are already removed at decode.
+  despike(clip);
+  // Loops end where they start (no seam at the wrap); additive layers return to a zero delta before they drop.
+  if (recipe.loop) settleToStart(clip, 0.3);
+  if (recipe.additive) settleToStart(clip, 0.4, true);
+  return clip;
 }

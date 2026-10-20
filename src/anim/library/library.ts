@@ -289,7 +289,9 @@ function pistol(): Record<ArmsAction, Recipe> {
         { t: 1.3, at: 'magwell', off: [0.0, -0.06, 0.03], w: 1 },
         { t: 1.5, at: 'magwell', off: [0.0, -0.08, 0.03], w: 0 },
       ],
-      hold: [0.45, 1.1],
+      // The hold loop must lie inside the static part: the support hand's magwell keys start at 0.9 (a loop
+      // to 1.1 snapped the rising hand back down on every wrap).
+      hold: [0.45, 0.85],
       magStyle: 'straight',
     },
     inspect: { segs: [{ clip: 'beretta.inspect' }] },
