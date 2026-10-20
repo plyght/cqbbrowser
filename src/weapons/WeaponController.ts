@@ -1,4 +1,4 @@
-import { Euler, Group, Matrix4, Object3D, Quaternion, Vector3 } from 'three';
+import { Euler, Group, Matrix4, type Mesh, Object3D, Quaternion, Vector3 } from 'three';
 import type { Context, System } from '../core/Context';
 import { Spring, clamp, damp, noise1, rng } from '../core/math';
 import { ReloadGesture } from '../input/ReloadGesture';
@@ -238,6 +238,7 @@ export class WeaponController implements System {
     this.pistol = this.loadout.find((x) => x.cls === 'pistol');
     this.mount(this.equipped);
     ctx.scene.add(this.view, ...this.body.objects);
+    for (const o of this.body.objects) receiveShadows(o);
     // Authored arms rig (src/anim/rig); the procedural arms + beat graph stay as the fallback until it loads
     // (and with `?procarms`).
     if (typeof location !== 'undefined' && !location.search.includes('procarms')) {
@@ -274,6 +275,7 @@ export class WeaponController implements System {
     const cfg = CFG[cls];
     const model = buildModel(def.model, { detailParts: true });
     const root = model.root;
+    receiveShadows(root);
     root.updateMatrixWorld(true);
     const inv = new Matrix4().copy(root.matrixWorld).invert();
     // Sockets, mag frame, grip surfaces and the solved hand placements (anim/grip).
@@ -360,7 +362,10 @@ export class WeaponController implements System {
     this.switching = null;
     this.ctx.scene.add(rig.root);
     this.body.left.mesh.visible = this.body.right.mesh.visible = false;
-    for (const m of rig.meshes) m.frustumCulled = false;
+    for (const m of rig.meshes) {
+      m.frustumCulled = false;
+      m.receiveShadow = true;
+    }
     this.view.remove(this.equipped.model.root);
     this.mount(this.equipped);
   }
@@ -1690,4 +1695,15 @@ export class WeaponController implements System {
       e.mag.obj.quaternion.copy(e.magRestQ);
     }
   }
+}
+
+/**
+ * The viewmodel (gun, arms, body) takes the sun's shadow like the world does. It used to ignore it, so under the
+ * kill-house roof (or the covered firing line) the gun and gloves were lit by full sun while the room around
+ * them was in shade: a glowing white gun once auto-exposure opened up indoors.
+ */
+function receiveShadows(root: Object3D) {
+  root.traverse((o) => {
+    if ((o as Mesh).isMesh) o.receiveShadow = true;
+  });
 }
