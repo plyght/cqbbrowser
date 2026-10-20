@@ -6,7 +6,6 @@ import {
   Group,
   Matrix4,
   Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   Quaternion,
@@ -331,7 +330,8 @@ function special(name: string): Material {
         envMap: weaponEnvMap(),
       }),
       lens: M.lensCoat,
-      reticle: new MeshBasicMaterial({ name: 'reticle', color: 0xff2a10, toneMapped: false }),
+      // HDR red (as the procedural optics) so the dot stays bright through the lens tint and auto-exposure
+      reticle: M.reticle,
       lightLens: M.lightLens,
     };
     for (const m of Object.values(specials)) if (m instanceof MeshStandardMaterial) KIT_MATERIALS.add(m);

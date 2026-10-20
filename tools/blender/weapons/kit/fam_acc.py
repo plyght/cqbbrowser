@@ -50,7 +50,8 @@ def red_dot():
         parts.append(o)
     parts.append(cyl("lensF", ri, zb1 + 0.0028, zb1 + 0.0018, ax, 0, 24, "lens", 0))
     parts.append(cyl("lensR", ri, zb0 - 0.001, zb0 - 0.0018, ax, 0, 24, "glass", 0))
-    parts.append(rbox("dot", 0.0011, 0.0011, 0.0004, 0, ax, zb1 + 0.004, mat="reticle", bevel=0))
+    # reticle: a round emissive dot sized to read like a 2 MOA dot at the ADS eye distance (~5-6 px at 720p)
+    parts.append(cyl("dot", 0.0012, zb1 + 0.0042, zb1 + 0.0038, ax, 0, 20, "reticle", 0))
     return join("acc_reddot", parts)
 
 
