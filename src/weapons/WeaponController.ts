@@ -329,6 +329,9 @@ export class WeaponController implements System {
   /** The authored arms rig once loaded (null = procedural fallback). */
   rig: ArmsRig | null = null;
 
+  /** Rig reload past the point the gun can fire again (mag seated + chambered). */
+  private reloadLive = false;
+
   /** True while ArmsRig.load() is in flight (viewmodel hidden). */
   rigPending = false;
 
@@ -432,6 +435,7 @@ export class WeaponController implements System {
         }
         break;
       case 'magSeat': {
+        if (this.planKind === 'reload' && e.mags.chambered) this.reloadLive = true;
         const k = lib.magSeat.calm[0].kick;
         if (k) this.applyKick(k, 1);
         break;
@@ -442,6 +446,7 @@ export class WeaponController implements System {
         if (this.planKind === 'reload') {
           e.mags.chamber();
           e.boltLocked = false;
+          this.reloadLive = true;
         }
         const k = (lib[beat] ?? lib.slideRelease ?? lib.boltRelease)?.calm[0].kick;
         if (k) this.applyKick(k, 1);
@@ -549,6 +554,12 @@ export class WeaponController implements System {
       _m.decompose(rig.root.position, rig.root.quaternion, _v);
     }
     rig.root.updateMatrixWorld(true);
+    // Mag seated (and chambered): the gun works, so trigger or aim cuts the clip's return-to-ready tail short
+    // (it held the gun ~0.65 s past the seat, unable to fire or aim).
+    if (this.planKind === 'reload' && this.reloadLive) {
+      const f = this.ctx.input.frame;
+      if (f.down.has('fire') || this.player.aiming) rig.play('idle', { fade: ArmsRig.CANCEL_XFADE });
+    }
     rig.update(dt);
     this.updateRigCamFix(dt);
     this.rigArmLayer(rig);
@@ -1190,6 +1201,7 @@ export class WeaponController implements System {
       this.reloadVariant = empty || intent === 'speedUpgrade' ? 'speed' : 'tactical';
       this.swapped = false;
       this.planKind = 'reload';
+      this.reloadLive = false;
       this.idleTime = 0;
       const stressed = this.player.stress > 0.45;
       rig.play(empty ? 'reloadEmpty' : 'reloadTactical', {

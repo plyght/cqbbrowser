@@ -54,8 +54,8 @@ export function holdShiftZ(cfg: ClassCfg, buttZ: number | undefined): number {
 export const CFG: Record<WeaponClass, ClassCfg> = {
   rifle: {
     holds: {
-      high: { p: [0.05, -0.135, -0.38], r: [0.03, 0.06, 0] },
-      ads: { p: [-0.014, -0.035, -0.27], r: [0.084, 0, 0] },
+      high: { p: [0.031, -0.134, -0.38], r: [0, 0, 0] },
+      ads: { p: [-0.022, -0.063, -0.26], r: [0, 0, 0] },
       low: { p: [0.04, -0.2, -0.352], r: [-0.405, 0.12, 0.05] },
       compressed: { p: [0.045, -0.16, -0.28], r: [-0.1, 0.04, 0] },
       sprint: { p: [0.02, -0.25, -0.25], r: [-0.75, 0.55, -0.5] },
@@ -89,7 +89,7 @@ export const CFG: Record<WeaponClass, ClassCfg> = {
   pistol: {
     holds: {
       high: { p: [-0.035, -0.115, -0.47], r: [0, 0, 0] },
-      ads: { p: [-0.078, -0.03, -0.61], r: [-0.06, -0.011, 0.03] },
+      ads: { p: [-0.078, -0.03, -0.61], r: [0, 0, 0] },
       low: { p: [-0.045, -0.175, -0.42], r: [-0.5, 0.05, 0] },
       compressed: { p: [-0.01, -0.14, -0.3], r: [-0.1, 0, 0] },
       sprint: { p: [0.06, -0.28, -0.3], r: [-1.0, 0.15, 0] },

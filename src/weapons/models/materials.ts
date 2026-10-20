@@ -406,12 +406,14 @@ export function weaponMaterials(): WeaponMaterials {
       side: DoubleSide,
       envMapIntensity: 1.6,
     }),
+    // Sight glass is looked *through*: a red dot is two coated lenses, both faces drawn (DoubleSide), so
+    // four layers stack. At 0.45 the window went ~90% opaque and hid the target behind the dot.
     lensCoat: std({
       color: 0x4a2c6a,
       metalness: 1,
       roughness: 0.06,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.12,
       depthWrite: false,
       side: DoubleSide,
       envMapIntensity: 1.8,

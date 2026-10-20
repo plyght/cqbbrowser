@@ -8,11 +8,17 @@
  * Prints the suggested holds for `src/anim/holds.ts`; the grip tests then confirm them.
  */
 import { Matrix4, Vector3 } from 'three';
-import { CFG, holdShiftZ } from '../holds';
+import { CFG, holdShiftZ, type HoldName } from '../holds';
 import { armContexts, armMetrics, armViolation, VALIDATED_HOLDS } from './arm';
 import { installHeadlessCanvas } from './headlessDom';
 import { gripShapes } from './shapes';
 import { solveFiring, supportCandidates, supportScore } from './solve';
+
+/** Hold rotation axes ([pitch, yaw, roll] indices) that must stay zero: they define where the gun aims. */
+const AIM_PINNED: [HoldName, number[]][] = [
+  ['ads', [0, 1, 2]],
+  ['high', [0, 1]],
+];
 
 export async function optimiseHolds(log = console.log) {
   installHeadlessCanvas();
@@ -54,6 +60,12 @@ export async function optimiseHolds(log = console.log) {
       }
       viol = c;
       for (let i = 0; i < v.length; i++) c += (i % 6 < 3 ? 300 : 3) * (v[i] - x0[i]) ** 2;
+      // The aim-defining rotations stay pinned: at ADS the camera rides the sight, so any ADS pitch/yaw/roll
+      // tilts the whole view off the point of aim; at high ready pitch/yaw would throw hip shots off it.
+      for (const [pose, axes] of AIM_PINNED) {
+        const k = VALIDATED_HOLDS.indexOf(pose) * 6 + 3;
+        for (const a of axes) c += 1e5 * v[k + a] ** 2;
+      }
       const low = VALIDATED_HOLDS.indexOf('low') * 6 + 3;
       if (cls === 'rifle') c += 400 * Math.max(0, v[low] + 0.38) ** 2;
       return c;

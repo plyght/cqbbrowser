@@ -110,7 +110,7 @@ export class World implements System, HitListener {
     ground.position.y = -0.02;
     ground.receiveShadow = true;
     scene.add(ground);
-    physics.box({ x: 0, y: -0.5, z: 0 }, { x: 500, y: 0.5, z: 500 }, { surface: 'dirt' });
+    physics.ground(0, 500, { surface: 'dirt' });
 
     const envFor = (id: FacilityId): FacilityEnv & { batch: StaticBatch } => {
       const group = new Group();
