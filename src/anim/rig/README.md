@@ -85,13 +85,37 @@ fire, slingDrop, holsterClear, swapMid`. Each fires on its frame through `onEven
 
 ## Per-weapon differences (src/anim/library/library.ts)
 
-| weapon | pack    | empty reload                                               | mag      | timing           |
-| ------ | ------- | ---------------------------------------------------------- | -------- | ---------------- |
-| k47s   | AK      | old mag drops, rock-in, firing hand racks the carrier      | rock     | 1.0, swing swaps |
-| sb16   | AK      | straight insert, support palm **slaps the bolt catch**     | straight | 1.05             |
-| hb300  | AK      | same as SB-16                                              | straight | 1.15, quick swap |
-| kp9    | AK      | lock the charging handle back, change the mag, **HK slap** | straight | 1.08             |
-| p17    | Beretta | slide locked, new mag, overhand slide release              | straight | 1.1              |
+| weapon | pack    | speed reload (double tap, ≈ 0.9–1 s, seat ≈ 0.8 s)                    | empty reload finisher                   | mag      |
+| ------ | ------- | --------------------------------------------------------------------- | --------------------------------------- | -------- |
+| k47s   | AK      | fresh mag's spine knocks the old one out forward, rock in, hard clack | overhand rack with a wrist roll         | rock     |
+| sb16   | AK      | cant out, empty drops free and tumbles, low pouch rip, palm punch     | support palm **slaps the bolt catch**   | straight |
+| hb300  | AK      | same as SB-16, quicker                                                | same as SB-16                           | straight |
+| kp9    | AK      | rip the old mag out and flick it away, fresh mag in                   | cock, lock, **HK slap**                 | straight |
+| p17    | Beretta | the Beretta-pack dump-and-index reload at 1.3×                        | slide locked, new mag, overhand release | straight |
+
+Rifle speed / empty reloads are built in `arSpeed` / `akSpeed` / `hkSpeed`: a lead-in blend from the ready hold
+(anticipation dip + cant out), the AK-pack reload with the hand trip to the pouch slowed where the source wrist turns
+fast (`retime`), authored tilt that kicks the whole gun up on `magSeat` / `boltRelease`, and the support hand following
+that tilt while it is on the gun (`ArmsRig.tiltDelta`). `magDrop.hold` keeps the AK's old mag seated until it is
+knocked out; `drop` is the launch velocity the controller gives the physical floor mag at `magOut`. The controller
+plays `reloadSpeed` on a double tap (crossfading out of the tactical that started on the first release) and gives the
+seat and bolt beats 1.6× the impulse of a tactical. Tactical reloads stay ≈ 2 s.
+
+### Mag check (`present` layer)
+
+`magCheck` recipes carry a `present` layer (`PresentRecipe` in `library/compose.ts`, run by `ArmsRig.presentLayer`
+after the hand IK). It owns the seated mag and the support hand for its span:
+
+- `path` 0 → 1 slides the mag out of the well along its own axis (`magGeom.ts` measures the axis and how deep it
+  sits; the AK rocks about its front lug first) until it is clear by `MAG_GAP`. 1 → 2 swings it to `pose` in the
+  chest-cam frame (`rig.presentOffset`, kept current by the controller outside the check). Keys are monotone cubic.
+- `hand` weights the support hand onto the mag: two-bone IK onto the source clip's own mag-in-hand transform
+  (`grip`), moved around our mag by `gripTurn` / `gripShift` so the palm leaves the window, holes and lips in view.
+  The hand turn is kept continuous through 180°.
+- Families: pistols present close and low with the back (witness holes) toward the camera; rifles tilt it up toward
+  the face, side window / holes and lips in view. Events `magRelease, magCheckOut, magCheckIn, magSeat` fire at
+  release, clear-of-well, re-entry and seat; a tug follows the seat.
+- `ArmsRig.debug.present` / `debug.grip` override the pose for tuning (see `tests/e2e/magcheck.spec.ts`).
 
 Weapons that aren't in the table (a future revolver or shotgun) fall back by family in `weaponAnims(id)`.
 

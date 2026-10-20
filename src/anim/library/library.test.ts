@@ -163,6 +163,29 @@ describe('library table', () => {
     expect(WEAPON_ANIMS.p17.pack).toBe('beretta');
   });
 
+  test('rifle speed reloads: faster than the tactical, punch on the seat, per-family finishers', () => {
+    const t = (id: string, a: 'reloadSpeed' | 'reloadTactical' | 'reloadEmpty', name: string) => {
+      const r = WEAPON_ANIMS[id].clips[a];
+      const e = r.events?.find((x) => x.name === name);
+      return e ? e.t / (r.speed ?? 1) : NaN;
+    };
+    for (const id of ['sb16', 'hb300', 'k47s', 'kp9']) {
+      const sp = WEAPON_ANIMS[id].clips.reloadSpeed;
+      // The source's own seat marker (AK pack) or an authored one: either way well under a second.
+      expect(sp.speed!).toBeGreaterThan(WEAPON_ANIMS[id].clips.reloadTactical.speed ?? 1);
+      expect(sp.tilt?.length).toBeGreaterThan(4);
+      expect(sp.drop).toBeDefined();
+      expect(t(id, 'reloadSpeed', 'magOut')).toBeLessThan(0.5);
+    }
+    // AK: the old mag stays seated until the fresh one knocks it out; HK flicks it; AR lets it fall.
+    expect(WEAPON_ANIMS.k47s.clips.reloadSpeed.magDrop?.hold).toBe(true);
+    expect(WEAPON_ANIMS.kp9.clips.reloadSpeed.drop![0]).toBeLessThan(-1);
+    expect(WEAPON_ANIMS.sb16.clips.reloadSpeed.magDrop?.hold).toBeFalsy();
+    // Empty finishers: bolt catch slap (AR), handle cock + slap (HK), rack (AK, from the source).
+    expect(t('sb16', 'reloadEmpty', 'boltRelease')).toBeGreaterThan(0);
+    expect(t('kp9', 'reloadEmpty', 'chargingHandle')).toBeLessThan(t('kp9', 'reloadEmpty', 'boltRelease'));
+  });
+
   test('swaps carry swapMid / slingDrop / holsterClear', () => {
     const names = (id: string, a: 'swapOut' | 'swapIn') =>
       (WEAPON_ANIMS[id].clips[a].events ?? []).map((e) => e.name);

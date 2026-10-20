@@ -7,6 +7,7 @@ import {
   samplePose,
   settleToStart,
   type Clip,
+  type ClipPresent,
   type HandKey,
   type Layout,
 } from '../rig/pose';
@@ -30,6 +31,31 @@ export interface Key {
   v: number;
 }
 
+/**
+ * Mag check: the mag leaves the well completely and is presented to the camera (procedural layer in ArmsRig on top
+ * of the composed arms). `path`: 0 = seated, 1 = clear of the well (with a gap), 2 = presented; `hand`: the support
+ * hand rides the mag (0..1). Keys are interpolated monotone-cubic (no overshoot, no velocity steps).
+ */
+export interface PresentRecipe {
+  path: Key[];
+  hand: Key[];
+  /** The mag's centre in the present frame (chest cam: -z forward, metres) and its XYZ euler there (rad). */
+  pose: { p: V3; r: V3 };
+  /** Offset (present frame) at the middle of the clear → presented leg, to swing the mag around the gun. */
+  arc?: V3;
+  /** Source-clip frame whose mag-in-support-hand transform is the grip on the mag. */
+  grip: { clip: string; t: number };
+  /**
+   * Move that grip around our mag (mag frame): turn the hand about the mag's long axis through its centre (rad) and
+   * shift it (m), so the hand holds the front / base and leaves the witness holes, window and lips in view.
+   */
+  gripTurn?: number;
+  gripShift?: V3;
+  /** AK-style rock out/in about the front lug (rad, bottom swings forward) over the first `rockSpan` of the path. */
+  rock?: number;
+  rockSpan?: number;
+}
+
 export interface Recipe {
   segs: Seg[];
   /** Global time scale (> 1 = faster). Authored key times are in composed time before this scale. */
@@ -49,7 +75,15 @@ export interface Recipe {
   /** Firing-hand-holds-the-grip override keys (1 = parented to the hand). */
   gunW?: Key[];
   /** Synthesise the old mag falling out of the well (mag slot 1) starting at `t`. */
-  magDrop?: { t: number };
+  magDrop?: {
+    t: number;
+    /** Show the old mag seated in the well until `t` (AK: it stays in until the fresh mag knocks it out). */
+    hold?: boolean;
+    /** Extra launch velocity (model frame, m/s): knocked forward, flicked aside. */
+    kick?: V3;
+  };
+  /** Launch velocity (model frame, m/s) the controller gives the physical floor mag at `magOut`. */
+  drop?: V3;
   /** Offset of the seated mag (slot 0) in the model frame, weighted: partial drop for a mag check. */
   magOffset?: { t: number; p: V3; r?: V3 }[];
   hold?: [number, number];
@@ -57,6 +91,7 @@ export interface Recipe {
   additive?: boolean;
   holdLast?: boolean;
   magStyle?: 'rock' | 'straight';
+  present?: PresentRecipe;
 }
 
 const FPS = 30;
@@ -66,6 +101,36 @@ type Piece =
   | { kind: 'clip'; clip: Clip; t0: number; t1: number; start: number; dur: number }
   | { kind: 'hold'; start: number; dur: number }
   | { kind: 'blend'; start: number; dur: number };
+
+/**
+ * Monotone cubic (Fritsch–Carlson) interpolation over sorted keys (clamped): smooth velocity through the keys and
+ * no overshoot between them.
+ */
+export function smoothKeyAt(keys: Key[], t: number): number {
+  const n = keys.length;
+  if (t <= keys[0].t) return keys[0].v;
+  if (t >= keys[n - 1].t) return keys[n - 1].v;
+  let i = 1;
+  while (keys[i].t < t) i++;
+  const slope = (j: number) => (keys[j + 1].v - keys[j].v) / Math.max(1e-6, keys[j + 1].t - keys[j].t);
+  const tan = (j: number) => {
+    if (j <= 0 || j >= n - 1) return 0;
+    const a = slope(j - 1),
+      b = slope(j);
+    if (a * b <= 0) return 0;
+    // Harmonic mean of the neighbouring slopes (monotone, no overshoot).
+    return (2 * a * b) / (a + b);
+  };
+  const a = keys[i - 1],
+    b = keys[i];
+  const h = Math.max(1e-6, b.t - a.t);
+  const u = (t - a.t) / h;
+  const m0 = tan(i - 1) * h,
+    m1 = tan(i) * h;
+  const u2 = u * u,
+    u3 = u2 * u;
+  return (2 * u3 - 3 * u2 + 1) * a.v + (u3 - 2 * u2 + u) * m0 + (-2 * u3 + 3 * u2) * b.v + (u3 - u2) * m1;
+}
 
 /** Linear interpolation over sorted keys (clamped). */
 export function keyAt<T extends { t: number }>(keys: T[], t: number, get: (k: T) => number): number {
@@ -206,14 +271,23 @@ export function compose(id: string, action: string, recipe: Recipe, clips: Recor
     for (let f = 0; f < frames; f++) {
       const dt = at(f) - recipe.magDrop.t;
       const o = f * S;
+      if (dt < 0 && recipe.magDrop.hold) {
+        // Still seated.
+        for (let k = 0; k < 6; k++) data[o + m.gun + k] = 0;
+        data[o + m.gun + 6] = 1;
+        data[o + m.w] = 0;
+        data[o + m.vis] = 1;
+        continue;
+      }
       if (dt < 0 || dt > 0.45) {
         data[o + m.vis] = 0;
         continue;
       }
       // Free fall (scaled for the viewmodel), a little forward kick and a tumble.
-      data[o + m.gun] = 0;
-      data[o + m.gun + 1] = -0.5 * 7.5 * dt * dt - 0.05 * dt;
-      data[o + m.gun + 2] = -0.04 * dt;
+      const kk = recipe.magDrop.kick ?? [0, 0, 0];
+      data[o + m.gun] = kk[0] * dt;
+      data[o + m.gun + 1] = -0.5 * 7.5 * dt * dt - 0.05 * dt + kk[1] * dt;
+      data[o + m.gun + 2] = -0.04 * dt + kk[2] * dt;
       q.setFromEuler(e.set(-1.4 * dt * dt * 4, 0, 0.3 * dt));
       data[o + m.gun + 3] = q.x;
       data[o + m.gun + 4] = q.y;
@@ -250,6 +324,30 @@ export function compose(id: string, action: string, recipe: Recipe, clips: Recor
     }
   }
   const scaleKeys = (ks?: HandKey[]) => ks?.map((k) => ({ ...k, t: k.t / speed }));
+  let present: ClipPresent | undefined;
+  if (recipe.present) {
+    const pr = recipe.present;
+    const src = clips[pr.grip.clip];
+    if (!src) throw new Error(`compose ${id}: unknown grip clip ${pr.grip.clip}`);
+    samplePose(src, pr.grip.t, tmpA);
+    const o = L.mag[0].hand;
+    const sk = (ks: Key[]) => ks.map((k) => ({ t: k.t / speed, v: k.v }));
+    const path = sk(pr.path);
+    const hand = sk(pr.hand);
+    present = {
+      path,
+      hand,
+      pose: pr.pose,
+      arc: pr.arc ?? [0, 0, 0],
+      rock: pr.rock ?? 0,
+      rockSpan: pr.rockSpan ?? 0.3,
+      grip: tmpA.slice(o, o + 7),
+      gripTurn: pr.gripTurn ?? 0,
+      gripShift: pr.gripShift ?? [0, 0, 0],
+      t0: Math.min(path[0].t, hand[0].t),
+      t1: Math.max(path[path.length - 1].t, hand[hand.length - 1].t),
+    };
+  }
   const clip: Clip = {
     id,
     action,
@@ -267,6 +365,9 @@ export function compose(id: string, action: string, recipe: Recipe, clips: Recor
     loop: recipe.loop,
     additive: recipe.additive,
     holdLast: recipe.holdLast,
+    present,
+    drop: recipe.drop,
+    tilt: recipe.tilt?.map((k) => ({ t: k.t / speed, r: k.r })),
   };
   // Piece joins can step; the sources' retarget flips are already removed at decode.
   despike(clip);
