@@ -131,5 +131,5 @@ def apply(fam):
     for n in ("Sight", "Sight_2"):
         lib.delete(objs[n])
     kit.FAMILIES[fam]["materials"]["m4cc0"] = dict(kind="source", map=W + "m4cc0_c.webp", orm=W + "m4cc0_orm.webp",
-                                                   normal=W + "m4cc0_n.webp")
+                                                   normal=W + "m4cc0_n.webp", recolor=True)
     return Vector((lmn[0], lmn[1], lmn[2]))

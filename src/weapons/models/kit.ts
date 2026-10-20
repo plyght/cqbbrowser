@@ -65,6 +65,11 @@ export interface KitMaterialDef {
   ao?: string;
   /** Finish mask in the albedo alpha. */
   mask?: 'alpha';
+  /**
+   * Source texture without a finish mask (e.g. the black CC0 M4 receiver): a non-black finish recolours it from
+   * its luminance (detail and wear kept), as a cerakoted receiver would look.
+   */
+  recolor?: boolean;
 }
 
 export interface KitBase {
@@ -86,6 +91,10 @@ export interface KitBase {
    * (the P-17's frame is the asset's). E.g. the KP-9 keeps its procedural frame except the rear sight.
    */
   frameShift?: string[];
+  /** Platform frame values measured on the asset (asset frame), e.g. the Krinkov's rear sight. */
+  frame?: Record<string, unknown>;
+  /** `frame` keys that replace the platform's when the kit is used (then moved by `offset` like the asset). */
+  frameFromAsset?: string[];
 }
 
 export interface KitCatalog {
@@ -112,10 +121,9 @@ let ready = false;
 
 /**
  * Weapons that use the kit when it is loaded (the others keep their procedural meshes). Families are switched on
- * as they pass review: P-17, the new P-92, the SB-16 and the KP-9 by default; `?kit=all` turns everything on, `?kit=0` off, or a list
- * (`?kit=p17,k47s`).
+ * as they pass review (now all of them); `?kit=all` turns everything on, `?kit=0` off, or a list (`?kit=p17,k47s`).
  */
-const DEFAULT_KIT_WEAPONS = ['p17', 'p92', 'sb16', 'kp9'];
+const DEFAULT_KIT_WEAPONS = ['p17', 'p92', 'sb16', 'kp9', 'hb300', 'k47s'];
 let kitWeapons: Set<string> | 'all' = new Set(DEFAULT_KIT_WEAPONS);
 {
   const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('kit') : null;
@@ -231,6 +239,7 @@ async function familyMaterials(
     m.aoMapIntensity = 1;
     if (!d.metal && !d.orm) m.metalness = 0;
     if (d.mask === 'alpha') m.userData.finishMask = true;
+    if (d.recolor) m.userData.recolor = true;
     out.set(name, m);
   }
   return out;
@@ -240,8 +249,43 @@ async function familyMaterials(
 
 const finishCache = new Map<string, Material>();
 
+/** Source material recoloured to a (non-black) finish from its luminance. */
+function recolored(base: Material, finish: string): Material {
+  const key = base.uuid + finish + ':re';
+  const m = finishCache.get(key);
+  if (m) return m;
+  const std = (base as MeshStandardMaterial).clone();
+  const col = weaponMaterials().finish[finish as keyof ReturnType<typeof weaponMaterials>['finish']].color;
+  const uFinish = { value: new Color().copy(col) };
+  std.onBeforeCompile = (sh) => {
+    sh.uniforms.uFinish = uFinish;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('void main() {', 'uniform vec3 uFinish;\nvoid main() {')
+      .replace(
+        '#include <map_fragment>',
+        [
+          '#ifdef USE_MAP',
+          '  vec4 sampledDiffuseColor = texture2D( map, vMapUv );',
+          '  float lum = dot( sampledDiffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );',
+          '  diffuseColor.rgb *= uFinish * clamp( 0.6 + 6.0 * lum, 0.6, 1.5 );',
+          '#endif',
+        ].join('\n'),
+      );
+  };
+  std.customProgramCacheKey = () => 'kitRecolor';
+  std.envMap = weaponEnvMap();
+  KIT_MATERIALS.add(std);
+  finishCache.set(key, std);
+  return std;
+}
+
+/** Parts that keep their own colour whatever the finish (magazines, the bolt seen through the port). */
+const NO_FINISH = new Set<string>(['mag', 'bolt']);
+
 /** Atlas material with the build's finish colour applied where the albedo alpha says so. */
 function tinted(base: Material, finish: string): Material {
+  if ((base as MeshStandardMaterial).userData?.recolor)
+    return finish === 'black' ? base : recolored(base, finish);
   if (!(base as MeshStandardMaterial).userData?.finishMask) return base;
   const key = base.uuid + finish;
   const m = finishCache.get(key);
@@ -295,14 +339,14 @@ function special(name: string): Material {
   return specials[name] ?? specials.glass;
 }
 
-function materialFor(family: string, name: string, finish: string): Material {
+function materialFor(family: string, name: string, finish: string, part?: string): Material {
   const base = familyMats.get(family)?.get(name);
   if (base) {
     if (base instanceof MeshStandardMaterial && !KIT_MATERIALS.has(base)) {
       base.envMap = weaponEnvMap();
       KIT_MATERIALS.add(base);
     }
-    return tinted(base, finish);
+    return part && NO_FINISH.has(part) && base.userData?.recolor ? base : tinted(base, finish);
   }
   return special(name.split('.')[0]);
 }
@@ -338,7 +382,8 @@ export function kitEntries(r: ResolvedBuild): KitEntry[] | null {
 export function kitResolve(r: ResolvedBuild): ResolvedBuild {
   const base = KIT.bases[r.build.weapon];
   const dz = base?.offset?.[2] ?? 0;
-  if (!dz || !ready || !kitEnabledFor(r.build.weapon) || !kitEntries(r)) return r;
+  const fromAsset = base?.frameFromAsset ?? [];
+  if ((!dz && !fromAsset.length) || !ready || !kitEnabledFor(r.build.weapon) || !kitEntries(r)) return r;
   const shift = (v: unknown, key: string): unknown => {
     if (typeof v === 'number') return key.endsWith('Z') || key === 'z' ? v + dz : v;
     if (v && typeof v === 'object' && !Array.isArray(v))
@@ -346,10 +391,20 @@ export function kitResolve(r: ResolvedBuild): ResolvedBuild {
     return v;
   };
   const keys = base.frameShift;
-  const f0 = r.platform.frame as unknown as Record<string, unknown>;
+  const f0 = {
+    ...(r.platform.frame as unknown as Record<string, unknown>),
+    ...Object.fromEntries(
+      fromAsset.filter((k) => base.frame && k in base.frame).map((k) => [k, base.frame![k]]),
+    ),
+  };
   const frame = (
     keys
-      ? { ...f0, ...Object.fromEntries(keys.filter((k) => k in f0).map((k) => [k, shift(f0[k], k)])) }
+      ? {
+          ...f0,
+          ...Object.fromEntries(
+            [...keys, ...fromAsset].filter((k) => k in f0).map((k) => [k, shift(f0[k], k)]),
+          ),
+        }
       : shift(f0, '')
   ) as typeof r.platform.frame;
   return { ...r, platform: { ...r.platform, frame } };
@@ -451,9 +506,10 @@ export function assembleKit(
     m.geometry.dispose();
     m.removeFromParent();
   }
+  const off = new Vector3(...(base.offset ?? [0, 0, 0]));
   // The asset's own hinge for a folding stock (the part group pivots there).
   const stockGroup = base.fold ? parts.get('stock') : undefined;
-  if (stockGroup && base.fold) stockGroup.position.set(...base.fold.pivot);
+  if (stockGroup && base.fold) stockGroup.position.set(...base.fold.pivot).add(off);
   root.updateMatrixWorld(true);
   const rootInv = new Matrix4().copy(root.matrixWorld).invert();
   const modelOf = (o: Object3D) => new Matrix4().multiplyMatrices(rootInv, o.matrixWorld);
@@ -462,7 +518,6 @@ export function assembleKit(
   const buckets = new Map<Object3D, Map<Material, BufferGeometry[]>>();
   const overrides = new Map<string, Vector3>();
   const placed: { node: string; part?: string; matrix: Matrix4 }[] = [];
-  const off = new Vector3(...(base.offset ?? [0, 0, 0]));
   for (const [k, v] of Object.entries(base.sockets)) overrides.set(k, new Vector3(...v).add(off));
   for (const e of entries) {
     const ln = loaded.get(e.node)!;
@@ -487,7 +542,7 @@ export function assembleKit(
     let byMat = buckets.get(target);
     if (!byMat) buckets.set(target, (byMat = new Map()));
     for (const p of ln.prims) {
-      const mat = materialFor(kn.family, p.material, finish);
+      const mat = materialFor(kn.family, p.material, finish, partName);
       const g = p.geometry.clone().applyMatrix4(local);
       let list = byMat.get(mat);
       if (!list) byMat.set(mat, (list = []));
