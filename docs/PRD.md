@@ -322,7 +322,7 @@ MAGS    ███  ███  ██▌  █▏         (3 full · 1 partial)
 | Malfunctions | Off | Off | On |
 | Mag choice | Auto fullest | Auto fullest | Pouch order |
 | Weapon inertia | 40% | 100% | 120% |
-| Aim assist (controller) | Strong | Light | Off |
+| Aim assist (controller) | Standard | Light | Off |
 
 ---
 
@@ -358,7 +358,7 @@ No browser game handles trackpads well. Our approach:
 **Trackpad-specific helpers:**
 - **Turn assist:** optional **edge-glide turning**. If your finger reaches the trackpad edge and stays moving, keep turning at that velocity until it stops. This is the trackpad equivalent of a stick's outer-zone ramp. Implemented as velocity continuation when deltas keep coming at a constant rate, or via **fast-glide momentum** (a short inertial carry after lift, like a trackball, off by default).
 - **Keyboard snap turns:** optional ±45°/90°/180° quick-turn keys (Z/X, plus a configurable key) that animate the body turn over about 120 ms. Great for clearing corners without a mouse.
-- **Light aim slowdown** (same system as controller aim assist, §7.4) available on trackpad, **off by default**, single-player only.
+- No aim assist on trackpad or mouse (controller only, §7.4).
 - **Typing-suppression detection:** Windows Precision Touchpad's "touchpad sensitivity" setting (and some laptop palm-rejection) **ignores touchpad input while keys are held**. That breaks WASD + trackpad. Detect it (movement keys held, trackpad active, deltas drop to zero) and show a one-time tip on how to change it. Without this, people just think the game is broken.
 - **Precision ADS:** a separate, lower trackpad ADS multiplier plus optional **micro-adjust zone** (very slow deltas get extra reduction).
 
@@ -372,9 +372,11 @@ No browser game handles trackpads well. Our approach:
 - **Analog lean option**
 
 **Aim assist (single-player training, so it's a fun and accessibility tool, not a competitive one):**
-- **Rotational slowdown / friction** when the weapon's aim ray (not the screen center) is near a valid target. Strength depends on preset (§6.7) and is adjustable 0–100%.
-- **No snap-to-target, no magnetism by default.** Optional light magnetism (tracking a moving target) in Arcade.
-- **Friction applies only to shootable targets.** No-shoots never produce it, so the assist can't pull you into a penalty.
+- Setting: **Off / Light (default) / Standard**; Hardcore forces Off. **Gamepad only**, never mouse or trackpad.
+- **Slowdown:** 25% (Light) / 35% (Standard) lower look sensitivity while the reticle or bore line is over or near a shootable hitbox, smoothstep falloff to nothing 3.5 deg outside the hitbox edge; fades out for full-speed turns.
+- **Follow:** while moving and steering, 20% / 35% of the target's line-of-sight angular rate is added (capped at 8 deg/s). No snap-to.
+- **ADS magnetism:** on ADS entry a pull of at most 1 / 1.5 deg, spread over ~0.14 s, only toward a target whose centre is inside a 3 deg cone.
+- **No-shoots are skipped entirely** (no slowdown, follow or pull) and targets behind walls or other targets are ignored (line-of-sight ray).
 - **Leaderboards tag runs** with input type and assist level
 
 **Gyro aiming (big differentiator):**
