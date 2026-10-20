@@ -913,6 +913,10 @@ export class HandContact {
       }
     } else if (g > 0.003) t.set(0, 0, 0);
     else t.copy(r);
+    // A shot kicking: the shot clip's own finger/hand motion opens and closes the gaps by a few mm for ~0.2 s and the
+    // back-off chased it, sliding the support hand ~5 mm against the firing hand and back with every round (and
+    // ratcheting over a string). The hold from before the shot stays until the clip has settled.
+    if (onGrip && this.rig.shooting) t.copy(r);
     const k = 1 - Math.exp(-dt / (t.lengthSq() >= r.lengthSq() ? 0.05 : 0.25));
     r.lerp(t, k);
     if (r.lengthSq() < 1e-10 && t.lengthSq() === 0) r.set(0, 0, 0);
