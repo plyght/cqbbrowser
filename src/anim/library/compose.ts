@@ -1,6 +1,15 @@
 import { Euler, Quaternion } from 'three';
 import type { ClipEvent, V3 } from '../rig/clipData';
-import { blendPose, despike, qmul, samplePose, settleToStart, type Clip, type HandKey, type Layout } from '../rig/pose';
+import {
+  blendPose,
+  despike,
+  qmul,
+  samplePose,
+  settleToStart,
+  type Clip,
+  type HandKey,
+  type Layout,
+} from '../rig/pose';
 
 /**
  * Clip composition: build a weapon-specific clip from segments of the baked source clips (trim, speed,

@@ -182,6 +182,25 @@ export class Renderer {
   private skipped = 0;
 
   /**
+   * Compile every material in the scene now (pooled FX included: brass, particles, decals start hidden or
+   * empty). Three compiles a program the first time an object draws, so the first shot used to compile the
+   * brass and both particle shaders mid-frame (a multi-frame hitch on the first trigger pull). Compiled
+   * against the composer's HDR target so the program keys match the real render (linear output).
+   */
+  prewarm(): Promise<void> {
+    const r = this.renderer;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(this.composer.inputBuffer);
+    let p: Promise<unknown>;
+    try {
+      p = r.compileAsync(this.scene, this.camera);
+    } finally {
+      r.setRenderTarget(prev);
+    }
+    return p.then(() => undefined).catch(() => undefined);
+  }
+
+  /**
    * A sim frame that isn't drawn (fast test stepping). The time is carried into the next `render()` so the
    * camera's temporal state (auto-exposure, codec, boot sequence, motion) still advances by the full span.
    */

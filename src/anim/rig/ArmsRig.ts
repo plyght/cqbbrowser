@@ -493,7 +493,9 @@ export class ArmsRig {
   }
 
   private fireEvents(l: Layer, t0: number, t1: number) {
-    for (const e of l.clip.events) if (e.t > t0 && e.t <= t1 + 1e-9) this.emit(e.name, l.onEvent);
+    // Half-open (t0, t1]: consecutive frames share their boundary, so a marker fires exactly once. (A 1e-9
+    // slack here fired a marker on a frame boundary twice: magOut at 0.100 s fired at 0.100 and 0.117.)
+    for (const e of l.clip.events) if (e.t > t0 && e.t <= t1) this.emit(e.name, l.onEvent);
   }
 
   update(dt: number): void {

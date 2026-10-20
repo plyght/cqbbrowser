@@ -216,7 +216,8 @@ export function runScenario(
   const popOf = (v: number[], i: number) => v[i] - Math.max(v[i - 2] ?? 0, v[i + 2] ?? 0);
   // The swap's weapon change replaces the gun object: its own frame-to-frame jump is not a pose pop.
   const swapFrames = new Set<number>();
-  for (let i = 1; i < actions.length; i++) if (actions[i] === 'swapIn' && actions[i - 1] !== 'swapIn') swapFrames.add(i);
+  for (let i = 1; i < actions.length; i++)
+    if (actions[i] === 'swapIn' && actions[i - 1] !== 'swapIn') swapFrames.add(i);
   for (const t of tracks)
     for (let i = 2; i < sc.frames; i++) {
       if (t.name === 'gun' && swapFrames.has(i)) continue;

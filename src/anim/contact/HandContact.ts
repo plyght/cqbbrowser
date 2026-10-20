@@ -1113,7 +1113,10 @@ export class HandContact {
         // whenever recoil or the clip brushed it into the grip, then let it fall back — finger jitter under fire.
         // A few mm of penetration for 2–3 frames reads far better than a flick.
         const prev = cs.open[0];
-        const want = Math.abs(open) > Math.abs(prev) ? ease(prev, open, dt, CONTACT.tauOpen) : ease(prev, open, dt, CONTACT.tauRelease);
+        const want =
+          Math.abs(open) > Math.abs(prev)
+            ? ease(prev, open, dt, CONTACT.tauOpen)
+            : ease(prev, open, dt, CONTACT.tauRelease);
         cs.open[0] = prev + Math.max(-CONTACT.maxOpenStep, Math.min(CONTACT.maxOpenStep, want - prev));
         if (Math.abs(cs.open[0]) < 1e-5) cs.open[0] = 0;
         // 2. Wrap: curl the middle/tip joints to the first touch (eased in), never into a surface.

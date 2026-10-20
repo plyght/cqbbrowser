@@ -5,6 +5,11 @@
  * a burned-in ghost of the bang frame. Output stays scene-linear HDR so CAM04 develops it like any image.
  */
 export const nvgFrag = /* glsl */ `
+// Halo radius (half-height units) and gain, persistence weight. Halved from 0.045 / 0.8 / 0.6 (owner: "slightly
+// too much blur"): the halo and the smear behind moving lights read as blur through the whole image.
+#define NVG_HALO_R 0.026
+#define NVG_HALO_K 0.5
+#define NVG_PERSIST 0.35
 uniform sampler2D tState;   // 1×1: r = tube gain (EV)
 uniform sampler2D tHist;    // 1/4 res: r = persistence luminance, g = flash ghost
 uniform vec4 uNvg;          // on (0/1), user gain (linear), phosphor (0 green … 1 white), dual (0/1)
@@ -34,10 +39,11 @@ float nHex(vec2 p) {
   return smoothstep(0.25, 0.5, length(g));
 }
 
-const vec2 nDisc[12] = vec2[12](
-  vec2(1.0, 0.0), vec2(0.5, 0.866), vec2(-0.5, 0.866), vec2(-1.0, 0.0), vec2(-0.5, -0.866), vec2(0.5, -0.866),
-  vec2(0.45, 0.26), vec2(0.0, 0.52), vec2(-0.45, 0.26), vec2(-0.45, -0.26), vec2(0.0, -0.52), vec2(0.45, -0.26)
-);
+// Halo kernel: NVG_HALO_TAPS points on a golden-angle (Vogel) spiral, rotated per pixel and per frame, weighted
+// by a soft radial falloff. A fixed tap ring (the old 12-tap hexagon) stamped one sharp copy of every small bright
+// source — a red dot, a lamp — at each tap offset ("6 copies"); a rotated spiral integrates to one soft disc.
+#define NVG_HALO_TAPS 16
+float nIgn(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec3 col = inputColor.rgb;
@@ -65,23 +71,29 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
       float g = exp2(ev) * uNvg.y;
       float lum = nResp(s);
       // Phosphor persistence: bright things smear as you turn.
-      lum = max(lum, texture2D(tHist, suv).r * 0.6);
+      lum = max(lum, texture2D(tHist, suv).r * NVG_PERSIST);
       float sig = lum * g;
       // Blooming halos: bright point sources grow a soft disc (the tube's halo, not a lens flare).
-      float halo = 0.0;
-      vec2 hr = vec2(0.045 / aspect, 0.045);
-      for (int i = 0; i < 12; i++) {
-        float t = nResp(texture2D(inputBuffer, suv + nDisc[i] * hr).rgb) * g;
-        halo += max(t - 1.4, 0.0);
+      float halo = 0.0, hw = 0.0;
+      vec2 hr = vec2(NVG_HALO_R / aspect, NVG_HALO_R);
+      float rot = 6.2831853 * nIgn(uv * resolution + uFx.x * 5.0);
+      for (int i = 0; i < NVG_HALO_TAPS; i++) {
+        float fi = float(i) + 0.5;
+        float rad = sqrt(fi / float(NVG_HALO_TAPS));
+        float a = fi * 2.39996323 + rot;
+        float w = 1.0 - rad * rad;
+        float t = nResp(texture2D(inputBuffer, suv + vec2(cos(a), sin(a)) * rad * hr).rgb) * g;
+        halo += max(t - 1.4, 0.0) * w;
+        hw += w;
       }
-      sig += halo * (1.0 / 12.0) * 0.8 * uFx.w;
+      sig += halo / hw * NVG_HALO_K * uFx.w;
       // Scintillation: photon-starved sparkle that grows with gain; refreshed every frame.
       float nz = clamp((ev - 2.0) / 7.5, 0.0, 1.0) * uFx.z;
       vec2 cell = floor(uv * resolution);
       float h1 = nHash(cell + uFx.x * 13.17);
       float h2 = nHash(cell * 1.71 + uFx.x * 7.31 + 3.1);
-      sig += (h1 - 0.5) * (0.04 + 0.4 * nz) * (0.15 + sqrt(max(sig, 0.0)));
-      if (h2 > 1.0 - (0.0003 + 0.003 * nz)) sig += 1.4;
+      sig += (h1 - 0.5) * (0.02 + 0.16 * nz) * (0.15 + sqrt(max(sig, 0.0)));
+      if (h2 > 1.0 - (0.0002 + 0.0012 * nz)) sig += 0.9;
       // Tube output saturates (it can't get brighter than the phosphor screen).
       float o = 1.0 - exp(-1.3 * max(sig, 0.0));
       // Tube contrast: blacks stay down, highlights roll off.

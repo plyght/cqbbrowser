@@ -106,6 +106,10 @@ export interface GameEvents {
   };
   /** NVG intensifier powered (audio: the faint tube whine). */
   nvg: { on: boolean };
+  /** Feet back on the ground after a fall / jump; `speed` = downward speed at touchdown (m/s). */
+  land: { speed: number };
+  /** Aim-down-sights state changed (the raise / drop of the sight, haptic tick). */
+  ads: { on: boolean };
   /**
    * Startle reflex hook for the body/animation: a bright/loud event nearby. `strength` 0..1 (≥ ~0.5 = arm comes
    * up to shield the face, Bodycam-style), `dir` = unit vector from the player toward the source (world).

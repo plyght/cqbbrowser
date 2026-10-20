@@ -714,6 +714,10 @@ export class WeaponController implements System {
     // Linear ramp over the build's ADS time; everything reads the eased `adsBlend`.
     const adsTime = d.handling?.adsTime ?? 0.25 + d.mass * 0.04;
     const adsWant = p.aiming && !busy ? 1 : 0;
+    if (adsWant !== this.adsWantPrev) {
+      this.adsWantPrev = adsWant;
+      this.ctx.bus.emit('ads', { on: adsWant === 1 });
+    }
     this.ads = clamp(this.ads + Math.sign(adsWant - this.ads) * (dt / Math.max(0.08, adsTime)), 0, 1);
     if (Math.abs(adsWant - this.ads) < 1e-3) this.ads = adsWant;
     void hd;
@@ -1055,6 +1059,7 @@ export class WeaponController implements System {
   }
 
   private burstLeft = 0;
+  private adsWantPrev = 0;
   /** FOV punch (deg) and the aim-point climb that stacks over a string (rad, recovers). */
   private readonly fovPunch = new Spring(FOV_SPRING.freq, FOV_SPRING.zeta);
   private climbPitch = 0;

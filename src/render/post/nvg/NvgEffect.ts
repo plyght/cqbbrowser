@@ -157,7 +157,7 @@ export class NvgEffect extends Effect {
     hu.tPrev.value = hp.texture;
     hu.tInput.value = inputBuffer.texture;
     (hu.uHist.value as Vector4).set(
-      Math.exp(-dt / 0.07),
+      Math.exp(-dt / 0.04),
       Math.exp(-dt / 0.9),
       f.capture,
       this.resetHist ? 1 : 0,
