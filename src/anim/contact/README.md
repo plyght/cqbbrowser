@@ -2,8 +2,12 @@
 
 ## Status
 
-**Off in game by default.** Opt in with `?handcontact=safe` or `?handcontact=full`. `?contact` draws the
-proxies over the raw hands.
+**In game, the default depends on the weapon:**
+
+- Pistols are ON: safe mode with the hand-tuned two-hand hold `PISTOL_SUPPORT`.
+- Rifles and SMGs are OFF: raw clip, until their meshes are slimmed.
+
+`?handcontact=off|safe|full` overrides the default. `?contact` draws the proxies.
 
 Root cause of the sinking: our procedural grips are far bigger than the guns the clips were authored on.
 

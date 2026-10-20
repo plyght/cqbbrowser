@@ -1,7 +1,7 @@
 import { PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import { buildModel, setWeaponEnvMap, type WeaponModel } from '../../../weapons/models';
 import { ContactOverlay } from '../../contact/ContactOverlay';
-import { HandContact } from '../../contact/HandContact';
+import { HandContact, PISTOL_SUPPORT } from '../../contact/HandContact';
 import type { ArmsAction } from '../../library/library';
 import { ArmsRig } from '../ArmsRig';
 import { Sheet, type Tile } from './sheet';
@@ -30,6 +30,13 @@ export async function rigSheet(q: URLSearchParams, hook: Record<string, unknown>
   const rig = await ArmsRig.load();
   sheet.scene.add(rig.root);
   const contact = new HandContact(rig);
+  // Tuning the two-hand pistol hold: `lpose=weapon` with `loff=x,y,z` (m) and `lturn=x,y,z` (rad, weapon axes).
+  const lp = q.get('lpose');
+  if (lp && PISTOL_SUPPORT[lp]) {
+    const v = (k: string) => q.get(k)?.split(',').map(Number) as [number, number, number] | undefined;
+    PISTOL_SUPPORT[lp].offset = v('loff') ?? PISTOL_SUPPORT[lp].offset;
+    PISTOL_SUPPORT[lp].turn = v('lturn') ?? PISTOL_SUPPORT[lp].turn;
+  }
   const overlay = q.get('overlay') === '1' ? new ContactOverlay(sheet.scene) : null;
   const models: Record<string, WeaponModel> = {};
   for (const w of weapons) models[w] = buildModel(w, { detailParts: true });
