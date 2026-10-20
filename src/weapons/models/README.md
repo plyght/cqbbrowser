@@ -63,11 +63,14 @@ Pass `{ detailParts: true }` to get them as separate meshes (+1 draw call each) 
 ## Rounds in the mag (`magRounds.ts`, `magGeom.ts`)
 
 `new MagRounds(model, def.caliber, def.magCapacity)` (the controller does this per equipped weapon) adds one
-`InstancedMesh` named `magRounds` under `parts.mag` (one extra draw call): a lathed brass case + projectile per
+`InstancedMesh` named `magRounds` under `parts.mag` plus a `magFollower` plate under the last round (two extra draw
+calls): a lathed brass case + projectile per
 calibre (9 mm, 5.56, 5.45, .300 BLK, 7.62x39), laid from the feed lips down the mag's measured cavity (centre line
 of its triangle cross-sections), double-stack stagger, turning with the curve. `set(n)` draws the top `n` rounds.
 The mag's materials are cloned with real openings cut in the shader: open top between the lips, numbered-count
-witness holes (Glock / Beretta back, HK side), the PMAG window, none on the AK; the inside renders as a dark cavity.
+witness holes (Glock / Beretta back, with moulded counts drawn by the same shader; HK side), the PMAG window, none on
+the AK; the inside renders as a dark cavity. The spring keeps the stack at the lips, so a part-empty mag shows brass
+in the upper holes / window, the follower under the last round and dark holes below it.
 
 ## Sockets
 

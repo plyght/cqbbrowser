@@ -17,6 +17,8 @@ export type PartName =
   | 'safety'
   | 'stock'
   | 'magnifier'
+  /** A both-eyes-open (true 1x) optic: hidden while looking past it at ADS. */
+  | 'optic'
   | 'dustCover'
   | 'hammer';
 

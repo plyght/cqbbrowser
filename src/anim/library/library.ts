@@ -191,7 +191,7 @@ function pistolCheck(): Recipe {
         { t: 2.32, v: 1 },
         { t: 2.52, v: 0 },
       ],
-      pose: { p: [-0.1, -0.07, -0.21], r: [-0.15, 0.35, 0.2] },
+      pose: { p: [-0.075, -0.04, -0.23], r: [0.32, 0.28, 0.12] },
       arc: [-0.04, -0.04, -0.04],
       grip: { clip: 'beretta.reloadTactical', t: 1.2 },
     },
@@ -606,7 +606,7 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       magStyle: 'straight',
       locksBack: true,
       check: {
-        pose: { p: [-0.085, -0.1, -0.3], r: [0.9, -1.25, 0.35] },
+        pose: { p: [-0.085, -0.1, -0.3], r: [1.1, -1.25, 0.35] },
         arc: [-0.05, -0.03, 0.03],
         tilt: [0.2, 0, -0.3],
       },
@@ -629,7 +629,7 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       magStyle: 'straight',
       locksBack: true,
       check: {
-        pose: { p: [-0.085, -0.1, -0.3], r: [0.9, -1.25, 0.35] },
+        pose: { p: [-0.085, -0.1, -0.3], r: [1.1, -1.25, 0.35] },
         arc: [-0.05, -0.03, 0.03],
         tilt: [0.2, 0, -0.3],
       },
@@ -652,7 +652,7 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       magStyle: 'straight',
       locksBack: false,
       check: {
-        pose: { p: [-0.08, -0.1, -0.29], r: [0.35, -1.5, 0.4] },
+        pose: { p: [-0.08, -0.1, -0.29], r: [0.75, -1.4, 0.35] },
         arc: [-0.05, -0.03, 0.03],
         tilt: [0.15, 0, -0.25],
       },

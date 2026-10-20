@@ -4,8 +4,11 @@ import {
   Color,
   DoubleSide,
   DynamicDrawUsage,
+  BoxGeometry,
+  CanvasTexture,
   InstancedMesh,
   LatheGeometry,
+  Mesh,
   Matrix4,
   MeshStandardMaterial,
   Quaternion,
@@ -13,7 +16,6 @@ import {
   Vector3,
   Vector4,
   type Material,
-  type Mesh,
   type Object3D,
 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -147,14 +149,14 @@ const SPECS: Record<CaliberId, RoundSpec> = {
     caseColor: BRASS,
     bulletColor: COPPER,
   },
-  // 7.62x39: tapered steel case.
+  // 7.62x39: tapered case (brass commercial load: reads at the lips better than lacquered steel).
   '7.62x39': {
     head: 11.35 * MM,
     caseLen: 38.7 * MM,
     oal: 56 * MM,
     caseProfile: bottleneck(11.35, 11.3, 10.07, 8.6, 38.7, 6),
     bulletProfile: ogive(7.92, 38.7, 56, 0.07, 4),
-    caseColor: STEEL_CASE,
+    caseColor: BRASS,
     bulletColor: COPPER,
   },
 };
@@ -357,6 +359,8 @@ export interface Cut {
   a: Vector3;
   r: number;
   n: Vector3;
+  /** Count moulded beside the hole (numbered witness holes). */
+  label?: number;
 }
 
 const MAX_CUTS = 12;
@@ -379,7 +383,7 @@ export function magCuts(style: MagStyle, info: MagInfo, lay: MagLayout, capacity
     const s = slot(k);
     if (!s || k > lay.slots.length) return;
     sliceAt(info, s.p.y, sl);
-    cuts.push({ c: new Vector3(cx, s.p.y, sl.z1), a: new Vector3(), r, n: new Vector3(0, 0, 1) });
+    cuts.push({ c: new Vector3(cx, s.p.y, sl.z1), a: new Vector3(), r, n: new Vector3(0, 0, 1), label: k });
   };
   const side = (k: number, r: number, inset: number) => {
     const s = slot(k);
@@ -396,10 +400,10 @@ export function magCuts(style: MagStyle, info: MagInfo, lay: MagLayout, capacity
   switch (style) {
     case 'glock':
       // Numbered witness holes up the back of the mag.
-      for (const k of holeCounts(capacity, 3, 4)) back(k, 0.0021);
+      for (const k of holeCounts(capacity, 3, 4)) back(k, 0.0028);
       break;
     case 'beretta':
-      for (const k of holeCounts(capacity, 3, 4)) back(k, 0.0019);
+      for (const k of holeCounts(capacity, 3, 4)) back(k, 0.0025);
       break;
     case 'hk':
       // Witness holes down the side, behind the case heads' line.
@@ -436,8 +440,66 @@ export function magCuts(style: MagStyle, info: MagInfo, lay: MagLayout, capacity
   return cuts.slice(0, MAX_CUTS);
 }
 
+/** A count printed on the shell: bottom-left origin, right / up axes along the face, the face normal. */
+interface Label {
+  o: Vector3;
+  r: Vector3;
+  u: Vector3;
+  n: Vector3;
+  digits: number[];
+}
+
+const MAX_LABELS = 8;
+/** Moulded digits: cap height and advance (m). */
+const DIGIT_H = 0.0034;
+const DIGIT_W = 0.0024;
+
+/** Labels beside the numbered holes, on the (raked) face the hole is cut in. */
+function holeLabels(cuts: Cut[], info: MagInfo): Label[] {
+  const out: Label[] = [];
+  const sa = { y: 0, x0: 0, x1: 0, z0: 0, z1: 0 };
+  const sb = { y: 0, x0: 0, x1: 0, z0: 0, z1: 0 };
+  for (const c of cuts) {
+    if (c.label === undefined || out.length >= MAX_LABELS) continue;
+    // The back face's slope at the hole: "up" runs along it.
+    const dz = sliceAt(info, c.c.y + 0.004, sa).z1 - sliceAt(info, c.c.y - 0.004, sb).z1;
+    const u = new Vector3(0, 0.008, dz).normalize();
+    const r = new Vector3(1, 0, 0);
+    const n = new Vector3().crossVectors(r, u).normalize();
+    const o = c.c
+      .clone()
+      .addScaledVector(r, c.r + 0.0009)
+      .addScaledVector(u, -DIGIT_H / 2)
+      .addScaledVector(n, 0.0003);
+    out.push({ o, r, u, n, digits: String(c.label).split('').map(Number) });
+  }
+  return out;
+}
+
+let digitTex: CanvasTexture | null = null;
+/** 10 cells of white digits on transparent (one row), for the moulded counts. */
+function digitAtlas(): CanvasTexture | null {
+  if (digitTex) return digitTex;
+  if (typeof document === 'undefined') return null;
+  const cv = document.createElement('canvas');
+  cv.width = 320;
+  cv.height = 48;
+  const g = cv.getContext('2d');
+  if (!g) return null;
+  g.clearRect(0, 0, 320, 48);
+  g.fillStyle = '#fff';
+  g.font = 'bold 44px sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  for (let i = 0; i < 10; i++) g.fillText(String(i), i * 32 + 16, 25);
+  digitTex = new CanvasTexture(cv);
+  digitTex.generateMipmaps = false;
+  return digitTex;
+}
+
 interface Opening {
   cuts: Cut[];
+  labels: Label[];
   /** Open top: faces pointing up above `y` inside the x/z rectangle. */
   top: { y: number; x0: number; x1: number; z0: number; z1: number };
 }
@@ -459,6 +521,31 @@ function openingUniforms(o: Opening, toMag: Matrix4) {
     uCutCount: { value: o.cuts.length },
     uTopMin: { value: new Vector3(o.top.x0, o.top.y, o.top.z0) },
     uTopMax: { value: new Vector3(o.top.x1, 1, o.top.z1) },
+    ...labelUniforms(o.labels),
+  };
+}
+
+function labelUniforms(labels: Label[]) {
+  const mk = () => Array.from({ length: MAX_LABELS }, () => new Vector4());
+  const lo = mk(),
+    lr = mk(),
+    lu = mk(),
+    ln = mk();
+  labels.forEach((l, i) => {
+    lo[i].set(l.o.x, l.o.y, l.o.z, l.digits.length);
+    lr[i].set(l.r.x, l.r.y, l.r.z, l.digits[0]);
+    lu[i].set(l.u.x, l.u.y, l.u.z, l.digits[1] ?? 0);
+    ln[i].set(l.n.x, l.n.y, l.n.z, 0);
+  });
+  const tex = digitAtlas();
+  return {
+    uLabO: { value: lo },
+    uLabR: { value: lr },
+    uLabU: { value: lu },
+    uLabN: { value: ln },
+    uLabCount: { value: tex ? labels.length : 0 },
+    uDigits: { value: tex },
+    uDigitSize: { value: new Vector2(DIGIT_W, DIGIT_H) },
   };
 }
 
@@ -476,6 +563,28 @@ uniform vec4 uCutN[${MAX_CUTS}];
 uniform int uCutCount;
 uniform vec3 uTopMin;
 uniform vec3 uTopMax;
+uniform vec4 uLabO[${MAX_LABELS}];
+uniform vec4 uLabR[${MAX_LABELS}];
+uniform vec4 uLabU[${MAX_LABELS}];
+uniform vec4 uLabN[${MAX_LABELS}];
+uniform int uLabCount;
+uniform sampler2D uDigits;
+uniform vec2 uDigitSize;
+/** Moulded counts beside the witness holes: light where a digit covers the fragment. */
+float magLabel() {
+  vec3 nm = normalize(vMagN);
+  for (int i = 0; i < ${MAX_LABELS}; i++) {
+    if (i >= uLabCount) break;
+    if (dot(nm, uLabN[i].xyz) < 0.45) continue;
+    vec3 d = vMagP - uLabO[i].xyz;
+    float u = dot(d, uLabR[i].xyz) / uDigitSize.x;
+    float v = dot(d, uLabU[i].xyz) / uDigitSize.y;
+    if (v < 0.0 || v > 1.0 || u < 0.0 || u > uLabO[i].w) continue;
+    float di = u < 1.0 ? uLabR[i].w : uLabU[i].w;
+    if (texture2D(uDigits, vec2((di + fract(u)) / 10.0, v)).a > 0.5) return 1.0;
+  }
+  return 0.0;
+}
 bool magCut() {
   vec3 p = vMagP;
   vec3 nm = normalize(vMagN);
@@ -533,9 +642,34 @@ function cutMaterial(mat: Material, o: Opening, toMag: Matrix4): Material {
 const _m = new Matrix4();
 const _s = new Vector3();
 
+const FOLLOWER_COLOR: Record<MagStyle, number> = {
+  glock: 0xb8571c,
+  beretta: 0x2c2c2c,
+  pmag: 0x9a7a4a,
+  gi: 0x56693f,
+  ak: 0x3b3b3b,
+  hk: 0x262626,
+};
+const followerMats = new Map<MagStyle, MeshStandardMaterial>();
+function followerMaterial(style: MagStyle) {
+  let m = followerMats.get(style);
+  if (!m) {
+    m = new MeshStandardMaterial({
+      name: 'magFollower',
+      color: FOLLOWER_COLOR[style],
+      roughness: 0.7,
+      metalness: 0,
+    });
+    followerMats.set(style, m);
+  }
+  return m;
+}
+
 /** Rounds + openings fitted to one model's mag. `set(n)` shows the top `n` rounds. */
 export class MagRounds {
   readonly mesh: InstancedMesh;
+  /** The follower: rides under the last round, at the lips when the mag is empty (+1 draw call). */
+  readonly follower: Mesh;
   readonly layout: MagLayout;
   readonly style: MagStyle;
   readonly info: MagInfo;
@@ -560,11 +694,22 @@ export class MagRounds {
     this.mesh.instanceMatrix.needsUpdate = true;
     this.mesh.count = 0;
     this.mesh.visible = false;
+    const body0 = this.info.slices[Math.min(this.info.slices.length - 1, 3)];
+    const L = SPECS[cal].oal * this.layout.scale;
+    this.follower = new Mesh(
+      new BoxGeometry(Math.max(0.006, (body0.x1 - body0.x0) * 0.82), 0.003, L * 0.92),
+      followerMaterial(this.style),
+    );
+    this.follower.name = 'magFollower';
+    this.follower.frustumCulled = false;
+    this.followerLen = L;
     // Openings on the mag shell (per mesh: its own matrix into the mag frame).
     const body = this.info.slices[Math.min(this.info.slices.length - 1, 3)];
     const lip = 0.0016;
+    const cuts = magCuts(this.style, this.info, this.layout, capacity);
     const open: Opening = {
-      cuts: magCuts(this.style, this.info, this.layout, capacity),
+      cuts,
+      labels: holeLabels(cuts, this.info),
       top: {
         y: this.info.top - 0.016,
         x0: body.x0 + lip,
@@ -584,6 +729,26 @@ export class MagRounds {
         : cutMaterial(mesh.material, open, toMag);
     });
     mag.add(this.mesh);
+    mag.add(this.follower);
+    this.placeFollower(0);
+  }
+
+  private followerLen = 0;
+
+  /** Follower under round `n` (top `n` rounds in the mag): its top touches the last round, centred in the cavity. */
+  private placeFollower(n: number) {
+    const L = this.layout;
+    const s = L.slots[Math.max(0, Math.min(L.slots.length - 1, n - 1))];
+    if (!s) return;
+    const up = new Vector3(0, 1, 0).applyQuaternion(s.q);
+    const ax = new Vector3(0, 0, -1).applyQuaternion(s.q);
+    const body = this.info.slices[Math.min(this.info.slices.length - 1, 3)];
+    const p = s.p.clone().addScaledVector(ax, this.followerLen / 2);
+    p.x = (body.x0 + body.x1) / 2;
+    // Empty: up at the lips where the top round would sit; else just under the last round.
+    p.addScaledVector(up, n === 0 ? -0.0015 : -(L.diameter / 2 + 0.0016));
+    this.follower.position.copy(p);
+    this.follower.quaternion.copy(s.q);
   }
 
   /** Show the top `n` rounds (clamped to what fits in this mag). */
@@ -593,6 +758,7 @@ export class MagRounds {
     this.shown = k;
     this.mesh.count = k;
     this.mesh.visible = k > 0;
+    this.placeFollower(k);
   }
 
   get count(): number {

@@ -18,7 +18,7 @@ import {
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import catalogJson from '../../../public/assets/models/weapons/catalog.json';
 import type { Layout, ResolvedBuild } from '../attachments/build';
-import type { FinishPart, LightPart, SlotId } from '../attachments/types';
+import type { FinishPart, HandguardPart, LightPart, SlotId } from '../attachments/types';
 import type { Ctx, PartName, SocketName } from './core';
 import { weaponEnvMap, weaponMaterials, KIT_MATERIALS } from './materials';
 
@@ -355,6 +355,12 @@ function materialFor(family: string, name: string, finish: string, part?: string
 
 const SMALL = new Set(['trigger', 'safety', 'magRelease', 'boltCatch', 'dustCover', 'hammer']);
 
+/** The handguard's accessory interface: M-LOK slots (free-float / integral) or 1913 rails (quad). */
+export function hgRail(r: ResolvedBuild): 'mlok' | 'pic' {
+  const s = (r.parts.handguard as HandguardPart | undefined)?.style;
+  return s === 'mlok' || s === 'integral' ? 'mlok' : 'pic';
+}
+
 /** Every kit entry for a build, or null when some part has no asset (→ procedural fallback). */
 export function kitEntries(r: ResolvedBuild): KitEntry[] | null {
   const base = KIT.bases[r.build.weapon];
@@ -363,11 +369,17 @@ export function kitEntries(r: ResolvedBuild): KitEntry[] | null {
   for (const p of Object.values(r.parts)) {
     const es = KIT.parts[p.id];
     if (!es) return null;
-    // `{slot}` in a node name = that slot's part id (barrel × profile variants).
+    // `{slot}` in a node name = that slot's part id (barrel × profile variants); `{hgRail}` = the handguard's
+    // accessory interface ('mlok' | 'pic') for parts that come in both mounts.
     for (const e of es)
       out.push(
         e.node.includes('{')
-          ? { ...e, node: e.node.replace(/\{(\w+)\}/g, (_, s: string) => r.parts[s as SlotId]?.id ?? '') }
+          ? {
+              ...e,
+              node: e.node.replace(/\{(\w+)\}/g, (_, s: string) =>
+                s === 'hgRail' ? hgRail(r) : (r.parts[s as SlotId]?.id ?? ''),
+              ),
+            }
           : e,
       );
   }
@@ -473,7 +485,13 @@ export function anchorMatrix(anchor: string, c: Ctx, base: KitBase): Matrix4 {
     }
     case 'foregrip': {
       const z = l.foregrip?.z ?? 0;
-      return m.makeTranslation(0, B - c.hgRadius - (c.hgStyle === 'quad' ? 0 : 0.002), z);
+      // On the kit handguard's own bottom face (its node bounds); the procedural radius sat 1-4 mm lower, so
+      // grips floated under the kit guards.
+      const hg = c.r.parts.handguard;
+      const hgNode = hg ? KIT.parts[hg.id]?.[0]?.node : undefined;
+      const b = hgNode ? KIT.nodes[hgNode]?.bounds : undefined;
+      const y = b ? b[0][1] + o[1] : B - c.hgRadius - (c.hgStyle === 'quad' ? 0 : 0.002);
+      return m.makeTranslation(0, y, z);
     }
     default:
       return m;

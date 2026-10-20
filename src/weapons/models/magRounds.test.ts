@@ -28,7 +28,7 @@ describe('mag rounds', () => {
     expect(blk.boundingBox!.min.z).toBeGreaterThan(r556.boundingBox!.min.z - 0.002);
   });
 
-  test('every weapon: a full stack inside the mag, the top round at the lips, one extra draw call', () => {
+  test('every weapon: a full stack inside the mag, the top round at the lips, two extra draw calls (rounds + follower)', () => {
     for (const id of IDS) {
       const def = WEAPONS[id];
       const m = buildModel(id, { detailParts: true });
@@ -40,7 +40,7 @@ describe('mag rounds', () => {
       const r = new MagRounds(m, def.caliber, def.magCapacity);
       let after = 0;
       m.root.traverse((o) => void ((o as { isMesh?: boolean }).isMesh && after++));
-      expect(after - meshes).toBe(1);
+      expect(after - meshes).toBe(2);
       const L = r.layout;
       expect(L.slots.length).toBe(def.magCapacity);
       // Top round just under the lip line; stack goes down; staggered left/right.

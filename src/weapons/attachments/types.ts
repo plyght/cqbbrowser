@@ -164,7 +164,8 @@ export interface GripPart extends PartBase {
 
 export interface ForegripPart extends PartBase {
   slot: 'foregrip';
-  style: 'none' | 'vertical' | 'angled' | 'handstop';
+  /** `stubby`: short vertical (index stop); `wedge`: low-profile angled with a heel ramp. */
+  style: 'none' | 'vertical' | 'angled' | 'handstop' | 'stubby' | 'wedge';
 }
 
 export interface OpticPart extends PartBase {
@@ -181,7 +182,18 @@ export interface OpticPart extends PartBase {
   eyeRelief: number;
   /** Optical body length along the axis (m), for the sight line node. */
   bodyLength: number;
+  /** Tube optics: rear lens (eyepiece) z behind the mount's rear edge (m, + = toward the shooter). */
+  eyepiece?: number;
+  /** Eyepiece reticle drawn at ADS through a tube optic (default: duplex crosshair). */
+  reticle?: ReticleKind;
+  /** Eye box radius (m): how far the eye may sit off the axis before the scope shadow closes in. */
+  eyeBox?: number;
+  /** Variable optics with a true 1x: used like a red dot (both eyes open) at the low end. */
+  trueOneX?: boolean;
 }
+
+/** Eyepiece reticles (src/player/ScopeOverlay.ts). */
+export type ReticleKind = 'duplex' | 'circleDot';
 
 export interface LightPart extends PartBase {
   slot: 'light' | 'laser';

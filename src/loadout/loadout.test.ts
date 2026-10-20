@@ -156,6 +156,28 @@ describe('options', () => {
     expect(slotOptions(ak, 'optic').filter((o) => o.current).length).toBe(1);
   });
 
+  test('compact 1-3x LPVO is offered on the long-rail rifles', () => {
+    for (const w of ['sb16', 'hb300'] as const) {
+      const o = slotOptions(defaultBuild(w), 'optic').find((x) => x.part.id === 'opt_lpvo3')!;
+      expect(o.result.ok).toBe(true);
+      expect(validateBuild(o.result.build)).toEqual([]);
+    }
+    // AK: offered, disabled until a side / cover mount is fitted (the validator's reason is shown).
+    const ak = slotOptions(defaultBuild('k47s'), 'optic').find((x) => x.part.id === 'opt_lpvo3')!;
+    expect(ak.result.ok).toBe(false);
+    expect(ak.result.reason).toContain('receiver');
+    expect(slotOptions(defaultBuild('kp9'), 'optic').some((x) => x.part.id === 'opt_lpvo3')).toBe(false);
+  });
+
+  test('SBR grips are offered on the railed rifles', () => {
+    for (const w of ['sb16', 'hb300'] as const)
+      for (const id of ['fg_stubby', 'fg_wedge']) {
+        const o = slotOptions(defaultBuild(w), 'foregrip').find((x) => x.part.id === id)!;
+        expect(o.result.ok).toBe(true);
+        expect(validateBuild(o.result.build)).toEqual([]);
+      }
+  });
+
   test('ammo options show per-barrel velocity', () => {
     const o = ammoOptions(defaultBuild('hb300'));
     expect(o.map((x) => x.id).sort()).toEqual(['blk110', 'blk220']);

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { BASE_WEAPONS, WEAPONS } from '../defs';
+import { mlokSlot, SBR_GRIP_LEAD } from './build';
+import { PART_BY_ID } from './catalog';
 import {
   applyBuild,
   BuildValidationError,
@@ -61,6 +63,16 @@ describe('validation', () => {
     expect(e.map((x) => x.code)).toEqual(['requires']);
     expect(e[0].message).toContain('receiver');
     expect(codes(b('k47s', { optic: 'opt_lpvo', mount: 'ak_mount_side' }))).toEqual([]);
+  });
+
+  test('compact 1-3x LPVO: receiver rail on SB-16 / HB-300, AK side or cover mount', () => {
+    for (const w of ['sb16', 'hb300'] as const)
+      expect(codes(b(w, { optic: 'opt_lpvo3', buis: 'buis_none' }))).toEqual([]);
+    expect(codes(b('k47s', { optic: 'opt_lpvo3', mount: 'ak_mount_side' }))).toEqual([]);
+    expect(codes(b('k47s', { optic: 'opt_lpvo3', mount: 'ak_mount_cover' }))).toEqual([]);
+    expect(codes(b('k47s', { optic: 'opt_lpvo3', handguard: 'ak_hg_quad' }))).toEqual(['requires']);
+    expect(codes(b('sb16', { optic: 'opt_lpvo3', buis: 'buis_flip' }))).toEqual(['requires']);
+    expect(codes(b('kp9', { optic: 'opt_lpvo3' }))).toEqual(['fit']);
   });
 
   test('offset dot needs top rail space; magnifier needs a unity optic', () => {
@@ -235,6 +247,76 @@ describe('layout + aim modes', () => {
     expect(off.point[0]).toBeGreaterThan(0.02);
     expect(l.offset!.z0).toBeLessThan(l.optic!.z1);
     expect(l.aimModes.map((m) => m.id)).toEqual(['primary', 'offset']);
+  });
+  test('compact LPVO: eyepiece over the receiver, variable 1-3x, true 1x, no irons', () => {
+    for (const id of ['sb16_lpvo3', 'hb300_lpvo3']) {
+      const l = layoutBuild(resolveBuild(PRESETS[id]));
+      const m = l.aimModes[0];
+      expect(l.aimModes.map((x) => x.id)).toEqual(['primary']);
+      expect(m.optic).toBe('lpvo');
+      expect(m.magnification).toEqual([1, 3]);
+      expect(m.reticle).toBe('circleDot');
+      expect(m.trueOneX).toBe(true);
+      // Rear lens 75 mm behind the mount's rear edge, on the axis 36 mm over the rail.
+      expect(m.point[2]).toBeCloseTo(l.optic!.z0 + 0.075, 6);
+      expect(m.point[1]).toBeCloseTo(l.optic!.railY + 0.036, 6);
+      expect(m.tube).toBeCloseTo(0.205, 6);
+      expect(m.eyeBox!).toBeGreaterThan(0.006);
+      // At 1x (both eyes open) the head sits where it would behind a micro red dot on the same rail.
+      const p = PRESETS[id];
+      const dot = layoutBuild(resolveBuild(b(p.weapon, { ...p.parts, optic: 'opt_reddot' }))).aimModes[0];
+      expect(m.point[2] - m.oneXForward!).toBeCloseTo(dot.point[2], 6);
+    }
+    // Same eye position as the big LPVO on the same rail, ~5 cm shorter, lighter, quicker to the eye.
+    const big = layoutBuild(resolveBuild(PRESETS.sb16_lpvo)).aimModes[0];
+    const small = layoutBuild(resolveBuild(b('sb16', { optic: 'opt_lpvo3', buis: 'buis_none' }))).aimModes[0];
+    expect(Math.abs(big.point[2] - small.point[2])).toBeLessThan(0.01);
+    expect(big.tube! - small.tube!).toBeCloseTo(0.055, 6);
+    const sBig = stats(b('sb16', { optic: 'opt_lpvo', buis: 'buis_none' }));
+    const sSmall = stats(b('sb16', { optic: 'opt_lpvo3', buis: 'buis_none' }));
+    expect(sSmall.mass).toBeLessThan(sBig.mass - 0.15);
+    expect(sSmall.handling.adsTime).toBeLessThan(sBig.handling.adsTime);
+  });
+  test('SBR grips: ahead of the support hand, on an M-LOK slot, on the handguard', () => {
+    const cases: [WeaponId, string][] = [
+      ['sb16', 'ar_hg_mlok7'],
+      ['sb16', 'ar_hg_mlok95'],
+      ['sb16', 'ar_hg_quad9'],
+      ['hb300', 'hb_hg_mlok5'],
+      ['hb300', 'hb_hg_mlok8'],
+      ['k47s', 'ak_hg_quad'],
+      ['k47s', 'ak_hg_mlok'],
+    ];
+    for (const fg of ['fg_stubby', 'fg_wedge'] as const) {
+      for (const [w, hg] of cases) {
+        const parts: Partial<Record<SlotId, string>> = { handguard: hg, foregrip: fg };
+        if (w === 'hb300') Object.assign(parts, { barrel: 'hb_b9', muzzle: 'ar_fh_3p' });
+        const x = b(w, parts);
+        expect({ w, hg, fg, e: codes(x) }).toEqual({ w, hg, fg, e: [] });
+        const l = layoutBuild(resolveBuild(x));
+        const z = l.foregrip!.z;
+        const lead = SBR_GRIP_LEAD[fg === 'fg_stubby' ? 'stubby' : 'wedge'];
+        // The hand grips just behind it.
+        expect(l.supportHand[2] - z).toBeCloseTo(lead, 6);
+        // The whole grip stays on the handguard (stubby 23 mm, wedge 39 mm half-length).
+        expect(z).toBeLessThan(l.handguard!.z0 - 0.02);
+        expect(z - (fg === 'fg_stubby' ? 0.023 : 0.039)).toBeGreaterThan(l.handguard!.z1 - 1e-9);
+        if (w !== 'k47s' && hg.includes('mlok')) {
+          const h = PART_BY_ID[hg] as { length: number };
+          expect(mlokSlot(l.handguard!.z0, h.length, z)).toBeCloseTo(z, 9);
+        }
+      }
+    }
+    // Wood AK handguard: nowhere to mount it.
+    expect(codes(b('k47s', { foregrip: 'fg_stubby' }))).toEqual(['requires']);
+  });
+  test('M-LOK slots: 40 mm pitch, centred on the handguard', () => {
+    const len = 9.5 * 0.0254;
+    const s = [0, 1, 2, 3, 4].map((i) => mlokSlot(0, len, -0.03 - i * 0.04));
+    expect(s[1] - s[0]).toBeCloseTo(-0.04, 9);
+    expect((s[0] + s[4]) / 2).toBeCloseTo(-0.001 - (len - 0.001) / 2, 9);
+    expect(mlokSlot(0, len, 1)).toBeCloseTo(s[0], 9);
+    expect(mlokSlot(0, len, -1)).toBeCloseTo(s[4], 9);
   });
   test('AK irons: kept with a gas-tube dot, lost under a railed top cover', () => {
     expect(layoutBuild(resolveBuild(PRESETS.k47s_railed)).aimModes.map((m) => m.id)).toEqual([
