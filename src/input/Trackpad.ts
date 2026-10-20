@@ -1,5 +1,4 @@
 import type { ActionFrame, ButtonAction, InputSource } from './actions';
-import type { AimAssist } from './AimAssist';
 import { DEFAULT_KEY_BINDINGS } from './bindings';
 import { keySettings, trackpadSettings } from './config';
 
@@ -293,7 +292,7 @@ export class Trackpad implements InputSource {
   private gestureScale = 1;
   private gestureFired = false;
 
-  constructor(private aimAssist?: AimAssist) {
+  constructor() {
     addEventListener('wheel', this.onWheel, { passive: false });
     // Safari pinch.
     addEventListener('gesturestart', this.onGesture as EventListener, { passive: false });
@@ -419,7 +418,6 @@ export class Trackpad implements InputSource {
     }
     if (aiming) gain *= s.adsMultiplier;
     const look = { yaw: dx * gain, pitch: -dy * gain * (s.invertY ? -1 : 1) };
-    if (s.aimAssist) this.aimAssist?.apply(look, Math.min(1, speed / s.curveHighSpeed));
     return look;
   }
 
