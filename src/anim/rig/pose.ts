@@ -131,7 +131,7 @@ export function decodeClip(j: ClipJson, layout: Layout): Clip {
     put(decodeF32(j.wL[a]), layout.wL[a], 1);
     put(decodeF32(j.wR[a]), layout.wR[a], 1);
   }
-  return {
+  const clip: Clip = {
     id: j.id,
     action: j.action,
     pack: j.pack,
@@ -142,6 +142,8 @@ export function decodeClip(j: ClipJson, layout: Layout): Clip {
     data,
     events: j.events.slice(),
   };
+  despike(clip);
+  return clip;
 }
 
 /** Normalised lerp of the quaternion at `o` (in place on `out`, shortest arc). */
@@ -223,6 +225,7 @@ export function qmul(
 
 const _d = new Float32Array(4);
 const _c = new Float32Array(4);
+const ID_Q = [0, 0, 0, 1];
 /**
  * Additive layer: for every bone rotation, base · (ref⁻¹ · cur) scaled by `w`; bolt/trigger take the max.
  * `ref` = the additive clip's first frame, `cur` = its sampled frame.
@@ -235,12 +238,116 @@ export function addPose(layout: Layout, base: Float32Array, ref: Float32Array, c
     _c[2] = -ref[o + 2];
     _c[3] = ref[o + 3];
     qmul(_c, 0, cur, o, _d, 0);
-    if (w < 1) {
-      const id = [0, 0, 0, 1];
-      nlerpQ(_d, 0, id, 0, _d, 0, w);
-    }
+    if (w < 1) nlerpQ(_d, 0, ID_Q, 0, _d, 0, w);
     qmul(base, o, _d, 0, base, o);
   }
   for (const c of ['bolt', 'trigger'] as const)
     base[layout.ch[c]] = Math.max(base[layout.ch[c]], cur[layout.ch[c]] * w);
+}
+
+/** Angle (rad) between the unit quaternions at `a[ao]` and `b[bo]`. */
+export function quatAngle(a: ArrayLike<number>, ao: number, b: ArrayLike<number>, bo: number): number {
+  const dot = Math.abs(a[ao] * b[bo] + a[ao + 1] * b[bo + 1] + a[ao + 2] * b[bo + 2] + a[ao + 3] * b[bo + 3]);
+  return 2 * Math.acos(Math.min(1, dot));
+}
+
+/**
+ * Remove single-frame rotation pops from a clip's bone tracks in place. The retargeted source packs have frames
+ * where one bone turns 80–155° (mostly twist about the bone: a retarget flip) in one 30 fps frame while its
+ * neighbours (the window's median) move < 1/2.5 as much — a skin "flick" at 60 Hz+. Such a step is re-timed: the bone's frames across a
+ * window of ±`k` frames around it are replaced by a smoothstep slerp between the window's edge poses, so the
+ * same rotation happens over ~2k frames. Returns the number of spikes fixed.
+ */
+export function despike(clip: Clip, minStep = (35 * Math.PI) / 180, ratio = 2.5, k = 3): number {
+  const L = clip.layout;
+  const S = L.stride;
+  const n = clip.frames;
+  const d = clip.data;
+  const steps = new Float32Array(n);
+  const a = new Float32Array(4);
+  const nb: number[] = [];
+  let fixed = 0;
+  for (let bi = 0; bi < L.bones.length; bi++) {
+    const o = L.rot + bi * 4;
+    for (let pass = 0; pass < 3; pass++) {
+      for (let f = 1; f < n; f++) steps[f] = quatAngle(d, (f - 1) * S + o, d, f * S + o);
+      let any = false;
+      for (let f = 1; f < n; f++) {
+        const s = steps[f];
+        if (s < minStep) continue;
+        // Typical neighbour step outside the spike itself (it can straddle two frames): the window's median.
+        nb.length = 0;
+        for (let j = f - k; j <= f + k; j++) if (j >= 1 && j < n && Math.abs(j - f) > 1) nb.push(steps[j]);
+        nb.sort((x, y) => x - y);
+        const around = nb.length ? nb[nb.length >> 1] : 0;
+        if (s < ratio * around) continue;
+        const f0 = Math.max(0, f - k);
+        const f1 = Math.min(n - 1, f + k - 1);
+        if (f1 - f0 < 2) continue;
+        a.set(d.subarray(f0 * S + o, f0 * S + o + 4));
+        const b = d.slice(f1 * S + o, f1 * S + o + 4);
+        for (let g = f0 + 1; g < f1; g++) {
+          const u = (g - f0) / (f1 - f0);
+          slerpQ(d, g * S + o, a, b, u * u * (3 - 2 * u));
+        }
+        fixed++;
+        any = true;
+        f = f1;
+      }
+      if (!any) break;
+    }
+  }
+  return fixed;
+}
+
+/** Spherical lerp of quaternions `a` → `b` (shortest arc) into `out[o]`. */
+function slerpQ(out: Float32Array, o: number, a: ArrayLike<number>, b: ArrayLike<number>, t: number) {
+  let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  const s = dot < 0 ? -1 : 1;
+  dot = Math.min(1, Math.abs(dot));
+  const th = Math.acos(dot);
+  let ka = 1 - t,
+    kb = t;
+  if (th > 1e-4) {
+    const sn = Math.sin(th);
+    ka = Math.sin((1 - t) * th) / sn;
+    kb = Math.sin(t * th) / sn;
+  }
+  let l = 0;
+  for (let i = 0; i < 4; i++) {
+    out[o + i] = a[i] * ka + s * b[i] * kb;
+    l += out[o + i] * out[o + i];
+  }
+  l = Math.sqrt(l) || 1;
+  for (let i = 0; i < 4; i++) out[o + i] /= l;
+}
+
+/**
+ * Make a clip end where it starts, in place: over its last `fraction`, every frame is blended (smoothstep) toward
+ * frame 0. Loops then have no seam at the wrap, and additive clips (applied as a delta from frame 0) return to a
+ * zero delta, so the layer leaves without a pop. `bonesOnly` limits it to the bone rotations (additive clips:
+ * their bolt / trigger channels are maxed, not deltas).
+ */
+export function settleToStart(clip: Clip, fraction: number, bonesOnly = false) {
+  const L = clip.layout;
+  const S = L.stride;
+  const n = clip.frames;
+  const d = clip.data;
+  const k = Math.max(2, Math.round((n - 1) * fraction));
+  const head = d.slice(0, S);
+  const tmp = new Float32Array(S);
+  for (let f = n - 1 - k; f < n; f++) {
+    if (f <= 0) continue;
+    const u = (f - (n - 1 - k)) / k;
+    const w = u * u * (3 - 2 * u);
+    if (bonesOnly) {
+      for (let bi = 0; bi < L.bones.length; bi++) {
+        const o = L.rot + bi * 4;
+        nlerpQ(d, f * S + o, d, f * S + o, head, o, w);
+      }
+    } else {
+      blendPose(L, tmp, d, f * S, head, 0, w);
+      d.set(tmp, f * S);
+    }
+  }
 }
