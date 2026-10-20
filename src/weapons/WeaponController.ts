@@ -347,8 +347,7 @@ export class WeaponController implements System {
 
   /** Idle steadiness weight (0..1) and last frame's inverse clip gun frame in rig space (see updateRig). */
   private idleLock = 0;
-  private readonly rigGunInv = new Matrix4();
-  private rigGunValid = false;
+  private idleLockWant = false;
 
   /** Rig reload past the point the gun can fire again (mag seated + chambered). */
   private reloadLive = false;
@@ -569,6 +568,32 @@ export class WeaponController implements System {
     foreArmL.updateMatrixWorld(true);
   }
 
+  /**
+   * Idle steadiness. The idle clips move the gun on their own (the P-17 idle cants it ~8 deg and swings the aim
+   * ~2 deg every 1.2 s loop), which fought the handling sim: at ADS the sight wandered off the point of aim. And
+   * the additive shot clip rotates the gun a further ~8 deg of pitch and ~3 deg of roll ~100 ms after the shot
+   * (sampled at 30 Hz, so it also stair-steps): a second jolt on top of the handling sim's recoil, which already
+   * is the muzzle flip. While idling (this includes a shot kicking), place the rig so the gun sits exactly on the
+   * handling pose: fully at ADS, halfway at the hip (a shot at the hip keeps its clip kick). Runs right after
+   * the rig samples, so there is no frame of lag; the slide (bolt channel) and the hands still animate.
+   */
+  private lockToHandlingPose(dt: number) {
+    const rig = this.rig!;
+    const e = this.equipped;
+    const ads = this.adsBlend;
+    const want = this.idleLockWant ? (rig.shooting ? ads : 0.5 + 0.5 * ads) : 0;
+    this.idleLock += (want - this.idleLock) * damp(0.05, dt);
+    if (this.idleLock < 1e-3 || rig.weaponModel !== e.model) return;
+    rig.root.updateMatrixWorld(true);
+    // Gun frame in rig space, then the root that puts it on the handling pose.
+    _m2.copy(rig.root.matrixWorld).invert().multiply(e.model.root.matrixWorld).invert();
+    _m2.premultiply(this.view.matrixWorld);
+    _m2.decompose(_posA, _qA, _v);
+    rig.root.position.lerp(_posA, this.idleLock);
+    rig.root.quaternion.slerp(_qA, this.idleLock);
+    rig.root.updateMatrixWorld(true);
+  }
+
   /** Root = handling pose × inverse idle gun frame; then the rig samples, places the gun and IKs the hands. */
   private updateRig(dt: number) {
     const rig = this.rig!;
@@ -577,18 +602,7 @@ export class WeaponController implements System {
     if (e.rigRefInv) {
       _m.copy(this.view.matrixWorld).multiply(e.rigRefInv);
       _m.decompose(rig.root.position, rig.root.quaternion, _v);
-      // Idle steadiness: the idle clips move the gun on their own (the P-17 idle cants it ~8 deg and swings
-      // the aim ~2 deg every 1.2 s loop), which fought the handling sim: at ADS the sight wandered off the
-      // point of aim. While idling (no shot kicking), pull the rig so the gun sits on the handling pose:
-      // fully at ADS, halfway at the hip. Uses last frame's clip gun frame (one frame of lag).
-      const want = rig.action === 'idle' && !rig.shooting ? 0.5 + 0.5 * this.adsBlend : 0;
-      this.idleLock += (want - this.idleLock) * damp(0.05, dt);
-      if (this.idleLock > 1e-3 && this.rigGunValid) {
-        _m2.copy(this.view.matrixWorld).multiply(this.rigGunInv);
-        _m2.decompose(_posA, _qA, _v);
-        rig.root.position.lerp(_posA, this.idleLock);
-        rig.root.quaternion.slerp(_qA, this.idleLock);
-      }
+      this.idleLockWant = rig.action === 'idle';
     }
     rig.root.updateMatrixWorld(true);
     // The mag check presents the mag to the chest cam: keep the camera's place in rig space current, frozen while the
@@ -605,6 +619,7 @@ export class WeaponController implements System {
       if (f.down.has('fire') || this.player.aiming) rig.play('idle', { fade: ArmsRig.CANCEL_XFADE });
     }
     rig.update(dt);
+    this.lockToHandlingPose(dt);
     this.updateRigCamFix(dt);
     this.rigArmLayer(rig);
     // Hands may not sink into the weapon: after every arm layer, before rendering.
@@ -612,10 +627,7 @@ export class WeaponController implements System {
       this.contact.apply(dt);
       this.contactOverlay?.update(this.contact);
     }
-    // The clip's gun frame in rig space (inverted) for next frame's idle steadiness.
     rig.root.updateMatrixWorld(true);
-    this.rigGunInv.copy(e.model.root.matrixWorld).invert().multiply(rig.root.matrixWorld);
-    this.rigGunValid = rig.weaponModel === e.model;
     // The rig's clone of the old mag (slot 1): shown while the old mag is still in the gun (the AK knock-out keeps it
     // seated until the fresh one hits it); once it leaves, our physical floor mag replaces the clip's fall.
     const spare = e.model.root.getObjectByName('spareMag');

@@ -153,7 +153,15 @@ export class Gamepad implements InputSource, Haptics {
     );
     const ads = info?.aiming ? s.adsMultiplier : 1;
     const look = { yaw: rate.yaw * ads * dt, pitch: rate.pitch * ads * dt };
-    this.aimAssist?.apply(look, rate.intensity);
+    // Gamepad-only assist: sampled every frame (also with an idle stick) so line-of-sight rates stay continuous.
+    if (active) {
+      this.aimAssist?.apply(look, {
+        dt,
+        intensity: rate.intensity,
+        move: Math.hypot(mv.x, mv.y),
+        aiming: !!info?.aiming,
+      });
+    }
     frame.look.yaw += look.yaw;
     frame.look.pitch += look.pitch;
 

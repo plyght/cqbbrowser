@@ -71,7 +71,7 @@ export function recoilFor(def: WeaponDef): { profile: RecoilProfile; feel: Recoi
   const contact = pistol ? 0.3 : 1;
   const feel: RecoilFeel = {
     back: FEEL.back,
-    lever: FEEL.lever * up * (pistol ? 0.32 : 1),
+    lever: FEEL.lever * up * (pistol ? 0.27 : 1),
     side: FEEL.side * def.recoil.side,
     camPitch: FEEL.cam * V * contact * (0.7 + 0.3 * up),
     camShove: FEEL.shove * V * contact,

@@ -20,6 +20,9 @@ GRIP_ANGLE = math.radians(17)
 # hand envelope). Everything below is authored in the asset frame (game z = asset z + OFFSET_Z).
 OFFSET_Z = 0.070
 OLD_GRIP_RIGHT = (0.0, -0.055, 0.052)  # procedural gripRight socket (game frame)
+# Grip truth audit: the palm sat 12 mm inside the backstrap; the whole SMG moves forward
+# 12 mm along the grip-depth normal = 12.4 mm in z at 14.8 deg (every socket incl. gripRight follows).
+PALM_CLEAR_Z = -0.0124
 
 
 def build():
@@ -159,7 +162,7 @@ def build():
                  "ejectionPort": (0.016, 0.03, -0.085),
              },
              anchors={"muzzle": (0, 0, fz0 + 0.002), "hgRear": (0, 0, hz1), "hgFront": (0, 0, hz0)},
-             offset=(0.0, 0.0, OFFSET_Z), frameShift=["ironRear"])
+             offset=(0.0, 0.0, OFFSET_Z + PALM_CLEAR_Z), frameShift=["ironRear"])
     from .devices import device
 
     device(FAM, "kp_fh", 0.045, 0.0115, "prong", "blued")

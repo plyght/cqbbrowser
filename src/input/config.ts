@@ -55,7 +55,6 @@ export const trackpadSettings = settings.ns('input.trackpad', {
   snapTurns: false,
   snapDegrees: 90,
   snapTime: 0.12,
-  aimAssist: false,
 });
 
 /** Gamepad (§7.4). Sensitivities are degrees/second at full deflection. */
@@ -84,21 +83,34 @@ export const gamepadSettings = settings.ns('input.gamepad', {
   bindings: DEFAULT_PAD_BINDINGS as PadBindings,
 });
 
-export type AssistLevel = 'arcade' | 'standard' | 'hardcore' | 'custom';
-export const ASSIST_PRESET: Record<Exclude<AssistLevel, 'custom'>, number> = {
-  arcade: 0.6,
-  standard: 0.35,
-  hardcore: 0,
+export type AssistMode = 'off' | 'light' | 'standard';
+
+/** What each mode does. All three effects are small by design (single-player training aid, not an aimbot). */
+export interface AssistTune {
+  /** Look-sensitivity reduction when the aim is over a target hitbox (0.3 = 30% slower). */
+  slow: number;
+  /** Fraction of the target's relative angular motion added while moving and steering. */
+  follow: number;
+  /** Total ADS-entry pull in degrees. */
+  magnetDeg: number;
+}
+export const ASSIST_TUNE: Record<AssistMode, AssistTune> = {
+  off: { slow: 0, follow: 0, magnetDeg: 0 },
+  light: { slow: 0.25, follow: 0.2, magnetDeg: 1 },
+  standard: { slow: 0.35, follow: 0.35, magnetDeg: 1.5 },
 };
 
+/** Hard caps no tune may exceed (also asserted in tests). */
+export const ASSIST_CAPS = { slow: 0.35, follow: 0.4, followDegPerSec: 8, magnetDeg: 2 };
+
 export const aimAssistSettings = settings.ns('input.aimAssist', {
-  level: 'standard' as AssistLevel,
-  /** 0..1, used when level = custom. */
-  custom: 0.35,
-  /** Full friction inside this cone (degrees from the weapon aim ray). */
-  innerDeg: 1.2,
-  /** Friction fades to zero at this cone. */
-  outerDeg: 4.5,
+  mode: 'light' as AssistMode,
+  /** Slowdown stays at full strength within this angle outside the hitbox edge (degrees). */
+  innerDeg: 0,
+  /** ...and fades smoothly to nothing this far outside the hitbox edge. */
+  outerDeg: 3.5,
+  /** ADS magnetism only considers targets whose centre is within this cone of the sight line (degrees). */
+  magnetConeDeg: 3,
 });
 
 export const gyroSettings = settings.ns('input.gyro', {

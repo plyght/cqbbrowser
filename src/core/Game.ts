@@ -5,7 +5,7 @@ import { videoSettings } from '../render/quality';
 import { AudioEngine } from '../audio/AudioEngine';
 import { Fx } from '../fx/Fx';
 import { Gear } from '../gear/Gear';
-import { AimAssist } from '../input/AimAssist';
+import { AimAssist, assistRadius, type AssistScene, type AssistTarget } from '../input/AimAssist';
 import { mouseSettings } from '../input/config';
 import { Gamepad } from '../input/Gamepad';
 import { Gyro } from '../input/Gyro';
@@ -75,7 +75,7 @@ export class Game {
     await physics.init();
     this.renderer = new Renderer(canvas);
     const input = new Input();
-    this.trackpad = new Trackpad(this.aimAssist);
+    this.trackpad = new Trackpad();
     this.gamepad = new Gamepad(this.aimAssist);
     input.add(new KeyboardMouse(canvas, this.trackpad));
     input.add(this.trackpad);
@@ -128,7 +128,7 @@ export class Game {
       toast: (t) => this.hud?.toast(t),
     });
     this.systems.push(this.gear);
-    this.aimAssist.provider = this.aimAssistProvider();
+    this.wireAimAssist();
     this.audio = new AudioEngine(bus, this.ctx.camera, { physics, exclude: () => this.player.rigidBody });
     this.hud = new Hud(ui);
     this.hud.bind({
@@ -219,19 +219,43 @@ export class Game {
     }
   }
 
-  /** Aim assist: angle from the weapon aim ray to the nearest standing shootable target in the active facility. */
-  private aimAssistProvider() {
-    const p = new Vector3();
-    return () => {
-      const { origin, dir } = this.weapons.muzzleWorld();
-      let best = Infinity;
+  /** Aim assist scene: standing shootable targets of the active facility plus camera and bore rays. */
+  private wireAimAssist() {
+    const eye = new Vector3();
+    const camDir = new Vector3();
+    const cache = new Map<string, AssistTarget>();
+    const scene: AssistScene = { eye, camDir, muzzle: eye, boreDir: camDir, targets: [] };
+    const list: AssistTarget[] = [];
+    this.aimAssist.scene = () => {
+      const cam = this.ctx.camera;
+      cam.getWorldPosition(eye);
+      cam.getWorldDirection(camDir);
+      const m = this.weapons.muzzleWorld();
+      scene.muzzle = m.origin;
+      scene.boreDir = m.dir;
+      list.length = 0;
       for (const t of this.world.list(this.world.active)) {
-        if (t.down || t.noShoot) continue;
-        p.copy(t.aimPoint()).sub(origin);
-        if (p.lengthSq() < 0.09) continue;
-        best = Math.min(best, dir.angleTo(p));
+        if (t.down) continue;
+        let a = cache.get(t.id);
+        if (!a)
+          cache.set(
+            t.id,
+            (a = { id: t.id, pos: t.aimPoint(), radius: assistRadius(t.kind), noShoot: t.noShoot }),
+          );
+        a.pos = t.aimPoint();
+        a.noShoot = t.noShoot;
+        list.push(a);
       }
-      return best;
+      scene.targets = list;
+      return scene;
+    };
+    const o = new Vector3();
+    const d = new Vector3();
+    this.aimAssist.los = (from, t, dist) => {
+      o.set(from.x, from.y, from.z);
+      d.set(t.pos.x - from.x, t.pos.y - from.y, t.pos.z - from.z).normalize();
+      const hit = this.ctx.physics.raycast(o, d, dist, this.player.rigidBody);
+      return !hit || hit.tag.targetId === t.id || hit.distance >= dist - t.radius;
     };
   }
 
