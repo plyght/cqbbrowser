@@ -438,6 +438,11 @@ export class ArmsRig {
     return !l.done || !!l.clip.holdLast;
   }
 
+  /** True while an additive shot layer is still kicking. */
+  get shooting(): boolean {
+    return !!this.shot && !this.shot.done;
+  }
+
   /** Current action time / duration (0..1). */
   get progress(): number {
     const l = this.layer;
@@ -490,6 +495,11 @@ export class ArmsRig {
     this.layer = { clip, t: 0, speed: opts.speed ?? 1, onEvent: opts.onEvent, done: false };
     this.holding = !!opts.hold && !!clip.hold;
     this.fireEvents(this.layer, -1, 0);
+  }
+
+  /** Speed up the clip that's playing (a tactical reload upgraded to a speed reload mid-way). */
+  hurry(k: number): void {
+    if (this.layer && !this.layer.done) this.layer.speed *= k;
   }
 
   /** Mag check: leave the hold loop → reinsert + seat. */

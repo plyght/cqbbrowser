@@ -339,7 +339,12 @@ export class Throwables {
       if (dv > 0.8 && l.age - l.lastBounce > 0.06) {
         l.lastBounce = l.age;
         const p = new Vector3(t.x, t.y, t.z);
-        const hit = this.ctx.physics.raycast(p, this.down, 0.25, l.body);
+        // The surface struck lies against the velocity change (a wall bounce isn't below the can): probe that
+        // way first, then down. Walls used to report the 'concrete' fallback.
+        const into = new Vector3(l.prev.x - v.x, l.prev.y - v.y, l.prev.z - v.z).normalize();
+        const hit =
+          this.ctx.physics.raycast(p, into, 0.25, l.body) ??
+          this.ctx.physics.raycast(p, this.down, 0.25, l.body);
         this.ctx.bus.emit('gearSound', {
           kind: 'bounce',
           point: p,
