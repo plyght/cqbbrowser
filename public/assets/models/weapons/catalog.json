@@ -76,6 +76,9 @@
      "z": -0.047
     }
    },
+   "frameFromAsset": [
+    "ironRear"
+   ],
    "frameShift": [],
    "nodes": [
     {
@@ -134,10 +137,7 @@
      0.03,
      -0.32903
     ]
-   },
-   "frameFromAsset": [
-    "ironRear"
-   ]
+   }
   },
   "kp9": {
    "anchors": {
@@ -497,7 +497,7 @@
    }
   },
   "p17": {
-   "bytes": 618848,
+   "bytes": 611108,
    "glb": "assets/models/weapons/p17.glb",
    "materials": {
     "kit_p17": {

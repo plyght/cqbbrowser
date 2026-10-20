@@ -291,6 +291,49 @@ def finish(o, bevel=None, seg=None, angle=None, weighted=True):
     return o
 
 
+def flat_planar(o, min_area=4e-5, tol_deg=0.5):
+    """Exact face normals on large flat regions (coplanar triangle fans, e.g. a slide flat after triangulation):
+    smooth/weighted normals interpolated along a long triangle edge show up as a diagonal shading line on glossy
+    metal. Regions of edge-connected faces within tol_deg of each other and at least min_area (m²) get every corner
+    set to the region's area-weighted normal; everything else keeps its normals."""
+    me = o.data
+    cos_t = math.cos(math.radians(tol_deg))
+    normals = [tuple(c.vector) for c in me.corner_normals]
+    edge_faces = {}
+    for p in me.polygons:
+        for ek in p.edge_keys:
+            edge_faces.setdefault(ek, []).append(p.index)
+    seen = set()
+    n_regions = 0
+    for p0 in me.polygons:
+        if p0.index in seen:
+            continue
+        region, stack = [], [p0.index]
+        seen.add(p0.index)
+        n0 = p0.normal.copy()
+        while stack:
+            i = stack.pop()
+            region.append(i)
+            for ek in me.polygons[i].edge_keys:
+                for j in edge_faces[ek]:
+                    if j not in seen and me.polygons[j].normal.dot(n0) > cos_t:
+                        seen.add(j)
+                        stack.append(j)
+        area = sum(me.polygons[i].area for i in region)
+        if area < min_area:
+            continue
+        n = Vector((0, 0, 0))
+        for i in region:
+            n += me.polygons[i].normal * me.polygons[i].area
+        n.normalize()
+        for i in region:
+            for li in me.polygons[i].loop_indices:
+                normals[li] = tuple(n)
+        n_regions += 1
+    me.normals_split_custom_set(normals)
+    return n_regions
+
+
 def join(name, objs, pivot=(0, 0, 0)):
     """Finish (if not yet) and join objects into one kit node with its origin at `pivot` (three frame)."""
     objs = [o for o in objs if o is not None]

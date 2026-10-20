@@ -73,6 +73,8 @@ def build():
     notch_bottom = fy1  # line of sight level with the post tip
     cut(rs, box("notch", 0.0033, 0.006, rz1 + 0.001, rz0 - 0.001, 0, notch_bottom + 0.003, mat=None, bevel=0))
     slide = join("p17_slide", [s, hood, ext, barrel, bore, guide, fs, dot, rs], pivot=(0, 0, 0))
+    # exact normals on the slide flats (ISSUES #29: diagonal shading line along a long triangle edge)
+    print("[p17] slide flat regions:", lib.flat_planar(slide))
     kit.node(slide, FAM)
 
     # ------------------------------------------------------------------ frame
