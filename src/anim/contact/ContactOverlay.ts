@@ -79,9 +79,10 @@ export class ContactOverlay {
 
   /** Redraw from the contact layer's current state (call after `contact.apply`, before rendering). */
   update(c: HandContact) {
+    const synced = c.sync();
     const col = c.col;
     const model = c.rig.weaponModel;
-    if (!col || !model || !c.sync()) {
+    if (!synced || !col || !model) {
       this.spheres.count = 0;
       this.lines.geometry.setDrawRange(0, 0);
       return;
