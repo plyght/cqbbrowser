@@ -50,7 +50,7 @@ function meshesUnder(root: Object3D, skip?: (o: Object3D) => boolean): { geo: Bu
   const inv = new Matrix4().copy(root.matrixWorld).invert();
   const out: { geo: BufferGeometry; m: Matrix4 }[] = [];
   const walk = (o: Object3D) => {
-    if (o.name === 'magRounds' || o.name === 'spareMag' || skip?.(o)) return;
+    if (o.name === 'magRounds' || o.name === 'magFollower' || o.name === 'spareMag' || skip?.(o)) return;
     const mesh = o as Mesh;
     if (mesh.isMesh && !(mesh as { isInstancedMesh?: boolean }).isInstancedMesh)
       out.push({ geo: mesh.geometry, m: new Matrix4().multiplyMatrices(inv, mesh.matrixWorld) });
