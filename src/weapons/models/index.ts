@@ -20,6 +20,7 @@ import type {
 } from '../attachments/types';
 import { Ctx, type BuildOptions, type PartName, type SocketName } from './core';
 import { triangles } from './geom';
+import { assembleKit } from './kit';
 import { buildAK } from './parts/ak';
 import { buildAR } from './parts/ar';
 import { buildGlock } from './parts/glock';
@@ -38,6 +39,7 @@ import {
 
 export type { BuildOptions, PartName, SocketName } from './core';
 export { setWeaponEnvMap, weaponMaterials } from './materials';
+export { KIT, kitProxies, preloadWeaponAssets, weaponAssetsReady } from './kit';
 
 export interface SightLine {
   mode: AimMode;
@@ -72,7 +74,14 @@ export interface WeaponModel {
   dispose(): void;
 }
 
-const LEGACY: Record<string, WeaponId> = { ar: 'sb16', pdw: 'hb300', ak: 'k47s', pistol: 'p17', smg: 'kp9' };
+const LEGACY: Record<string, WeaponId> = {
+  ar: 'sb16',
+  pdw: 'hb300',
+  ak: 'k47s',
+  pistol: 'p17',
+  smg: 'kp9',
+  beretta: 'p92',
+};
 
 /** Resolve a model key: weapon id, preset id, legacy key, or `build:{json}` (from `applyBuild`). */
 export function buildFromKey(key: string): WeaponBuild {
@@ -153,6 +162,9 @@ export function buildModelFromBuild(build: WeaponBuild, opts: BuildOptions = {})
     } else root.add(o);
     return { mode, node: o };
   });
+
+  // Blender parts kit (when preloaded and every part of the build has an asset).
+  if (assembleKit(c, root, parts, sockets, !!opts.detailParts)) for (const [k, v] of parts) partsRec[k] = v;
 
   let drawCalls = 0,
     tris = 0;

@@ -22,6 +22,7 @@ import { setDrillSource, type RunResult } from '../ui/drills';
 import { toDrillInfo, toRunResult } from '../ui/drillAdapter';
 import { Ballistics } from '../weapons/Ballistics';
 import { WeaponController } from '../weapons/WeaponController';
+import { preloadWeaponAssets } from '../weapons/models';
 import { Drills } from '../drills/Drills';
 import { World } from '../world/World';
 import { loadoutDefs, loadoutKey, LOADOUT_PRESETS, loadouts, type Loadout } from '../loadout';
@@ -109,6 +110,8 @@ export class Game {
     const ballistics = (this.ballistics = new Ballistics(this.ctx, () => this.player.rigidBody));
     this.world = new World(this.ctx, ballistics, this.player);
     this.player.teleport(this.world.spawn, this.world.spawnYaw);
+    // Blender parts kit (GLB + atlases); buildModel falls back to procedural meshes if this fails.
+    await preloadWeaponAssets().catch((e) => console.warn('weapon kit not loaded', e));
     this.weapons = new WeaponController(this.ctx, this.player, ['sb16', 'p17']);
     this.drills = new Drills(this.ctx, this.world, this.player, () => this.paused);
     this.systems.push(this.player, this.weapons, ballistics, this.world, this.drills);

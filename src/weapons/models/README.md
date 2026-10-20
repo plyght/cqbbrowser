@@ -104,3 +104,57 @@ to use it) and `eyeRelief` (eye position = node + (0, 0, eyeRelief) in node spac
 - Metals read without a scene environment because the materials carry a generated studio
   equirect `envMap`; call `setWeaponEnvMap(pmremTexture)` to use the level's environment instead
   (or `null` to fall back to `scene.environment`).
+
+## Parts kit (Blender GLBs)
+
+The meshes come from a Blender-authored parts kit when it is loaded; the procedural builders above stay as the
+synchronous fallback (headless tests, or any build with a part the kit doesn't have yet).
+
+```ts
+await preloadWeaponAssets(); // once at boot (Game.start, the bench); safe to call again
+buildModel('sb16'); // still synchronous: assembled from kit nodes when every part is in the catalog
+weaponAssetsReady(); // true after the preload
+model.root.userData.kit; // true when the kit was used
+kitProxies(model.root); // collision proxies of every placed node (with its weapon-frame matrix)
+```
+
+- **Pipeline** (`tools/blender/weapons/`, see its README): `extract_sources.ts` un-skins the CC-BY BURNER
+  Krinkov/Beretta into our frame; `ref/trace.py` traces part outlines from scaled reference photos;
+  `build_kit.py` models every family in Blender (profile prisms, lofted sections, lathes, boolean cuts with
+  arrayed cutters, bevel + weighted normals), bakes one atlas per family and exports
+  `public/assets/models/weapons/<family>.glb` (meshopt) + `catalog.json`.
+- **Families**: `k47` (BURNER Krinkov, its own textures), `p92` (BURNER Beretta, its own textures), `p17`, `ar`
+  (SB-16, HB-300), `kp9`, `acc` (optics, BUIS, lights, laser, foregrips).
+- **Assembly** (`kit.ts`): the procedural build still runs first for pivots, sockets and sight lines (all from the
+  layout); its meshes are then replaced by kit nodes placed at layout anchors (`origin`, `muzzle`, `gas`,
+  `hgRear`, `butt`, `optic`, `magnifier`, `offset`, `buisRear`/`buisFront`, `light`, `laser`, `foregrip`) and
+  merged per material per part group (moving parts stay separate). Sockets measured on an asset (base `sockets`,
+  node `sockets`) override the layout ones, so hands land on the real mesh. Contract unchanged; additive: part
+  `hammer` (P-92) and the P-92 weapon.
+- **Atlas materials**: albedo (RGB, sRGB) with the finish mask in alpha (the runtime multiplies the build's finish
+  colour there), ORM (AO, roughness, metalness: three's channel layout), tangent-space normal.
+
+### Catalog (`public/assets/models/weapons/catalog.json`)
+
+All coordinates in the weapon frame (metres, y up, -z forward, origin at the grip, bore at `BORE_Y`).
+
+```jsonc
+{
+  "families": { "ar": { "glb": "assets/models/weapons/ar.glb", "materials": { "kit_ar": { "kind": "atlas", "map": "…_c.webp", "orm": "…", "normal": "…", "mask": "alpha" } } } },
+  "nodes": { "ar_lower": { "family": "ar", "pivot": [0, 0, 0], "tris": 4200, "bounds": [[…], […]], "proxies": [ … ], "sockets": { … } } },
+  "parts": {
+    "ar_hg_mlok95": [{ "node": "ar_hg_mlok95", "anchor": "hgRear" }],
+    "ar_b103": [{ "node": "ar_b103_{barrelProfile}", "anchor": "origin" }] // {slot} = that slot's part id
+  },
+  "bases": { "sb16": { "nodes": [{ "node": "ar_upper" }, { "node": "ar_bolt", "part": "bolt" }], "sockets": { … }, "anchors": { … } } }
+}
+```
+
+### Collision proxies (for `src/anim/grip/shapes.ts`)
+
+`nodes[n].proxies` are in **node-local** space (three frame; the node origin is its pivot):
+`{ "type": "box", "c": [x, y, z], "h": [hx, hy, hz], "rx"?: angle }` (half extents; `rx` = rotation about +x for
+raked grips, local -y running down the grip and local z = grip depth) or
+`{ "type": "capsule", "a": [x, y, z], "b": [x, y, z], "r": r }`. Curved or raked parts (mags, grips, stocks,
+receivers) get 2–4 boxes sliced along their long axis. `kitProxies(model.root)` returns them together with each
+placed node's model-frame matrix (`matrix` = anchor × node), so shapes can be derived without reading meshes.

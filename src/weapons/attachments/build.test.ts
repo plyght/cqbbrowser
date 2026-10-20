@@ -225,7 +225,7 @@ describe('layout + aim modes', () => {
   test('primary → magnified → irons with co-witnessed BUIS', () => {
     const l = layoutBuild(resolveBuild(PRESETS.sb16_supp));
     expect(l.aimModes.map((m) => m.id)).toEqual(['primary', 'magnified', 'irons']);
-    expect(l.aimModes[0].sightHeight).toBeCloseTo(0.067, 3); // ~2.6" over bore
+    expect(l.aimModes[0].sightHeight).toBeCloseTo(0.0635, 3); // ~2.5" over bore (CC0 M4 upper rail at bore + 27.5 mm)
     expect(l.magnifier!.z1).toBeGreaterThan(l.optic!.z0);
   });
   test('offset dot is canted 45° and sits ahead of the LPVO mount', () => {

@@ -169,6 +169,26 @@ export const BASE_WEAPONS: Record<string, WeaponDef> = {
     reloadTimes: { tactical: 1.8, speed: 1.3, emptyExtra: 0.25 },
     model: 'p17',
   },
+  p92: {
+    id: 'p92',
+    name: 'P-92 (9mm)',
+    slot: 'sidearm',
+    caliber: '9mm',
+    velocity: 375,
+    bulletMass: 7.5,
+    spreadMoa: 5,
+    rpm: 800,
+    modes: ['semi'],
+    reload: 'mag',
+    magCapacity: 15,
+    spareMags: 2,
+    mass: 0.97,
+    length: 0.217,
+    recoil: { up: 1.35, side: 0.45, roll: 0.5, back: 0.6 },
+    sightHeight: 0.011,
+    reloadTimes: { tactical: 1.9, speed: 1.35, emptyExtra: 0.3 },
+    model: 'p92',
+  },
 };
 
 /** Default-build defs keyed by weapon id (what the controller equips today). */

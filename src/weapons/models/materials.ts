@@ -448,6 +448,10 @@ export function weaponMaterials(): WeaponMaterials {
  */
 export function setWeaponEnvMap(tex: Texture | null) {
   env = tex;
+  for (const m of KIT_MATERIALS) {
+    m.envMap = env;
+    m.needsUpdate = true;
+  }
   if (!cache) return;
   for (const m of cache.all) {
     if (m instanceof MeshStandardMaterial) {
@@ -455,6 +459,15 @@ export function setWeaponEnvMap(tex: Texture | null) {
       m.needsUpdate = true;
     }
   }
+}
+
+/** Kit (GLB) materials that follow `setWeaponEnvMap` too. */
+export const KIT_MATERIALS = new Set<MeshStandardMaterial>();
+
+/** The current weapon reflection environment (generated studio map unless the level set one). */
+export function weaponEnvMap(): Texture | null {
+  weaponMaterials();
+  return env;
 }
 
 export function finishMaterial(f: Finish) {
