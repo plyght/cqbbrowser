@@ -22,7 +22,7 @@ import { HandContact } from '../HandContact';
  * Rows = weapon × mode, columns = views. `xray=1` draws the weapon see-through (fingers inside it show),
  * `overlay=1` the contact proxies, `state=idle|fire|ads`, `t=` seconds into it. Modes: raw (clip), contact
  * (shipping default for the weapon), safe, full. Section views: `gsec:<mm>` cuts across the grip `mm` up its axis from
- * the grip socket (looking down the grip), `bsec:<mm>` across the bore at the support wrist + `mm` (looking from the
+ * the grip socket (looking down the grip), `fg=fg_vertical|fg_angled` builds with that foregrip, `bsec:<mm>` across the bore at the support wrist + `mm` (looking from the
  * muzzle); cut interiors show red (weapon) / yellow (glove). Hook: window.__grip { ready, stats }.
  */
 const q = new URLSearchParams(location.search);
@@ -39,7 +39,7 @@ type View =
   | 'front'
   | `gsec:${string}`
   | `bsec:${string}`;
-const VIEWS: Record<string, { at: 'grip' | 'support'; az: number; el: number; dist: number }> = {
+const VIEWS: Record<string, { at: 'grip' | 'support' | 'fg'; az: number; el: number; dist: number }> = {
   right: { at: 'grip', az: -90, el: 5, dist: 0.32 },
   left: { at: 'grip', az: 90, el: 5, dist: 0.28 },
   leftfront: { at: 'grip', az: 40, el: -5, dist: 0.28 },
@@ -47,6 +47,9 @@ const VIEWS: Record<string, { at: 'grip' | 'support'; az: number; el: number; di
   support: { at: 'support', az: 20, el: -55, dist: 0.3 },
   top: { at: 'support', az: 0, el: 80, dist: 0.32 },
   front: { at: 'support', az: 10, el: -20, dist: 0.3 },
+  sleft: { at: 'fg', az: 95, el: -10, dist: 0.3 },
+  sright: { at: 'fg', az: -95, el: -10, dist: 0.3 },
+  sbelow: { at: 'fg', az: -30, el: -60, dist: 0.3 },
 };
 
 async function main() {
@@ -75,7 +78,13 @@ async function main() {
   const overlay = q.get('overlay') === '1' ? new ContactOverlay(sheet.scene) : null;
   const models: Record<string, WeaponModel> = {};
   for (const w of weapons) {
-    models[w] = buildModel(w, { detailParts: true });
+    const fg = q.get('fg');
+    models[w] = fg
+      ? buildModel(
+          { v: 1, weapon: w as WeaponModel['weapon'], parts: { foregrip: fg } },
+          { detailParts: true },
+        )
+      : buildModel(w, { detailParts: true });
     if (q.get('xray') === '1') xray(models[w]);
     const capGun = new MeshBasicMaterial({ color: 0xc02020, side: BackSide, clippingPlanes: [cut] });
     const meshes: Mesh[] = [];
@@ -105,6 +114,10 @@ async function main() {
     }
     const tgt = new Vector3();
     if (s.at === 'support') rig.bones.handL.getWorldPosition(tgt);
+    else if (s.at === 'fg')
+      rig.bones.handL
+        .getWorldPosition(tgt)
+        .add(new Vector3(0, -0.02, -0.07).applyQuaternion(m.root.getWorldQuaternion(new Quaternion())));
     else rig.socketWorld('gripRight', tgt);
     const az = (s.az * Math.PI) / 180,
       el = (s.el * Math.PI) / 180;
@@ -147,6 +160,8 @@ async function main() {
   const pose = (w: string, mode: string) => {
     const on = mode !== 'raw';
     contact.autoEnable = () => on;
+    // `legacy`: the proxy layer as it shipped before the baked grip (safe mode, PISTOL_SUPPORT).
+    contact.useGrip = mode !== 'legacy';
     contact.mode = mode === 'full' ? 'full' : 'safe';
     if (rig.weaponModel) rig.detachWeapon();
     rig.attachWeapon(models[w], w);

@@ -10,9 +10,13 @@ import gripData from './gripData.json';
  * per-frame blend onto the clip pose.
  */
 
-/** How the support hand holds the gun: the handguard (clip style), a vertical / angled foregrip, the magwell. */
-export type SupportGrip = 'handguard' | 'vertical' | 'angled' | 'magwell';
-export const SUPPORT_GRIPS: SupportGrip[] = ['handguard', 'vertical', 'angled', 'magwell'];
+/**
+ * How the support hand holds the gun (the per-build hook attachments select): the handguard (clip style), a
+ * vertical grip (`vgrip`: stubby → C-clamp with the fingers round it, full-length → wrapped like a pistol grip),
+ * an angled grip (`afg`: palm heel on its ramp), or the magwell.
+ */
+export type SupportGrip = 'handguard' | 'vgrip' | 'afg' | 'magwell';
+export const SUPPORT_GRIPS: SupportGrip[] = ['handguard', 'vgrip', 'afg', 'magwell'];
 export type V3 = [number, number, number];
 
 export interface JointDelta {
@@ -35,7 +39,8 @@ export interface GripBake {
   R: JointDelta[];
   /** Extra index curl onto the trigger blade, applied by the trigger channel. */
   trigger: JointDelta[];
-  L: Partial<Record<SupportGrip, SupportBake>>;
+  /** Support holds by foregrip part id (`fg_stubby`, …) or style (`handguard`, `magwell`). */
+  L: Record<string, SupportBake>;
   /** Truth after the bake (mm), for the record. */
   report?: Record<string, number | string>;
 }
@@ -61,9 +66,23 @@ export function gripFor(id: string, model: WeaponModel): GripBake | null {
 
 /** Support-hand style a build asks for (its foregrip; a hand stop keeps the handguard hold). */
 export function supportGripFor(model: WeaponModel): SupportGrip {
+  const st = foregripOf(model)?.style;
+  return st === 'vertical' || st === 'stubby'
+    ? 'vgrip'
+    : st === 'angled' || st === 'wedge'
+      ? 'afg'
+      : 'handguard';
+}
+
+function foregripOf(model: WeaponModel): ForegripPart | undefined {
   const id = model.build?.parts?.foregrip;
-  const fg = id ? (PART_BY_ID[id] as ForegripPart | undefined) : undefined;
-  return fg?.style === 'vertical' ? 'vertical' : fg?.style === 'angled' ? 'angled' : 'handguard';
+  return id ? (PART_BY_ID[id] as ForegripPart | undefined) : undefined;
+}
+
+/** The baked support hold for a build and style: the foregrip's own hold, else the style's, else the handguard. */
+export function supportHold(g: GripBake, model: WeaponModel, style: SupportGrip): SupportBake | undefined {
+  const fg = foregripOf(model);
+  return (style !== 'handguard' && fg ? g.L[fg.id] : undefined) ?? g.L[style] ?? g.L.handguard;
 }
 
 const _q = new Quaternion();

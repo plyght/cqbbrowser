@@ -9,6 +9,7 @@ import {
   applySupport,
   gripFor,
   supportGripFor,
+  supportHold,
   type GripBake,
   type SupportGrip,
 } from './grip';
@@ -236,7 +237,12 @@ export class HandContact {
       if (!this.grip && this.gripOnly(id)) this.enabled = false;
       this.style = this.supportGripOverride ?? supportGripFor(model);
       if (this.grip) {
-        this.ensure();
+        // No proxy fit needed: the baked grip is pure data (the overlay fits proxies on demand via sync()).
+        if (model !== this.model) {
+          this.model = model;
+          this.col = undefined;
+          this.reset();
+        }
         return new Matrix4().fromArray(this.grip.seat);
       }
       if (!this.enabled || !this.seats || this.mode === 'safe' || !this.ensure()) return null;
@@ -309,7 +315,7 @@ export class HandContact {
       this.trig = Math.max(0, Math.min(1, this.trig + step));
       if (this.trig > 0.001) applyJoints(rig, g.trigger, wr * this.trig);
     }
-    const L = g.L[this.style] ?? g.L.handguard;
+    const L = supportHold(g, this.model, this.style);
     const wl = Math.min(1, Math.max(0, rig.anchorWeight('L', 'grip')));
     if (L && wl > 0.001) {
       const k = wl * wl * (3 - 2 * wl);
@@ -368,7 +374,7 @@ export class HandContact {
   private ensure(): boolean {
     const model = this.rig.weaponModel;
     if (!model) return false;
-    if (model !== this.model) {
+    if (model !== this.model || !this.col) {
       let c = this.cache.get(model);
       if (!c) {
         // Fit at rest: parts back to their rest pose is the model's own state before the rig drives it; the rig
@@ -454,7 +460,7 @@ export class HandContact {
     this.stats.reachMiss = 0;
     if (this.grip) {
       // Baked grip: the hold is solved offline against the true meshes; per frame it only blends in.
-      if (this.ensure()) this.applyGrip(dt);
+      if (this.rig.weaponModel === this.model) this.applyGrip(dt);
       this.stats.ms = performance.now() - t0;
       return;
     }

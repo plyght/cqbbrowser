@@ -2,31 +2,60 @@
 
 ## Status
 
-**In game, the default depends on the weapon:**
+**In game, the default depends on the weapon** (`HandContact.defaultFor`):
 
-- Pistols are ON: safe mode with the hand-tuned two-hand hold `PISTOL_SUPPORT`.
-- Rifles and SMGs are OFF: raw clip, until their meshes are slimmed.
+- **Baked grip** (`grip.ts`, `GRIP_SHIP`): K-47S, SB-16, HB-300. Both hands hold the gun from an offline solve
+  on the true meshes (below); per frame it only blends in (~0.06 ms).
+- **Safe mode** for pistols (P-17, P-92): no seat, finger opening only, the hand-tuned `PISTOL_SUPPORT` hold.
+- **Raw clip** for the KP-9.
 
-`?handcontact=off|safe|full` overrides the default. `?contact` draws the proxies.
+`?handcontact=off|safe|full` overrides; `?contact` draws the proxies.
 
-Root cause of the sinking: our procedural grips are far bigger than the guns the clips were authored on.
+## Ground truth (`truth.ts`, `gripAudit.ts`)
 
-- The firing palm centre sits on the right grip panel, 15–18 mm right of the grip centre. Its 16 mm
-  half-thickness then sinks about 11 mm into our grip.
-- The grip proxies measure k47s 28×54 mm, sb16 26×57, hb300 29×61, kp9 31×73 and p17 31×64. That is a
-  159–202 mm circumference.
-- The source AK-74U grip, measured on its mesh with horizontal slices so the figures are approximate, is about
-  24 mm wide and 25–27 mm deep, roughly 95 mm around.
+Proxies (rounded boxes, capsules) inflate penetration, so the hold is judged on the meshes themselves: every
+pad-side glove vertex (skinned on the CPU) against the weapon's render triangles (exact point-triangle distance in
+a 1.5 cm grid; the sign from the nearest face, confirmed by 6-ray parity below 1.5 mm because the kit meshes have
+overlapping shells). Regions: the palm and each phalanx of each finger. The firing hand is an analytic obstacle
+(its `HandProxy` capsules) for the support hand, since the open glove mesh has no reliable inside.
 
-Any solve that seats the hand on our grips therefore has to move the hand ~1 cm sideways or open the fingers a
-lot, and both read worse than the raw sinking.
+The **side-aware wrap check** (`wrapFailures`, `WRAP_RULES`) asks each holding pad to be within 3 mm of the right
+face of the gun, facing it (normals opposed, judged on the tips), and not deeper than 2 mm (3 mm for a middle
+phalanx crossing the front-strap corner, 4.5 mm for the soft palm):
 
-- `safe` mode: no seat, no gun yield, finger opening only, support-hand IK depenetration. It is
-  never worse than raw by the numbers (CI), but the opened fingers and the dropped support hand look worse.
-- `full` mode: the grip seat and gun yield move the hand off-centre on these grips.
+- firing hand: palm on the backstrap / right panel; middle, ring and pinky over the front strap onto the far
+  panel; the thumb over the far panel or the top;
+- support hand on a handguard: palm under or along the near side; index and middle tips up the far side.
 
-The fix is at the source: bring the grip and handguard meshes into the clips' envelope (see the coordinator
-note), then turn this layer on.
+`bun tools/grip-audit.ts [ids]` prints raw vs contact per state (idle, ADS, fire).
+
+## Baked grip (`gripBake.ts`, `bun tools/grip-bake.ts` → `gripData.json`)
+
+Per weapon, rig at idle frame 0, raw clip:
+
+1. **Seat**: a rigid correction of the gun in the firing hand (≤ 5 mm, ≤ 3°) that takes the palm out of the
+   grip, keeps it touching and pulls the proximal phalanges onto the near panel.
+2. **Firing fingers**: each finger fitted on the true mesh. Hinges about the knuckle line (a palm-normal axis
+   degenerates once a finger curls round a grip), knuckle abduction, anatomical and clip-relative joint limits.
+   The cost: no penetration (the palm skin a knuckle drags counts too), pad _area_ contact (the mean of the
+   closest quarter, so a tip grazing a corner does not count), the distal pad on an allowed face, opening the
+   knuckle costs more than closing (no claw). A finger with nothing to touch ends at the least change that clears
+   it, so it never curls into air. The index lies along the frame; a separate trigger curl (flex + abduction) puts
+   its pad on the blade, blended in by the trigger channel (eased, rate-limited).
+3. **Support hand**, per `SupportGrip` style (the attachments hook, `HandContact.supportGripOverride`, defaults
+   to the build's foregrip via `supportGripFor`):
+   - `handguard`: the clip's hold, offset/turned (two-bone IK) to clear the palm, refined on the real arm;
+   - `angled`: the same on a build carrying the angled grip (the palm clears its ramp);
+   - `vertical` / `magwell`: the firing hand's hold mirrored onto the post (foregrip node, or the well), then
+     refined;
+     then the finger fit (fingers up the far side, thumb over the near side or top). The firing hand is an obstacle.
+
+Runtime (`HandContact.applyGrip`): the seat via `ArmsRig.seatProvider`; joint deltas (bone, parent-frame axis,
+angle) premultiplied on the clip pose, weighted by `gunOnHand` / the support `grip` anchor weight, so the hold
+fades with the clip's own transitions. Rebake after a clip or kit change; CI fails if a shipped weapon stops
+holding.
+
+## Proxy layer (safe / full modes)
 
 The authored rig hands (`src/anim/rig`) were made around the source packs' guns. On our procedural guns they sink
 into grips, handguards, magwells and mags by up to ~3 cm. This layer measures that against collision proxies

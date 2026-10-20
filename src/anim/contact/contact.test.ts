@@ -267,6 +267,38 @@ describe('grip truth on the kit weapons (baked grip)', () => {
     expect(bad).toEqual([]);
   });
 
+  test('SBR foregrip holds (stubby, wedge): support hand never worse than raw, and on the grip', () => {
+    const truth = new GripTruth(rig);
+    const rows: string[] = [];
+    const bad: string[] = [];
+    for (const w of ['sb16', 'hb300'])
+      for (const fg of ['fg_stubby', 'fg_wedge']) {
+        const pen: number[] = [];
+        for (const on of [false, true]) {
+          const model = buildModel(
+            { v: 1, weapon: w as never, parts: { foregrip: fg } },
+            { detailParts: true },
+          );
+          contact.autoEnable = () => on;
+          rig.attachWeapon(model, w);
+          truth.refresh(model);
+          let p = 0;
+          runState(rig, contact, 'idle', (i) => {
+            if (i % 5 === 0) p = Math.max(p, truth.measure(model, 'L').pen);
+          });
+          pen.push(p);
+          if (on && contact.style !== (fg === 'fg_stubby' ? 'vgrip' : 'afg'))
+            bad.push(`${w}/${fg} style ${contact.style}`);
+          rig.setGripSeat(null);
+        }
+        rows.push(`${w}/${fg} support pen ${(pen[0] * 1000).toFixed(1)} → ${(pen[1] * 1000).toFixed(1)} mm`);
+        if (pen[1] > pen[0] + 0.0005) bad.push(rows[rows.length - 1]);
+      }
+    contact.autoEnable = undefined;
+    console.log(rows.join('\n'));
+    expect(bad).toEqual([]);
+  }, 300_000);
+
   test('pose continuity with the baked grip blended in (no snaps)', () => {
     const rows: SpikeRow[] = [];
     contact.autoEnable = () => true;

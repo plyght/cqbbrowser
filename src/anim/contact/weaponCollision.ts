@@ -2,6 +2,10 @@ import { Matrix4, Quaternion, Vector3, type Mesh, type Object3D } from 'three';
 import type { CollisionProxy, WeaponModel } from '../../weapons/models';
 import type { PartName } from '../../weapons/models/core';
 import { box, capsule, sdShape, type Shape } from '../grip/sdf';
+import kitFit from './kitProxies.json';
+
+/** Mesh-fitted proxies of the kit weapons' default builds (weapon frame / part frames), baked offline. */
+const KIT_FIT = kitFit as unknown as Record<string, CollisionProxy[]>;
 
 /**
  * Hard-contact collision set of a weapon (weapon frame = model root: origin at the grip, -z muzzle).
@@ -402,7 +406,11 @@ export class WeaponCollision {
   mute: Group | null = null;
 
   constructor(readonly model: WeaponModel) {
-    this.proxies = model.collision ?? fitCollision(model);
+    // Kit models: the catalog's proxies are coarse auto boxes (they inflate penetration by 2–8 mm); use the
+    // mesh fit, baked offline per weapon (kitProxies.json, tools/grip-bake.ts), or fitted now.
+    this.proxies = model.root.userData.kit
+      ? (KIT_FIT[model.weapon] ?? fitCollision(model))
+      : (model.collision ?? fitCollision(model));
     const byKey = new Map<string, CollisionProxy[]>();
     for (const p of this.proxies) {
       const k = p.part ?? (p.name === 'wellPlug' ? '#plug' : '');

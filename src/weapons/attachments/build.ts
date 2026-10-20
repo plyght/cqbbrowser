@@ -265,11 +265,12 @@ function place(rail: RailSeg, cursor: number, p: OpticPart, errors: BuildError[]
 }
 
 /**
- * SBR grips: how far ahead of the support hand's grip point the grip's centre sits (m). Both index the hand from
- * the front (the rig's support hand wraps the handguard, so a grip under the palm would sit in the fingers): the
- * stubby is an index stop just ahead of the index finger, the wedge's rear ramp meets the index finger / web.
+ * SBR grips: how far ahead of the support hand's grip point (the clip's fingertip-side anchor, ~26 mm ahead of
+ * the knuckles) the grip's centre sits (m); negative = behind it. The hand holds them (src/anim/contact baked
+ * holds): the stubby C-clamped, just ahead of the knuckles so the fingers wrap it under the thumb-over-top hand;
+ * the wedge under the palm, its rear ramp at the palm heel. Measured on the rig with the SB-16 and HB-300.
  */
-export const SBR_GRIP_LEAD = { stubby: 0.044, wedge: 0.062 } as const;
+export const SBR_GRIP_LEAD = { stubby: -0.019, wedge: -0.033 } as const;
 
 /**
  * Nearest M-LOK slot centre to `z` on an AR free-float handguard (slots on a 40 mm pitch, centred on the guard:
