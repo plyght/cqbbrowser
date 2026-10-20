@@ -423,7 +423,7 @@
  },
  "families": {
   "acc": {
-   "bytes": 549160,
+   "bytes": 553144,
    "glb": "assets/models/weapons/acc.glb",
    "materials": {
     "kit_acc": {
@@ -778,7 +778,7 @@
      "type": "box"
     }
    ],
-   "tris": 1824
+   "tris": 1928
   },
   "acc_laser": {
    "bounds": [
@@ -1070,7 +1070,7 @@
      "type": "box"
     }
    ],
-   "tris": 604
+   "tris": 656
   },
   "acc_p17_combo": {
    "bounds": [
@@ -1192,7 +1192,7 @@
      "type": "box"
     }
    ],
-   "tris": 496
+   "tris": 548
   },
   "acc_reddot": {
    "bounds": [
@@ -1228,7 +1228,7 @@
      "type": "box"
     }
    ],
-   "tris": 2892
+   "tris": 2876
   },
   "ak_brake": {
    "bounds": [

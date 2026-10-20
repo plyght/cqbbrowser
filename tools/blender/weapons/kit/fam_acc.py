@@ -14,6 +14,9 @@ from . import kit, lib
 from .lib import box, cyl, cyl_x, cyl_y, cut, done, join, lathe, prism, rbox, sweep
 
 FAM = "acc"
+# Reticle sizes (m), mirrored from RETICLE in src/weapons/models/parts/optics.ts: true 65 MOA holo ring, dots floored at
+# a few px at 720p / the 75 deg ADS view (1 px ~ 7 MOA there) keeping the real ordering holo < micro < RMR.
+RET = dict(microDot=0.00036, holoRing=(0.00128, 0.00162), holoDot=0.00028, pistolDot=0.0014, offsetDot=0.00037)
 
 
 def clamp(z0, z1, w=0.026, knob=True):
@@ -50,8 +53,8 @@ def red_dot():
         parts.append(o)
     parts.append(cyl("lensF", ri, zb1 + 0.0028, zb1 + 0.0018, ax, 0, 24, "lens", 0))
     parts.append(cyl("lensR", ri, zb0 - 0.001, zb0 - 0.0018, ax, 0, 24, "glass", 0))
-    # reticle: a round emissive dot sized to read like a 2 MOA dot at the ADS eye distance (~5-6 px at 720p)
-    parts.append(cyl("dot", 0.0012, zb1 + 0.0042, zb1 + 0.0038, ax, 0, 20, "reticle", 0))
+    # reticle: round 2 MOA-class dot, floored at ~2.5 px at 720p / ADS (RETICLE in src/weapons/models/parts/optics.ts)
+    parts.append(cyl("dot", RET["microDot"], zb1 + 0.0042, zb1 + 0.0038, ax, 0, 16, "reticle", 0))
     return join("acc_reddot", parts)
 
 
@@ -73,10 +76,14 @@ def holo():
         parts.append(prism("ear", ear, 0.004, x=x, mat="anod", bevel=0.0008))
     parts.append(rbox("wF", 0.039, 0.029, 0.0012, 0, ax + 0.001, z1 + 0.006, mat="lens", bevel=0))
     parts.append(rbox("wR", 0.039, 0.028, 0.0012, 0, ax + 0.001, za - 0.002, mat="glass", bevel=0))
-    ring = lathe("ring", [(0.0052, (za + z1) / 2 + 0.0002), (0.0058, (za + z1) / 2 + 0.0002), (0.0058, (za + z1) / 2 - 0.0002),
-                          (0.0052, (za + z1) / 2 - 0.0002)], 32, ax, 0, "reticle", 0)
+    # 65 MOA ring + 1 MOA-class dot at the ADS eye distance (~0.154 m)
+    zr = (za + z1) / 2
+    r0, r1 = RET["holoRing"]
+    # closed profile: an open one gets its end loops hole-filled, which turned the ring into a solid red disc
+    ring = lathe("ring", [(r0, zr + 0.0002), (r1, zr + 0.0002), (r1, zr - 0.0002), (r0, zr - 0.0002),
+                          (r0, zr + 0.0002)], 40, ax, 0, "reticle", 0)
     parts.append(ring)
-    parts.append(rbox("dot", 0.0009, 0.0009, 0.0003, 0, ax, (za + z1) / 2, mat="reticle", bevel=0))
+    parts.append(cyl("dot", RET["holoDot"], zr + 0.0002, zr - 0.0002, ax, 0, 12, "reticle", 0))
     for z in (z0 - 0.02, z1 + 0.02):
         parts.append(rbox("qd", 0.003, 0.007, 0.018, -0.0235, -0.002, z, mat="phos", bevel=0.001))
     return join("acc_holo", parts)
@@ -235,12 +242,13 @@ def build():
         kit.part(pid, kit.entry(n.name, anchor="light"))
 
 
-def rmr_parts(z0, z1, base_y, x=0.0):
+def rmr_parts(z0, z1, base_y, x=0.0, dot_r=None):
     """RMR-style housing (base on y = base_y, footprint z0 → z1): body, rear battery hump, hoop, lens, dot."""
     L = z0 - z1
     zf = z1 + 0.0145
     parts = [box("rb", 0.026, 0.008, z0, z1, x, base_y + 0.004, mat="anod", bevel=0.0018),
-             box("rh", 0.019, 0.009, z0, z0 - L * 0.32, x, base_y + 0.011, mat="anod", bevel=0.003)]
+             # rear battery hump stays under the sight line (top 12.7 mm, axis 15.5 mm): it used to hide half the dot
+             box("rh", 0.019, 0.0062, z0, z0 - L * 0.32, x, base_y + 0.0096, mat="anod", bevel=0.0025)]
     hoop = sweep("hoop", [(x - 0.013, base_y + 0.006), (x + 0.013, base_y + 0.006), (x + 0.0095, base_y + 0.026),
                           (x - 0.0095, base_y + 0.026)], zf, z1, "anod", 0.0008)
     cut(hoop, sweep("win", [(x - 0.0098, base_y + 0.0085), (x + 0.0098, base_y + 0.0085), (x + 0.0072, base_y + 0.0232),
@@ -248,7 +256,7 @@ def rmr_parts(z0, z1, base_y, x=0.0):
     parts.append(hoop)
     lens = rbox("lens", 0.019, 0.015, 0.0008, x, base_y + 0.0158, zf - 0.006, mat="lens", bevel=0)
     parts.append(lens)
-    parts.append(rbox("dot", 0.0008, 0.0008, 0.0003, x, base_y + 0.0155, zf - 0.004, mat="reticle", bevel=0))
+    parts.append(cyl("dot", dot_r or RET["pistolDot"], zf - 0.0038, zf - 0.0042, base_y + 0.0155, x, 16, "reticle", 0))
     return parts
 
 
@@ -272,7 +280,7 @@ def magnifier():
 
 def offset_dot():
     """45° offset dot: mount block + RMR, authored in the rolled rail frame (y = out along the 45° line)."""
-    parts = [box("ob", 0.02, 0.022, 0, -0.028, 0, 0.012, mat="anod", bevel=0.002)] + rmr_parts(0.008, -0.036, 0.024)
+    parts = [box("ob", 0.02, 0.022, 0, -0.028, 0, 0.012, mat="anod", bevel=0.002)] + rmr_parts(0.008, -0.036, 0.024, dot_r=RET["offsetDot"])
     return join("acc_offset_dot", parts)
 
 
