@@ -599,57 +599,6 @@ def fit_grip(o, max_w, max_d, angle_deg, y_hand, pred=lambda p: True, blend=None
     return w, dd, sec2[0], sec2[1]
 
 
-def narrow_grip(o, width, sock_y, up=0.040, down=0.015, feather=0.010, pred=lambda p: True, bin_h=0.002):
-    """Narrow a grip in x only (centreline, rake, depth untouched) to `width` over the firing-hand band
-    y ∈ [sock_y - down, sock_y + up] (three frame), smoothstep-feathered over `feather` into the frame above and
-    the mag well below. Each 2 mm height bin is scaled about its own x-centre so tapered sections are not
-    over-thinned. Only vertices with pred(p3) move. Returns (widest before, widest after) in the band, metres."""
-    mw = o.matrix_world
-    inv = mw.inverted()
-    pts = []
-    for v in o.data.vertices:
-        g = mw @ v.co
-        pts.append((g.x, g.z, -g.y))
-    y0, y1 = sock_y - down, sock_y + up
-
-    def weight(y):
-        if y0 <= y <= y1:
-            return 1.0
-        d = (y0 - y) if y < y0 else (y - y1)
-        if d >= feather:
-            return 0.0
-        t = 1 - d / feather
-        return t * t * (3 - 2 * t)
-
-    bins = {}
-    for p in pts:
-        if pred(p) and weight(p[1]) > 0:
-            b = bins.setdefault(int(math.floor(p[1] / bin_h)), [1e9, -1e9])
-            b[0], b[1] = min(b[0], p[0]), max(b[1], p[0])
-    if not bins:
-        return 0.0, 0.0
-    before = max(b[1] - b[0] for k, b in bins.items() if y0 <= (k + 0.5) * bin_h <= y1) if any(
-        y0 <= (k + 0.5) * bin_h <= y1 for k in bins) else 0.0
-    hw = width / 2
-    after = 0.0
-    for v, p in zip(o.data.vertices, pts):
-        if not pred(p):
-            continue
-        f = weight(p[1])
-        b = bins.get(int(math.floor(p[1] / bin_h)))
-        if f <= 0 or not b:
-            continue
-        xm, half = (b[0] + b[1]) / 2, (b[1] - b[0]) / 2
-        k0 = min(1.0, hw / half) if half > 1e-6 else 1.0
-        k = 1 + (k0 - 1) * f
-        x = xm + (p[0] - xm) * k
-        v.co = inv @ T(x, p[1], p[2])
-        if y0 <= p[1] <= y1:
-            after = max(after, abs(x - xm) * 2)
-    o.data.update()
-    return before, after
-
-
 def obb_proxies(o, slices=3, pred=lambda p: True, angle_deg=None):
     """Boxes along the grip's own axis (rotated about x by `rx`), node-local; for raked grips."""
     mw = o.matrix_world

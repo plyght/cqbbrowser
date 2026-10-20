@@ -62,10 +62,6 @@ def build():
     grip_mid = (min(row) + max(row)) / 2 if row else 0.06
     rail_bottom = min(v[1] for v in fv if v[2] < ffront + 0.03)
 
-    # firing-hand band (grip socket ± the palm) to 24.5 mm wide (true-mesh audit: the palm sank into the 27 mm
-    # panels); x only (socket, centreline, rake, depth unchanged), feathered into the frame and the mag well
-    nb = lib.narrow_grip(frame, 0.0245, gy, 0.040, 0.030, 0.010, lambda p: p[1] < -0.035 + DY and p[2] > 0.02)
-    print("[p92] hand-band width %.1f → %.1f mm" % (nb[0] * 1000, nb[1] * 1000))
     kit.node(frame, FAM, proxy_slices=3)
     kit.node(slide, FAM, proxy_slices=2)
     kit.node(mag, FAM, sockets={"magwell": mag_base}, proxy_slices=2)
