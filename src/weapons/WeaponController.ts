@@ -4,6 +4,7 @@ import { Spring, clamp, damp, noise1, rng } from '../core/math';
 import { ReloadGesture } from '../input/ReloadGesture';
 import { cameraSettings, CHEST_MOUNT, type Player } from '../player/Player';
 import { ScopeOverlay } from '../player/ScopeOverlay';
+import { ADS_BUMP } from '../player/gait';
 import { settings } from '../settings/Settings';
 import { CFG, type ClassCfg, type Hold } from '../anim/holds';
 import {
@@ -134,6 +135,7 @@ const DEFAULT_LEFT: HandKey = { t: 1, at: 'handguard', pose: 'support' };
 const DEFAULT_RIGHT: HandKey = { t: 1, at: 'grip', pose: 'grip' };
 const ZERO3: V3 = [0, 0, 0];
 const X_AXIS = new Vector3(1, 0, 0);
+const Y_AXIS = new Vector3(0, 1, 0);
 const CAM_GRIP = new Vector3(-0.07, 0.015, 0.012);
 /** Minimum arm centre-line distance from the chest-cam lens the elbow swivel aims for (m). */
 const ARM_CLEAR = 0.2;
@@ -144,6 +146,8 @@ const CAM_REACH = new Vector3(-0.05, -0.06, -0.09);
 const _v = new Vector3();
 const _v2 = new Vector3();
 const _v3 = new Vector3();
+const _bi = new Vector3();
+const _bp = new Vector3();
 const _q = new Quaternion();
 const _q2 = new Quaternion();
 const _e = new Euler(0, 0, 0, 'YXZ');
@@ -262,6 +266,15 @@ export class WeaponController implements System {
     };
     apply(handlingSettings.get());
     handlingSettings.onChange(apply);
+    // Footsteps and body knocks reach the gun as impulses into the handling sim (movement sway / inertia scale them).
+    ctx.bus.on('footstep', (ev) =>
+      this.bodyImpulse((ev.foot === 'L' ? 1 : -1) * 0.03 * ev.speed, -(0.05 + 0.07 * ev.speed), 0),
+    );
+    ctx.bus.on('bodyBump', (ev) => {
+      if (ev.kind === 'land') this.bodyImpulse(0, -0.8 * ev.strength, 0.1 * ev.strength);
+      else if (ev.kind === 'step') this.bodyImpulse(0, -0.6 * ev.strength, 0);
+      else this.bodyImpulse(-ev.side * 0.5 * ev.strength, 0.05 * ev.strength, 0);
+    });
     // Flashbang / blast flinch: the support arm comes up to shield the face, the weapon dips.
     ctx.bus.on('flinch', (ev) => {
       this.flinchTarget = Math.max(this.flinchTarget, clamp(ev.strength, 0, 1));
@@ -754,6 +767,9 @@ export class WeaponController implements System {
     const p = this.player;
     const e = this.equipped;
     const d = e.def;
+    // Tell the body how deep into ADS we are and how heavy the gun is (it damps its own gait motion with them).
+    p.adsBlend = this.adsBlend;
+    p.weaponInertia = this.inertia;
 
     // Reload button gestures (tap/double/hold — latency-free branching lives in ReloadGesture).
     for (const intent of this.gesture.update(f.down.has('reload'), dt)) this.onReloadIntent(intent);
@@ -843,6 +859,27 @@ export class WeaponController implements System {
     this.drops.update();
   }
 
+  /**
+   * A knock from the body (heel strike, shoulder on a wall, stair edge, landing) as a velocity change `(x, y, z)`
+   * m/s in the torso frame, applied at the front of the gun so it also pitches/yaws. The ADS keeps part of it.
+   */
+  private bodyImpulse(x: number, y: number, z: number) {
+    const b = this.equipped.body;
+    const k =
+      this.player.sway * clamp(this.inertia, 0, 1.25) * (1 - (1 - ADS_BUMP) * this.adsBlend) * this.bumpScale;
+    if (k < 1e-3 || b.locked) return;
+    _bi
+      .set(x, y, z)
+      .multiplyScalar(k * b.totalMass)
+      .applyAxisAngle(Y_AXIS, this.player.yaw);
+    b.pointWorld(_bp.set(0, 0, -0.15), _bp);
+    b.impulseAt(_bi, _bp);
+  }
+  /** Nothing to nudge while the gun is being swapped or reloaded by the beat graph. */
+  private get bumpScale() {
+    return this.switching ? 0.3 : 1;
+  }
+
   private mixHold(k: number, o: Hold) {
     if (k <= 1e-4) return;
     this.hold.lerp(_v3.fromArray(o.p), k);
@@ -864,18 +901,14 @@ export class WeaponController implements System {
     // Crouched: slightly lower and tighter; drifting hold (never exactly the same place).
     h.y -= p.crouch * 0.015;
     h.z += p.crouch * 0.02;
-    // Gait: most of the walk shows on the weapon (the chest cam is quiet) — a vertical double bounce per
-    // stride, a lateral sway per step, a slight nod/yaw/cant. Damped in ADS; the handling sim smooths it.
-    const g = p.gaitAmount * (1 - this.ads * 0.75);
-    if (g > 1e-3) {
-      const ph = p.gaitPhase;
-      const amp = (0.003 + Math.min(p.speed, 5.5) * 0.0032) * g;
-      h.y -= (1 - Math.abs(Math.sin(ph))) * amp;
-      h.x += Math.sin(ph) * amp * 0.55;
-      r.x += Math.cos(2 * ph) * 0.007 * g;
-      r.y += Math.sin(ph) * 0.009 * g;
-      r.z += Math.sin(ph) * 0.012 * g;
-    }
+    // Gait: the hands' own swing (gait.ts) rides on what the carrying torso hands over through the sim: out of
+    // phase with the chest cam, a figure-8 at a walk, a bigger rhythmic swing in the sprint carry. ADS keeps a sliver.
+    const gm = p.gait.out;
+    h.x += gm.gunX;
+    h.y += gm.gunY;
+    r.x += gm.gunPitch;
+    r.y += gm.gunYaw;
+    r.z += gm.gunRoll;
     this.drift.lerp(this.driftTarget, damp(0.6, dt));
     h.addScaledVector(this.drift, 1 - this.ads * 0.6);
     // Beat pose offsets.

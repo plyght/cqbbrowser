@@ -182,7 +182,7 @@ test('feel: recoil strip (5-shot string, frames 0/2/4/8/16 after the last shot)'
   expect(errors).toEqual([]);
 });
 
-test('feel: walking — responsive accel, planted stops, subtle chest bob', async ({ page }) => {
+test('feel: walking — responsive accel, planted stops, natural chest bob', async ({ page }) => {
   const errors = await start(page);
   const rec = (n: number, input: Record<string, unknown>) =>
     page.evaluate(
@@ -214,8 +214,9 @@ test('feel: walking — responsive accel, planted stops, subtle chest bob', asyn
   expect(reach).toBeLessThan(0.16);
   expect(halt).toBeLessThan(0.13);
   expect(Math.max(...walk.map((r) => r[0]))).toBeLessThan(2.25); // no overshoot
-  expect(bob).toBeGreaterThan(0.002);
-  expect(bob).toBeLessThan(0.012);
+  // Chest bob 2–4 cm peak to peak walking (gait.ts), not the old ~1 cm.
+  expect(bob).toBeGreaterThan(0.018);
+  expect(bob).toBeLessThan(0.05);
   expect(Math.max(...sprint.map((r) => r[0]))).toBeCloseTo(5, 1);
   expect(slow.at(-1)![0]).toBeCloseTo(1, 1);
   await sim(page, 20, { move: { x: 0, y: 1 } });
