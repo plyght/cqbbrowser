@@ -57,7 +57,6 @@ import { recoilFor, type RecoilFeel, type RecoilProfile } from '../anim/handling
 import { FOV_SPRING } from '../anim/handling/characterise';
 import { WeaponRigidBody, gainsFor } from '../anim/handling/sim';
 import { ArmsRig } from '../anim/rig/ArmsRig';
-import { weaponAnims } from '../anim/library/library';
 import { ContactOverlay } from '../anim/contact/ContactOverlay';
 import { HandContact } from '../anim/contact/HandContact';
 import { solveTwoBone } from '../anim/ik';
@@ -353,13 +352,13 @@ export class WeaponController implements System {
 
   private useRig(rig: ArmsRig) {
     this.rig = rig;
-    // Per weapon: on for pistols (safe mode + the tuned two-hand hold), off for rifles/SMGs until their
-    // grips/handguards match the clips' hand envelope (README). `?handcontact=off|safe|full` overrides;
-    // `?contact` draws the proxies.
+    // Per weapon (HandContact.defaultFor): the offline-baked grip where it shipped, safe mode for pistols,
+    // else the raw clip. `?handcontact=off|safe|full` overrides; `?contact` draws the proxies.
     this.contact = new HandContact(rig);
     const hc = HandContact.urlMode();
     if (hc && hc !== 'off') this.contact.mode = hc;
-    this.contact.autoEnable = (id) => (hc ? hc !== 'off' : weaponAnims(id).family === 'pistol');
+    this.contact.shipping = true;
+    this.contact.autoEnable = (id) => (hc ? hc !== 'off' : HandContact.defaultFor(id) !== 'off');
     if (ContactOverlay.enabled()) this.contactOverlay = new ContactOverlay(this.ctx.scene);
     this.rigPending = false;
     this.view.visible = true;
