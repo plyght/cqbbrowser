@@ -33,7 +33,10 @@ import {
   STEP_CLASS,
   WEAPON_SOUNDS,
   weaponSound,
+  type CoreCal,
+  type ShotBuild,
   type SoundSetManifest,
+  type WeaponSound,
 } from './manifest';
 import { Mixer } from './Mixer';
 import { clamp, jitter, mulberry32, type Rng } from './rng';
@@ -60,7 +63,7 @@ export interface AudioDeps {
 registerSettings(AUDIO_SETTING_ENTRIES);
 
 /** Suppressed-fire stack level relative to the unsuppressed one (tuned on offline renders). */
-const SUP_LEVEL = 0.1;
+const SUP_LEVEL = 0.05;
 /** Foley/footsteps/brass/mags sit well under gunfire (a mag click is far quieter than a suppressed shot). */
 const FOLEY = 0.5;
 
@@ -69,6 +72,10 @@ const RAYS_PER_FRAME = 4;
 const PROBE_INTERVAL = 0.1;
 
 type ShotEvent = GameEvents['shot'];
+
+/** Bank key of a prebuilt long-gun blast core (synth.rifleCore). */
+const coreKey = (cal: CoreCal, muzzle: 'open' | 'flash' | 'comp' | 'brake', subsonic: boolean) =>
+  `core.${cal}.${muzzle}.${subsonic ? 'sub' : 'super'}`;
 
 export class AudioEngine {
   readonly ctx: BaseAudioContext;
@@ -82,7 +89,8 @@ export class AudioEngine {
   roomGraph: { rooms: Room[]; portals: Portal[] } | null = null;
   private rng: Rng;
   private settings: AudioSettings;
-  private synthGen = new Map<string, () => Float32Array[]>();
+  /** Generators: one entry per variant, mono or [L, R]. */
+  private synthGen = new Map<string, () => (Float32Array | Float32Array[])[]>();
   private steelCache = new Map<string, AudioBuffer[]>();
   private dirs = probeDirections();
   private rays: ProbeRay[] = [];
@@ -141,7 +149,30 @@ export class AudioEngine {
    * Shot-path keys go first. Returns when all are built.
    */
   prewarm(): Promise<void> {
-    const first = ['report.synth', 'mech.pistol', 'mech.ar', 'mech.ak', 'crack', 'blast.body', 'blast.roll'];
+    // Shot-path keys of the default builds first (P-17, SB-16, K-47S, KP-9, HB-300 integral + SBR).
+    const first = [
+      'report.synth',
+      'mech.pistol',
+      'crack',
+      'blast.body',
+      'blast.roll',
+      'action.ar',
+      'action.ak',
+      'action.mp5',
+      coreKey('556', 'flash', false),
+      coreKey('ak', 'flash', false),
+      coreKey('9', 'open', false),
+      'mech.ar',
+      'sup.report',
+      'sup.pop',
+      'sup.thwack',
+      'sup.crack',
+      'sup.gas',
+      'sup.ping',
+      coreKey('300', 'flash', true),
+      coreKey('300', 'comp', true),
+      coreKey('300', 'brake', true),
+    ];
     const keys = [...first, 'shot.thump', 'pressure', ...this.synthGen.keys()].filter(
       (k, i, a) => a.indexOf(k) === i && this.synthGen.has(k),
     );
@@ -176,16 +207,27 @@ export class AudioEngine {
     const r = this.ctx.sampleRate;
     const rng = this.rng;
     const n = <T>(k: number, f: (i: number) => T) => Array.from({ length: k }, (_, i) => f(i));
-    const reg = (key: string, f: () => Float32Array[]) => this.synthGen.set(key, f);
+    const reg = (key: string, f: () => (Float32Array | Float32Array[])[]) => this.synthGen.set(key, f);
     reg('report.synth', () => n(3, () => synth.reportFallback(r, rng, false)));
     reg('report.synth.sup', () => n(3, () => synth.reportFallback(r, rng, true)));
-    for (const m of ['ar', 'ak', 'pistol'] as const)
+    for (const m of ['ar', 'ak', 'pistol', 'mp5'] as const)
       reg(`mech.${m}`, () => n(4, () => synth.mechanical(m, r, rng)));
+    for (const m of ['ar', 'ak', 'mp5'] as const)
+      reg(`action.${m}`, () => n(4, () => synth.action(m, r, rng)));
+    // Long-gun blast cores: calibre × muzzle class × bullet speed (built once, in idle time; see prewarm).
+    for (const cal of ['556', 'ak', '300', '9'] as const)
+      for (const muz of ['open', 'flash', 'comp', 'brake'] as const)
+        // Only .300 BLK and 9 mm have subsonic loads; anything else falls back to the supersonic core.
+        for (const sub of cal === '300' || cal === '9' ? [false, true] : [false])
+          reg(coreKey(cal, muz, sub), () =>
+            n(3, () => synth.rifleCore(synth.coreSpec(cal, muz, sub), r, rng)),
+          );
+    reg('sup.thwack', () => n(3, () => synth.suppressedThwack(r, rng)));
+    reg('sup.crack', () => n(3, () => synth.bulletCrack(r, rng)));
     reg('pressure', () => [synth.pressurePulse(r)]);
     reg('crack', () => n(4, () => synth.crack(r, rng)));
     reg('sup.report', () => n(4, () => synth.suppressedReport(r, rng)));
     reg('sup.pop', () => n(2, () => synth.suppressedReport(r, rng, true)));
-    reg('sup.spring', () => n(3, () => synth.bufferSpring(r, rng)));
     reg('sup.gas', () => n(3, () => synth.gasHiss(r, rng)));
     reg('sup.ping', () => n(3, () => synth.casePing(r, rng)));
     reg('blast.body', () => n(4, () => synth.blastBody(r, rng)));
@@ -518,9 +560,16 @@ export class AudioEngine {
    * Layers: mechanical, report (by weapon + barrel), pressure (enclosure), early reflections + tail (send),
    * exterior escape (through openings), and the mic stage downstream.
    */
-  gunshot(e: Pick<ShotEvent, 'weaponId' | 'caliber' | 'suppressed'> & { at?: number; subsonic?: boolean }) {
+  gunshot(
+    e: Pick<ShotEvent, 'weaponId' | 'caliber' | 'suppressed'> & {
+      at?: number;
+      subsonic?: boolean;
+      /** The build fired (muzzle device, barrel); WeaponDef satisfies it. */
+      def?: ShotBuild;
+    },
+  ) {
     const at = e.at ?? this.now();
-    const prof = weaponSound(e.weaponId, e.caliber, e.suppressed);
+    const prof = weaponSound(e.weaponId, e.caliber, e.suppressed, e.def);
     const bc = barrelCharacter(prof.barrelIn);
     const a = this.acoustics;
     const enc = a.enclosure;
@@ -533,6 +582,10 @@ export class AudioEngine {
     if (sup) {
       this.suppressedShot(e, prof, at, at - last > 6);
       if (!this.brassSeen && !this.deps.ctx) this.autoBrass(e.weaponId, e.caliber, at);
+      return;
+    }
+    if (prof.family !== 'pistol') {
+      this.longGunShot(e, prof, at, j);
       return;
     }
 
@@ -565,8 +618,8 @@ export class AudioEngine {
         gain: (sup ? 0.6 : 1.9) * bc.gain * energy * j.gain,
         rate,
         // Short-barrel harshness is a rifle thing; 9 mm reference shots are mid-centred, not bright.
-        presenceDb: prof.family === 'rifle' ? bc.presenceDb : 0,
-        lp: prof.family === 'pistol' ? 5000 : undefined,
+        presenceDb: 0,
+        lp: 5000,
         send: sup ? 0.3 : 0.55,
         bus: 'shot',
         prio: 5,
@@ -636,22 +689,42 @@ export class AudioEngine {
     }
 
     // 3. Pressure: LF pulse; huge in a bathroom, nearly gone outdoors. Rings at the room's axial mode.
-    const pressure = this.pick('pressure');
-    if (pressure) {
-      const leak = Math.hypot(a.openness.x, a.openness.y, a.openness.z);
-      const g = (0.06 + 1.6 * enc ** 1.5 * (1 + a.bass)) * bc.pressure * prof.energy * (sup ? 0.3 : 1);
-      this.mixer.play(pressure, {
-        at,
-        gain: g,
-        rate: 1 / (1 + 0.8 * enc * (1 - leak)),
-        lp: 260,
-        peak: [a.roomMode, 4 + 10 * a.bass, 1.5 + 8 * a.bass * (1 - leak)],
-        room: 0.1,
-        bus: 'shot',
-        prio: 4,
-      });
-    }
+    this.pressureLayer(prof, bc.pressure, at, sup ? 0.3 : 1);
+    this.shotAfter(e, prof, report, at, rate, bc.gain * energy, sup);
+  }
 
+  /** 3. Pressure: LF pulse; huge in a bathroom, nearly gone outdoors. Rings at the room's axial mode. */
+  private pressureLayer(prof: WeaponSound, barrel: number, at: number, k: number) {
+    const a = this.acoustics;
+    const enc = a.enclosure;
+    const pressure = this.pick('pressure');
+    if (!pressure) return;
+    const leak = Math.hypot(a.openness.x, a.openness.y, a.openness.z);
+    const g = (0.06 + 1.6 * enc ** 1.5 * (1 + a.bass)) * barrel * prof.energy * k;
+    this.mixer.play(pressure, {
+      at,
+      gain: g,
+      rate: 1 / (1 + 0.8 * enc * (1 - leak)),
+      lp: 260,
+      peak: [a.roomMode, 4 + 10 * a.bass, 1.5 + 8 * a.bass * (1 - leak)],
+      room: 0.1,
+      bus: 'shot',
+      prio: 4,
+    });
+  }
+
+  /** Exterior escape through openings, mic AGC duck, hearing exposure and fallback brass after a shot. */
+  private shotAfter(
+    e: Pick<ShotEvent, 'weaponId' | 'caliber'>,
+    prof: WeaponSound,
+    report: AudioBuffer | null,
+    at: number,
+    rate: number,
+    level: number,
+    sup: boolean,
+  ) {
+    const a = this.acoustics;
+    const enc = a.enclosure;
     // 6. Exterior/escape: pressure venting through an opening, heard from its direction.
     const open = Math.hypot(a.openness.x, a.openness.z);
     if (report && enc > 0.3 && open > 0.03) {
@@ -661,7 +734,7 @@ export class AudioEngine {
         clamp((a.openness.x * right.x + a.openness.z * right.z) / Math.max(open, 1e-3), -1, 1) * 0.8;
       this.mixer.play(report, {
         at: at + a.predelay * 1.5 + 0.012,
-        gain: clamp(open * 2.2, 0, 0.6) * enc * bc.gain * energy * (sup ? 0.4 : 1),
+        gain: clamp(open * 2.2, 0, 0.6) * enc * level * (sup ? 0.4 : 1),
         rate: rate * 0.97,
         lp: 2200,
         pan,
@@ -685,6 +758,108 @@ export class AudioEngine {
   }
 
   /**
+   * Unsuppressed rifles and SMGs. What makes them read as long guns next to the pistol (measured on offline
+   * renders against the pistol and real recordings): a much sharper, brighter supersonic front (4–10 kHz crack
+   * band), more blast energy driving the mic harder (longer above the knee → louder), a heavier per-calibre low
+   * thump, a brighter, longer indoor slap (bigger reverb/ER sends), and the gun's own action. One procedural
+   * blast core per calibre × muzzle (crack + blast + body + comp/brake side blast, prebuilt) keeps full auto at
+   * ~7 voices a shot, so strings overlap without stealing tails.
+   */
+  private longGunShot(
+    e: Pick<ShotEvent, 'weaponId' | 'caliber'> & { subsonic?: boolean },
+    prof: WeaponSound,
+    at: number,
+    j: { rate: number; gain: number },
+  ) {
+    const a = this.acoustics;
+    const enc = a.enclosure;
+    const bc = barrelCharacter(prof.barrelIn);
+    const smg = prof.family === 'smg';
+    const energy = Math.sqrt(prof.energy);
+    const rate = prof.pitch * j.rate;
+    const muz =
+      prof.muzzle === 'comp' || prof.muzzle === 'brake' || prof.muzzle === 'flash' ? prof.muzzle : 'open';
+    // Comps and brakes throw the blast back at the shooter: louder and harsher at the mic.
+    const mk = muz === 'brake' ? 1.25 : muz === 'comp' ? 1.15 : 1;
+    const level = bc.gain * energy * mk;
+    const play = (b: AudioBuffer | null, o: Parameters<Mixer['play']>[1]) => {
+      if (b) this.mixer.play(b, { bus: 'shot', ...o });
+    };
+
+    // 1. Action: carrier/buffer/spring (AR), loose slamming AK, roller-delayed MP5 "chk-CHK". Close and dry.
+    const mj = jitter(this.rng, 0.02, 1.5);
+    play(this.pick(`action.${prof.mech}`), {
+      at: at + (prof.mech === 'mp5' ? 0.003 : 0.005),
+      gain: (smg ? 0.8 : 0.7) * mj.gain,
+      rate: mj.rate,
+      hp: 300,
+      room: 0.03,
+      prio: 3,
+    });
+
+    // 2. Report: the recorded blast (per weapon), hot into the mic's soft ceiling; rifles send more to the
+    // room (the indoor slap is longer and brighter than a pistol's).
+    const report = this.pickFirst([
+      KEYS.report(prof.report),
+      ...prof.fallbacks.map(KEYS.report),
+      'report.synth',
+    ]);
+    play(report, {
+      at,
+      gain: (smg ? 1.4 : 1.6) * level * j.gain,
+      rate,
+      presenceDb: smg ? bc.presenceDb * 0.5 : bc.presenceDb,
+      lp: prof.reportLp,
+      send: smg ? 0.5 : 0.7,
+      prio: 5,
+    });
+    // 2a. A second, darker recording underneath: density, and no two shots identical.
+    const second = this.pickFirst(this.secondaryReports(smg ? 'pistol' : 'rifle', prof.report));
+    if (second !== report)
+      play(second, {
+        at: at + 0.0007,
+        gain: 0.75 * level,
+        rate: rate * 0.985,
+        lp: 6500,
+        send: 0.3,
+        prio: 4,
+      });
+
+    // 3. Blast core: crack + bite (none on a subsonic bullet, just the muzzle front), muzzle blast, harshness,
+    // low-mid body and boom, side blast for comps/brakes.
+    const cj = 0.97 + this.rng() * 0.06;
+    play(this.pickFirst([coreKey(prof.core, muz, !!e.subsonic), coreKey(prof.core, muz, false)]), {
+      at,
+      gain: (smg ? 1.5 : 4.2) * level * (1 + 0.25 * bc.harshness) * (1 + 0.25 * enc),
+      rate: cj,
+      send: smg ? 0.25 : 0.4,
+      prio: 5,
+    });
+
+    // 4. Mid roll: the warm low-mid decay a recording keeps after the crack.
+    // Rifles: hotter and slower (longer), so the blast stays above the mic's knee for longer than a pistol's.
+    play(this.pick('blast.roll'), {
+      at: at + 0.01,
+      gain: (smg ? 0.85 : 1.5) * level,
+      rate: prof.pitch * (smg ? 0.96 : 0.84) * (0.96 + this.rng() * 0.08),
+      send: smg ? 0.15 : 0.25,
+      prio: 3,
+    });
+
+    // 5. Chest thump: per-calibre low end (deeper for .300 BLK and the AK), more concussive indoors.
+    const thumpRate = prof.core === '300' ? 0.84 : prof.core === 'ak' ? 0.92 : 1;
+    play(this.pick('shot.thump'), {
+      at,
+      gain: (smg ? 1 : 1.8) * 0.45 * prof.energy * bc.pressure * mk * (1 + 1.7 * enc + 1.2 * a.bass),
+      rate: thumpRate * (0.97 + this.rng() * 0.06),
+      prio: 5,
+    });
+
+    this.pressureLayer(prof, bc.pressure * (smg ? 1 : 1.2), at, mk);
+    this.shotAfter(e, prof, report, at, rate, level, false);
+  }
+
+  /**
    * Suppressed fire (real, not Hollywood): the report is still ~130–135 dB at the shooter — a sharp,
    * compressed "pfft-crack" with a short thump — but the action is now just as loud: bolt carrier, buffer
    * spring, case ping, gas blowback at the port. First round after a pause pops (oxygen in the can).
@@ -702,69 +877,72 @@ export class AudioEngine {
     // An add-on can on a 5.56 carbine is noticeably louder than the integral-can subsonic PDW.
     // SUP_LEVEL sets suppressed fire ~12–18 dB under an unsuppressed shot at the mic (which is driven well into
     // the soft ceiling), instead of clipping just as hard.
-    const L = SUP_LEVEL * (supersonic ? 1 : 0.72) * Math.sqrt(prof.energy);
+    const L = SUP_LEVEL * (supersonic ? 1.3 : 1) * Math.sqrt(prof.energy);
     const pop = firstRound ? 1.5 : 1;
     const isAr = prof.mech === 'ar';
+    const longGun = prof.mech !== 'pistol';
     const S = SUP_LEVEL;
     const play = (key: string, o: Parameters<Mixer['play']>[1]) => {
       const b = this.pick(key);
       if (b) this.mixer.play(b, { bus: 'shot', ...o });
       return b;
     };
-    // Mechanical: louder and closer than unsuppressed — it's half of what you hear.
+    // Action: with the blast gone it's the loudest part after the report, a few dB under it — bolt carrier
+    // slamming, buffer-spring sproing (AR), roller "chk-CHK" (MP5), case ping, gas in the face.
     const mj = jitter(this.rng, 0.02, 1);
-    play(`mech.${prof.mech}`, {
+    play(longGun ? `action.${prof.mech}` : `mech.${prof.mech}`, {
       at: at + 0.003,
-      gain: 0.85 * S * mj.gain,
+      gain: (longGun ? 7 : 4) * S * mj.gain,
       rate: mj.rate,
       hp: 250,
       room: 0.03,
       prio: 4,
     });
-    if (isAr) {
-      play('sup.spring', {
-        at: at + 0.028,
-        gain: 0.45 * S,
-        rate: 0.98 + this.rng() * 0.04,
-        room: 0.02,
-        prio: 3,
-      });
-      // Gas blowback out of the ejection port, right side, a beat after the shot.
-      play('sup.gas', { at: at + 0.012, gain: 0.45 * S * pop, pan: 0.3, room: 0.02, prio: 3 });
-    }
+    if (isAr)
+      // Gas blowback out of the ejection port, right side, a beat after the shot (worse on a cold can).
+      play('sup.gas', { at: at + 0.012, gain: 2.2 * S * pop, pan: 0.3, room: 0.02, prio: 3 });
     play('sup.ping', {
       at: at + 0.035,
-      gain: 0.2 * S,
+      gain: 1.2 * S,
       pan: 0.45,
       rate: 0.97 + this.rng() * 0.06,
       room: 0.03,
       prio: 2,
     });
 
-    // Report: real suppressed recording + the synthetic pfft-crack/thump core (pop variant on round one).
+    // Report: the muffled "thwack" (mid pop off the last baffle), the synthetic pfft/thump core (pop variant
+    // on round one) and a real suppressed range recording for texture. Not a "pew", not a hiss.
     const rj = jitter(this.rng);
+    play('sup.thwack', {
+      at,
+      gain: 6 * L * (firstRound ? 1.7 : 1) * rj.gain,
+      rate: prof.pitch * (0.97 + this.rng() * 0.06),
+      send: 0.3,
+      prio: 5,
+    });
     play(KEYS.report('suppressed'), {
       at,
-      gain: 0.85 * L * (firstRound ? 1.4 : 1) * rj.gain,
+      gain: 5 * L * (firstRound ? 1.3 : 1) * rj.gain,
       rate: prof.pitch * rj.rate,
-      send: 0.22,
+      lp: 9000,
+      send: 0.25,
       prio: 5,
     });
     play(firstRound ? 'sup.pop' : 'sup.report', {
       at,
-      gain: 1.5 * L * (firstRound ? 1.6 : 1),
+      gain: 4 * L * (firstRound ? 1.6 : 1),
       rate: prof.pitch * (0.98 + this.rng() * 0.04),
-      send: 0.22,
+      send: 0.3,
       prio: 5,
     });
-    // Supersonic: the bullet's own crack, just ahead of the muzzle and going away downrange.
+    // Supersonic: the bullet's own crack, just ahead of the muzzle and going away downrange — sharp and loud,
+    // the can does nothing about it.
     if (supersonic)
-      play('crack', {
-        at: at + 0.006,
-        gain: 0.7 * S,
-        rate: 0.95 + this.rng() * 0.08,
-        lp: 11000,
-        send: 0.12,
+      play('sup.crack', {
+        at: at + 0.004,
+        gain: 12 * S * Math.sqrt(prof.energy),
+        rate: 0.96 + this.rng() * 0.08,
+        send: 0.35,
         prio: 5,
       });
     // A little pressure — mostly indoors, more on the pop.
@@ -1007,6 +1185,7 @@ export class AudioEngine {
   private autoBrass(weaponId: string, caliber: string, at: number) {
     this.camera.getWorldPosition(this.camPos);
     const fam = WEAPON_SOUNDS[weaponId]?.family ?? 'rifle';
+    const pistolCase = fam === 'pistol' || caliber.includes('9mm');
     const right = this.tmpDir.set(1, 0, 0).applyQuaternion(this.camera.getWorldQuaternion(this.camQuat));
     const p = { x: this.camPos.x + right.x * 1.2, y: 0, z: this.camPos.z + right.z * 1.2 };
     let surface: Surface = 'gravel';
@@ -1015,7 +1194,7 @@ export class AudioEngine {
       const hit = ph.raycast(this.camPos, this.tmpV.set(0, -1, 0), 3, this.deps.exclude?.());
       if (hit) surface = hit.tag.surface;
     }
-    const kind = caliber.includes('12') ? 'shell' : fam === 'pistol' ? 'pistol' : 'rifle';
+    const kind = caliber.includes('12') ? 'shell' : pistolCase ? 'pistol' : 'rifle';
     this.brass(p, surface, kind, at + 0.4 + this.rng() * 0.25);
   }
 
@@ -1039,7 +1218,8 @@ export class AudioEngine {
 
   weaponBeat(e: Pick<GameEvents['weaponBeat'], 'weaponId' | 'beat' | 'stressed'> & { at?: number }) {
     const at = e.at ?? this.now();
-    const fam = WEAPON_SOUNDS[e.weaponId]?.family ?? 'rifle';
+    // SMGs reload like long guns (rifle foley set).
+    const fam = WEAPON_SOUNDS[e.weaponId]?.family === 'pistol' ? 'pistol' : 'rifle';
     const keys = [KEYS.foley(fam, e.beat)];
     if (fam === 'rifle' || e.beat === 'magRelease' || e.beat === 'boltRelease')
       keys.push(KEYS.foley('rifle', e.beat));

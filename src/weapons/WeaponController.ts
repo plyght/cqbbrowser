@@ -1122,6 +1122,9 @@ export class WeaponController implements System {
       dir: m.dir.clone(),
       suppressed: !!d.suppressed,
       caliber: d.caliber,
+      // The build fired: ballistics (ammo, velocity → subsonic), recoil and audio (muzzle device, barrel)
+      // follow the loadout instead of the weapon's default build.
+      def: d,
     });
     // Fast fire raises stress; long strings build hand fatigue.
     if (this.sinceShot < 0.35) this.player.addStress(0.02);

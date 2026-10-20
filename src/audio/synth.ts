@@ -389,7 +389,7 @@ export function casePing(rate: number, rng: Rng) {
   return normalisePeak(out, 0.7);
 }
 
-export type MechKind = 'ar' | 'ak' | 'pistol';
+export type MechKind = 'ar' | 'ak' | 'pistol' | 'mp5';
 
 /** Close, dry mechanical layer: bolt carrier / slide clacks, buffer spring twang. */
 export function mechanical(kind: MechKind, rate: number, rng: Rng) {
@@ -421,6 +421,39 @@ export function mechanical(kind: MechKind, rate: number, rng: Rng) {
       rng,
     );
     burst(out, rate, rng, { at: 0.028, dur: 0.01, gain: 0.9, hp: 1000 });
+  } else if (kind === 'mp5') {
+    // Roller-delayed blowback: a tight, high "chk" as the rollers cam in and the bolt head unlocks, a burst of
+    // roller/carrier chatter, then the carrier slapping home ~45 ms later ("chk-CHK"). Steel on steel, no
+    // buffer tube, so it's brighter and shorter than an AR.
+    modal(
+      out,
+      rate,
+      [
+        [3300 * j(), 0.55, 0.014],
+        [5200 * j(), 0.45, 0.011],
+        [7900 * j(), 0.3, 0.008],
+      ],
+      0,
+      rng,
+    );
+    burst(out, rate, rng, { dur: 0.004, gain: 1, hp: 2500, attack: 0.00005 });
+    for (let k = 0; k < 4; k++)
+      burst(out, rate, rng, { at: 0.004 + k * 0.0045 + rng() * 0.002, dur: 0.0025, gain: 0.35, hp: 3500 });
+    modal(
+      out,
+      rate,
+      [
+        [2600 * j(), 0.6, 0.022],
+        [4300 * j(), 0.5, 0.016],
+        [6900 * j(), 0.3, 0.01],
+        [1250 * j(), 0.25, 0.03],
+      ],
+      0.044,
+      rng,
+    );
+    burst(out, rate, rng, { at: 0.044, dur: 0.009, gain: 1.1, hp: 1500, attack: 0.00008 });
+    // Recoil spring on its guide rod: a faint short zing.
+    modal(out, rate, [[880 * j(), 0.1, 0.05]], 0.006, rng);
   } else {
     const low = kind === 'ak' ? 0.75 : 1;
     // Carrier hits the buffer, then returns into battery.
@@ -459,6 +492,303 @@ export function mechanical(kind: MechKind, rate: number, rng: Rng) {
     }
   }
   return normalisePeak(out, 0.9);
+}
+
+/**
+ * Full long-gun action as heard from the shoulder (one buffer per variant, so a shot costs one voice):
+ * - ar: carrier into the buffer + buffer-spring "sproing" + carrier home;
+ * - ak: heavy long-stroke carrier slamming into the trunnion and a loose, clattery receiver (rattling cover,
+ *   swinging carrier), lower and dirtier than an AR;
+ * - mp5: the roller-delayed "chk-CHK" (see mechanical()).
+ */
+export function action(kind: Exclude<MechKind, 'pistol'>, rate: number, rng: Rng) {
+  const out = alloc(0.3, rate);
+  out.set(mechanical(kind, rate, rng));
+  if (kind === 'ar') {
+    const sp = bufferSpring(rate, rng);
+    for (let i = 0, o = Math.floor(0.02 * rate); i < sp.length && o + i < out.length; i++)
+      out[o + i] += sp[i] * 0.3;
+  } else if (kind === 'ak') {
+    // Loose clatter: a scatter of short, mid-pitched clacks across the cycle (cover, carrier, selector).
+    for (let k = 0; k < 7; k++) {
+      const at = 0.008 + rng() * 0.1;
+      const f = 1100 + rng() * 2400;
+      modal(
+        out,
+        rate,
+        [
+          [f, 0.18 + rng() * 0.2, 0.012 + rng() * 0.012],
+          [f * (1.6 + rng() * 0.5), 0.12, 0.008],
+        ],
+        at,
+        rng,
+      );
+      burst(out, rate, rng, { at, dur: 0.003, gain: 0.25 + rng() * 0.2, hp: 1200 });
+    }
+    // Carrier slamming home into the trunnion: a heavy low-mid clank.
+    modal(
+      out,
+      rate,
+      [
+        [720 + rng() * 80, 0.5, 0.05],
+        [1650 + rng() * 150, 0.35, 0.035],
+      ],
+      0.07,
+      rng,
+    );
+    burst(out, rate, rng, { at: 0.07, dur: 0.012, gain: 0.8, lp: 4000, hp: 400 });
+  }
+  return normalisePeak(out, 0.9);
+}
+
+/** 30 ms RMS every blast core is normalised to (≈ −12 dBFS). */
+export const CORE_RMS = 0.25;
+
+/** Per-calibre spec of the procedural blast core (see rifleCore). Gains are relative, ~1 = 5.56 blast. */
+export interface CoreSpec {
+  /** Supersonic N-wave amplitude and duration (s). */
+  crack: number;
+  nw: number;
+  /** 3.5 kHz+ "bite" right behind the crack, and its top. */
+  bite: number;
+  biteLp: number;
+  /** Muzzle blast: broadband noise burst. */
+  blast: number;
+  blastDur: number;
+  blastHp: number;
+  blastLp: number;
+  /** 1.4–4.5 kHz harshness (short barrels, AKs, comps and brakes). */
+  harsh: number;
+  /** Low-mid body (two damped resonances + noise) and its first resonance (Hz). */
+  body: number;
+  bodyF: number;
+  /** Low-mid "boom" sweep (160 → 70 Hz) and its decay (s). */
+  boom: number;
+  boomDur: number;
+  /** Comp/brake side blast: decorrelated L/R harsh bursts thrown sideways. */
+  side: number;
+}
+
+export const CORE_SPECS: Record<'556' | 'ak' | '300' | '9', CoreSpec> = {
+  // 5.56 short barrel: very sharp crack, bright bite, hot mids, moderate body.
+  '556': {
+    crack: 1,
+    nw: 0.00035,
+    bite: 0.9,
+    biteLp: 14000,
+    blast: 1,
+    blastDur: 0.09,
+    blastHp: 450,
+    blastLp: 9000,
+    harsh: 0.35,
+    body: 0.55,
+    bodyF: 230,
+    boom: 0.45,
+    boomDur: 0.03,
+    side: 0,
+  },
+  // AK short barrel + booster: brutal, harsh, concussive — longer blast, more upper-mid tear and boom.
+  ak: {
+    crack: 0.95,
+    nw: 0.0004,
+    bite: 0.85,
+    biteLp: 12000,
+    blast: 1.25,
+    blastDur: 0.12,
+    blastHp: 300,
+    blastLp: 7500,
+    harsh: 0.7,
+    body: 0.7,
+    bodyF: 190,
+    boom: 0.65,
+    boomDur: 0.04,
+    side: 0,
+  },
+  // .300 BLK SBR: big, deep, concussive — darker blast, most low-mid body.
+  '300': {
+    crack: 0.85,
+    nw: 0.0004,
+    bite: 0.4,
+    biteLp: 7000,
+    blast: 1.15,
+    blastDur: 0.11,
+    blastHp: 180,
+    blastLp: 4000,
+    harsh: 0.2,
+    body: 1.3,
+    bodyF: 150,
+    boom: 1.3,
+    boomDur: 0.06,
+    side: 0,
+  },
+  // 9 mm from a carbine-length barrel: softer, rounder, short.
+  '9': {
+    crack: 0.45,
+    nw: 0.0003,
+    bite: 0.2,
+    biteLp: 7000,
+    blast: 0.75,
+    blastDur: 0.05,
+    blastHp: 350,
+    blastLp: 4500,
+    harsh: 0.15,
+    body: 0.6,
+    bodyF: 260,
+    boom: 0.35,
+    boomDur: 0.025,
+    side: 0,
+  },
+};
+
+/** Core spec for a calibre fired through a muzzle class, with or without a supersonic bullet. */
+export function coreSpec(
+  cal: keyof typeof CORE_SPECS,
+  muzzle: 'open' | 'flash' | 'comp' | 'brake',
+  subsonic: boolean,
+): CoreSpec {
+  const s = { ...CORE_SPECS[cal] };
+  if (subsonic) {
+    // No bullet N-wave — only the muzzle's own shock front — but the blast and boom stay.
+    s.crack *= 0.3;
+    s.bite *= 0.45;
+    s.blast *= 1.05;
+    s.boom *= 1.1;
+  }
+  if (muzzle === 'open') {
+    s.bite *= 1.05;
+    s.blast *= 1.05;
+  } else if (muzzle === 'flash') s.bite *= 0.95;
+  else if (muzzle === 'comp') {
+    s.side = 0.75;
+    s.harsh += 0.25;
+    s.blast *= 1.1;
+  } else if (muzzle === 'brake') {
+    s.side = 1.1;
+    s.harsh += 0.4;
+    s.blast *= 1.2;
+    s.crack *= 1.05;
+  }
+  return s;
+}
+
+/**
+ * Procedural blast core of an unsuppressed long gun (stereo): supersonic N-wave crack + HF bite, broadband
+ * muzzle blast, upper-mid harshness, low-mid body and boom; comps/brakes add a decorrelated side blast. This
+ * is what separates a rifle from a pistol at the mic: a much sharper, brighter front and more blast energy.
+ */
+export function rifleCore(spec: CoreSpec, rate: number, rng: Rng): Float32Array[] {
+  const m = alloc(0.22, rate);
+  const n = Math.max(3, Math.round(spec.nw * rate));
+  // Supersonic N-wave: near-instant rise (3-sample raised cosine, so the 4× oversampled clippers downstream
+  // don't ring), linear fall through zero, snap back.
+  for (let i = 0; i < n; i++)
+    m[i] += spec.crack * (1 - (2 * i) / n) * (i < 3 ? 0.5 - 0.5 * Math.cos((Math.PI * (i + 1)) / 4) : 1);
+  // Bite: the bright first milliseconds (N-wave + blast front), then a short "sizzle" of the blast's top end.
+  burst(m, rate, rng, { dur: 0.006, gain: spec.bite * 1.6, hp: 3500, lp: spec.biteLp, attack: 0.00004 });
+  burst(m, rate, rng, { dur: 0.002, gain: spec.bite * 0.9, hp: 6500, attack: 0.00003 });
+  burst(m, rate, rng, {
+    at: 0.0006,
+    dur: 0.04,
+    gain: spec.bite * 0.7,
+    hp: 2500,
+    lp: spec.biteLp,
+    attack: 0.0002,
+  });
+  // Muzzle blast: broadband, sharp attack.
+  burst(m, rate, rng, {
+    at: 0.0003,
+    dur: spec.blastDur,
+    gain: spec.blast,
+    hp: spec.blastHp,
+    lp: spec.blastLp,
+    attack: 0.0003,
+  });
+  burst(m, rate, rng, { at: 0.0005, dur: 0.03, gain: spec.harsh, hp: 1400, lp: 4500, attack: 0.0003 });
+  // Roar: the blast's mid "rolling" overpressure off the ground and nearby surfaces (what makes a rifle
+  // sound bigger and longer than a pistol through a clipped mic, outdoors too).
+  burst(m, rate, rng, { at: 0.002, dur: 0.22, gain: spec.blast * 0.55, hp: 300, lp: 3500, attack: 0.002 });
+  // Low-mid body: two damped resonances + band noise.
+  modal(
+    m,
+    rate,
+    [
+      [spec.bodyF * (0.95 + rng() * 0.1), 0.28 * spec.body, 0.06],
+      [spec.bodyF * (1.8 + rng() * 0.15), 0.2 * spec.body, 0.045],
+    ],
+    0.0005,
+    rng,
+  );
+  burst(m, rate, rng, { dur: 0.07, gain: spec.body * 0.9, lp: 800, hp: 130, attack: 0.0008 });
+  // Low-mid boom (220 → 110 Hz); the 40–120 Hz chest thump is its own layer.
+  let ph = 0;
+  for (let i = 0; i < m.length; i++) {
+    const t = i / rate;
+    ph += (TAU * (110 + 110 * Math.exp(-t / 0.01))) / rate;
+    m[i] += Math.sin(ph) * 0.3 * spec.boom * Math.min(1, t / 0.0008) * Math.exp(-t / spec.boomDur);
+  }
+  // Mono unless there's a side blast (half the memory for the common open/flash-hider cores).
+  const ch = spec.side > 0 ? [Float32Array.from(m), Float32Array.from(m)] : [m];
+  if (spec.side > 0)
+    ch.forEach((c, k) => {
+      burst(c, rate, rng, {
+        at: 0.0005 + k * 0.0004,
+        dur: 0.035,
+        gain: spec.side,
+        hp: 1200,
+        lp: 6000,
+        attack: 0.0002,
+      });
+      burst(c, rate, rng, { at: 0.001 + k * 0.0006, dur: 0.06, gain: spec.side * 0.5, hp: 500, lp: 3000 });
+    });
+  // Calibrated by energy, not peak (the sub-ms N-wave would set the peak): 30 ms RMS = CORE_RMS, so the specs'
+  // relative gains survive and the engine's per-calibre level does the rest.
+  const w = Math.floor(0.03 * rate);
+  let e = 0;
+  for (const c of ch) for (let i = 0; i < w; i++) e += c[i] * c[i];
+  const k = CORE_RMS / Math.sqrt(e / (ch.length * w));
+  for (const c of ch) for (let i = 0; i < c.length; i++) c[i] *= k;
+  return ch;
+}
+
+/**
+ * Supersonic bullet crack on its own (suppressed supersonic fire): the can removes the muzzle blast, not the
+ * bullet's shock wave — a sharp, bright N-wave snap going away downrange.
+ */
+export function bulletCrack(rate: number, rng: Rng) {
+  const out = alloc(0.04, rate);
+  const n = Math.max(3, Math.round(0.00035 * rate));
+  for (let i = 0; i < n; i++)
+    out[i] += (1 - (2 * i) / n) * (i < 3 ? 0.5 - 0.5 * Math.cos((Math.PI * (i + 1)) / 4) : 1);
+  burst(out, rate, rng, { dur: 0.005, gain: 1.3, hp: 3500, lp: 14000, attack: 0.00004 });
+  burst(out, rate, rng, { at: 0.0005, dur: 0.025, gain: 0.35, hp: 2500, lp: 10000, attack: 0.0002 });
+  return normalisePeak(out, 0.95);
+}
+
+/**
+ * Suppressed .300 BLK subsonic "thwack": the 125–135 dB muffled pop at the ear — a sharp mid pop (gas leaving
+ * the last baffle into the air) with a short low knock, not a hiss and not a "pew".
+ */
+export function suppressedThwack(rate: number, rng: Rng) {
+  const out = alloc(0.09, rate);
+  burst(out, rate, rng, { dur: 0.026, gain: 1, hp: 350, lp: 2200, attack: 0.0002 });
+  modal(
+    out,
+    rate,
+    [
+      [800 + rng() * 80, 0.5, 0.026],
+      [1450 + rng() * 120, 0.32, 0.018],
+      [520 + rng() * 40, 0.3, 0.03],
+    ],
+    0.0003,
+    rng,
+  );
+  let ph = 0;
+  for (let i = 0; i < out.length; i++) {
+    const t = i / rate;
+    ph += (TAU * (95 + 60 * Math.exp(-t / 0.008))) / rate;
+    out[i] += Math.sin(ph) * 0.45 * Math.min(1, t / 0.0008) * Math.exp(-t / 0.022);
+  }
+  return normalisePeak(out, 0.95);
 }
 
 /** Fallback report if no sample is available: N-wave + broadband blast decay. */
