@@ -492,6 +492,11 @@ export class ArmsRig {
     this.fireEvents(this.layer, -1, 0);
   }
 
+  /** Speed up the clip that's playing (a tactical reload upgraded to a speed reload mid-way). */
+  hurry(k: number): void {
+    if (this.layer && !this.layer.done) this.layer.speed *= k;
+  }
+
   /** Mag check: leave the hold loop → reinsert + seat. */
   releaseHold(): void {
     this.holding = false;

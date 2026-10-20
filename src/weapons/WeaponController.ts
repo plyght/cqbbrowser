@@ -1196,8 +1196,13 @@ export class WeaponController implements System {
       this.checking = false;
     } else if (intent === 'tactical' || intent === 'speedUpgrade') {
       if (intent === 'speedUpgrade' && this.planKind === 'reload') {
-        // Double tap before the old mag is out: it goes on the floor instead of the pouch.
-        if (!this.swapped) this.reloadVariant = 'speed';
+        // Double tap before the old mag is out: it goes on the floor instead of the pouch, and the hand skips
+        // the stow, so the rest of the reload runs at the speed-reload pace (it used to take as long as a
+        // retention reload, so a double tap bought nothing).
+        if (!this.swapped && this.reloadVariant !== 'speed') {
+          this.reloadVariant = 'speed';
+          rig.hurry(1.18);
+        }
         return;
       }
       if (this.busy || !e.mags.hasSpare()) return;
