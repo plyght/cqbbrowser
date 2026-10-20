@@ -28,6 +28,8 @@ export interface DrillResult {
   seed: number;
   newPB: boolean;
   pb?: PersonalBest;
+  /** The personal best before this run (for the PB delta when this run beat it). */
+  previousPB?: PersonalBest;
 }
 
 /** What a minimal HUD needs. `time` is only exposed once the run is finished (no running clock). */
@@ -232,6 +234,7 @@ export class Drills implements System {
     const s = score(r.scoreInput());
     const medal = medalFor(def.method, s.final, def.par);
     const pb: PersonalBest = { final: s.final, time: s.time, medal, date: new Date().toISOString() };
+    const previousPB = this.pbs.get(def.id);
     const newPB = this.pbs.submit(def.id, def.method, pb);
     const res: DrillResult = {
       drillId: def.id,
@@ -243,6 +246,7 @@ export class Drills implements System {
       seed: this.seed,
       newPB,
       pb: this.pbs.get(def.id),
+      previousPB,
     };
     this.lastResult = res;
     for (const cb of this.resultCbs) cb(res);

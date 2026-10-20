@@ -1,7 +1,6 @@
 import { h, hints, navButton, padGlyph } from './dom';
-import { facilities, getDrills, type DrillInfo, type Medal } from './drills';
+import { facilities, fmtScore, getDrills, type DrillInfo, type Medal } from './drills';
 import type { Screen } from './FocusNav';
-import { fmtTime } from './nav';
 
 export function medalBadge(m: Medal | undefined, big = false) {
   return h('span', {
@@ -115,8 +114,8 @@ export class PlayScreen implements Screen {
               h('span', { class: 'idx', text: String(i + 1).padStart(2, '0') }),
               d.name,
             ),
-            h('span', { class: 'num', text: fmtTime(d.par) }),
-            h('span', { class: 'num', text: d.best !== undefined ? fmtTime(d.best) : '—' }),
+            h('span', { class: 'num', text: fmtScore(d.par, d.method) }),
+            h('span', { class: 'num', text: fmtScore(d.best, d.method) }),
             medalBadge(d.medal),
           ),
           () => this.onGo(d),
@@ -135,7 +134,10 @@ export class PlayScreen implements Screen {
       this.detail.replaceChildren(h('p', { class: 'dim', text: 'No drills here yet.' }));
       return;
     }
-    const delta = d.best !== undefined ? d.best - d.par : undefined;
+    const hf = d.method === 'hitFactor';
+    // vs par in the drill's unit: under par is good for time, over par is good for hit factor.
+    const delta = d.best !== undefined && d.par > 0 ? d.best - d.par : undefined;
+    const good = delta !== undefined && (hf ? delta >= 0 : delta <= 0);
     this.detail.replaceChildren(
       h('div', { class: 'eyebrow', text: d.facility }),
       h('h3', { text: d.name }),
@@ -144,16 +146,16 @@ export class PlayScreen implements Screen {
         'dl',
         { class: 'stats' },
         h('dt', { text: 'Par' }),
-        h('dd', { text: fmtTime(d.par) }),
+        h('dd', { text: fmtScore(d.par, d.method) }),
         h('dt', { text: 'Best' }),
-        h('dd', { text: d.best !== undefined ? fmtTime(d.best) : 'No time' }),
+        h('dd', { text: d.best !== undefined ? fmtScore(d.best, d.method) : 'No time' }),
         h('dt', { text: 'vs par' }),
         h('dd', {
-          class: delta === undefined ? '' : delta <= 0 ? 'good' : 'bad',
-          text: delta === undefined ? '—' : (delta <= 0 ? '−' : '+') + Math.abs(delta).toFixed(2),
+          class: delta === undefined ? '' : good ? 'good' : 'bad',
+          text: delta === undefined ? '—' : (delta < 0 ? '−' : '+') + Math.abs(delta).toFixed(2),
         }),
         h('dt', { text: 'Medal' }),
-        h('dd', {}, medalBadge(d.medal), ' ', d.medal ? d.medal.toUpperCase() : 'NONE'),
+        h('dd', {}, medalBadge(d.medal), ' ', (d.medalName ?? d.medal ?? 'none').toUpperCase()),
       ),
       ...(this.loadout ? [this.loadoutPick()!] : []),
       navButton(h('span', {}, 'GO ', h('span', { class: 'go-arrow', text: '▸' })), () => this.start(), {
