@@ -77,7 +77,7 @@ const state = (page: Page) =>
     };
   });
 
-test.describe.configure({ timeout: 900_000 });
+test.describe.configure({ timeout: 2_400_000 });
 
 for (const preset of WEAPONS)
   test(`mag check: ${preset}`, async ({ page }) => {

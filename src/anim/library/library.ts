@@ -1,5 +1,4 @@
 import type { ClipEvent, V3 } from '../rig/clipData';
-import type { HandKey } from '../rig/pose';
 import type { Recipe } from './compose';
 
 /**
@@ -25,6 +24,7 @@ export type ArmsAction =
   | 'shoot'
   | 'shootLast'
   | 'reloadTactical'
+  | 'reloadSpeed'
   | 'reloadEmpty'
   | 'magCheck'
   | 'inspect';
@@ -36,6 +36,7 @@ export const ACTIONS: ArmsAction[] = [
   'shoot',
   'shootLast',
   'reloadTactical',
+  'reloadSpeed',
   'reloadEmpty',
   'magCheck',
   'inspect',
@@ -204,7 +205,8 @@ function rifle(o: {
   speed: number;
   swapSpeed: number;
   swing: number;
-  emptyReload: Recipe;
+  /** Speed / empty reload family. */
+  reload: 'ar' | 'ak' | 'hk';
   magStyle: 'rock' | 'straight';
   locksBack: boolean;
   check: CheckFeel;
@@ -255,95 +257,274 @@ function rifle(o: {
         : shootBolt,
     },
     reloadTactical: { segs: [{ clip: 'ak.reloadTactical' }], speed: o.speed, magStyle: o.magStyle },
-    reloadEmpty: o.emptyReload,
+    reloadSpeed: SPEED[o.reload](o.speed * SPEED_PACE[o.reload], false),
+    reloadEmpty: SPEED[o.reload](o.speed * EMPTY_PACE[o.reload], true),
     magCheck: rifleCheck(o.speed, o.magStyle, o.check),
     inspect: { segs: [{ clip: 'ak.inspect' }], speed: o.speed },
   };
 }
 
-/** AK empty reload: the old mag drops, fresh one rocked in, firing hand racks the carrier. */
-const akEmpty = (speed: number): Recipe => ({
-  segs: [{ clip: 'ak.reloadEmpty' }],
-  speed,
-  magDrop: { t: 0 },
-  events: [ev('magRelease', 0), ev('magOut', 0.1)],
-  magStyle: 'rock',
-});
+// ------------------------------------------------------------------------------------ speed / empty reloads
 
-/** AR empty reload: straight insert, then the support palm slaps the bolt catch (no rack). */
-const arEmpty = (speed: number): Recipe => {
-  const slap: HandKey[] = [
-    { t: 1.68, at: 'boltCatch', off: [-0.08, -0.1, 0.1], w: 0 },
-    { t: 1.86, at: 'boltCatch', off: [-0.085, -0.095, 0.085], w: 1 },
-    { t: 1.94, at: 'boltCatch', off: [-0.06, -0.09, 0.08], w: 1 },
-    { t: 2.04, at: 'boltCatch', off: [-0.09, -0.1, 0.09], w: 1 },
-    { t: 2.25, at: 'boltCatch', off: [-0.09, -0.11, 0.1], w: 0 },
-  ];
-  return {
-    segs: [
-      { clip: 'ak.reloadEmpty', t0: 0, t1: 1.68 },
-      { hold: 0.6 },
-      { blend: 0.32 },
-      { clip: 'ak.idle', t0: 0, t1: 0 },
-    ],
-    speed,
-    magDrop: { t: 0 },
-    events: [ev('magRelease', 0), ev('magOut', 0.1), ev('boltRelease', 1.94)],
-    bolt: [
-      { t: 0, v: 1 },
-      { t: 1.93, v: 1 },
-      { t: 1.97, v: 0 },
-    ],
-    gunW: [
-      { t: 1.6, v: 1 },
-      { t: 2.6, v: 1 },
-    ],
-    handL: slap,
-    magStyle: 'straight',
+/**
+ * Rifle speed reloads (double-tap R, and the empty reloads that end in the bolt / handle), built for the punch the
+ * pistol's Beretta-pack speed reload has: a beat of anticipation (the gun dips and cants out), a snappy dump, a
+ * fast low hand trip to the chest rig, the mag indexed in and punched home with the whole gun kicking up on the
+ * seat, then the family's finisher and a snap back to the ready. Composed time (s) before `speed`; the seat lands at
+ * ≈ 0.8 s on every rifle and the whole speed reload takes ≈ 1 s (tactical reloads stay at ≈ 2 s).
+ *
+ * Families:
+ *  - AR (sb16 / hb300): index finger on the release, the empty drops free and tumbles; fresh mag straight in, palm
+ *    punch; empty → the support palm slaps the bolt catch.
+ *  - AK (k47s): the fresh mag's spine knocks the old one out past the paddle (it stays in until the new one gets
+ *    there), rock in front-lug first, hard clack; empty → overhand rack with a wrist roll.
+ *  - HK (kp9): rip the old mag out and flick it away, fresh mag in; empty → cock, lock and HK-slap the handle.
+ */
+const V0: V3 = [0, 0, 0];
+/**
+ * Lead-in from the ready hold into the source reload (composed s): the AK-pack reload starts mid-motion, and a
+ * shorter blend popped the support hand (> 50 mm/frame at speed-reload pace).
+ */
+const LEAD = 0.25;
+const T = (t: number, r: V3) => ({ t, r });
+
+/**
+ * Re-time every authored key / event. The builders are written against a short lead-in (`pre` s, then the source at
+ * a uniform pace); `slow` source spans play slower (the AK pack's hand trip to the pouch turns the wrist ~35°/frame,
+ * which at speed-reload pace would flip a bone in one frame), so keys after them move later.
+ */
+function retime(r: Recipe, pre: number, src0: number, slow: [number, number, number][] = []): Recipe {
+  const warp = (old: number) => {
+    if (old < pre) return (old / pre) * LEAD;
+    const src = old - pre + src0;
+    let t = LEAD + (src - src0);
+    for (const [a, b, k] of slow) t += Math.max(0, Math.min(src, b) - a) * (1 / k - 1);
+    return t;
   };
-};
+  const m = <K extends { t: number }>(ks?: K[]) => ks?.map((k) => ({ ...k, t: warp(k.t) }));
+  return {
+    ...r,
+    events: m(r.events),
+    tilt: m(r.tilt),
+    bolt: m(r.bolt),
+    gunW: m(r.gunW),
+    handL: m(r.handL),
+    magDrop: r.magDrop && { ...r.magDrop, t: warp(r.magDrop.t) },
+  };
+}
 
-/** MP5-style: lock the charging handle back, swap the mag (straight), HK slap the handle down. */
-const hkEmpty = (speed: number): Recipe => ({
-  segs: [
+/** The AR reload's slowed span (source s, relative pace). */
+const AR_SLOW: [number, number, number][] = [[0.12, 0.45, 0.55]];
+
+/** AR: dump (free fall) → pouch → straight in → punch; `empty` adds the bolt-catch slap. */
+function arSpeed(speed: number, empty: boolean): Recipe {
+  const cant: V3 = [0.12, 0.05, -0.4];
+  const seat = 1.35; // source reloadEmpty 1.30 (source 0.05 at composed 0.1)
+  const tilt = [
+    T(0, V0),
+    // Anticipation: a short dip, then the gun cants out to bring the well to the support hand.
+    T(0.05, [-0.06, 0, -0.06]),
+    T(0.3, cant),
+    T(1.15, cant),
+    T(seat - 0.02, [0.08, 0.05, -0.36]),
+    // Palm punch: the whole gun kicks up on the seat.
+    T(seat + 0.02, [0.22, 0.05, -0.32]),
+    T(seat + 0.1, [0.1, 0.03, -0.22]),
+  ];
+  const segs: Recipe['segs'] = [
     { clip: 'ak.idle', t0: 0, t1: 0 },
-    { hold: 0.5 },
-    { blend: 0.18 },
-    { clip: 'ak.reloadEmpty', t0: 0.3, t1: 1.68 },
-    { hold: 0.55 },
-    { blend: 0.3 },
+    { blend: LEAD },
+    { clip: 'ak.reloadEmpty', t0: 0.05, t1: 0.12 },
+    { clip: 'ak.reloadEmpty', t0: 0.12, t1: 0.45, speed: AR_SLOW[0][2] },
+    { clip: 'ak.reloadEmpty', t0: 0.45, t1: empty ? 1.55 : 1.42 },
+  ];
+  const r: Recipe = {
+    segs,
+    speed,
+    magDrop: { t: 0.04 },
+    drop: [0, -1.4, 0.15],
+    events: [ev('magRelease', 0), ev('magOut', 0.04)],
+    bolt: [
+      { t: 0, v: empty ? 1 : 0 },
+      { t: 1.6, v: empty ? 1 : 0 },
+    ],
+    magStyle: 'straight',
+    tilt,
+  };
+  if (!empty) {
+    segs.push({ blend: 0.22 }, { clip: 'ak.idle', t0: 0, t1: 0 });
+    tilt.push(T(1.69, V0));
+    return retime(r, 0.1, 0.05, AR_SLOW);
+  }
+  // Bolt-catch slap with the support palm right after the seat.
+  const slap = 1.62;
+  segs.push({ hold: 0.34 }, { blend: 0.25 }, { clip: 'ak.idle', t0: 0, t1: 0 });
+  tilt.push(
+    T(slap - 0.02, [0.1, 0.03, -0.22]),
+    T(slap + 0.02, [0.17, 0.03, -0.2]),
+    T(slap + 0.1, [0.08, 0.02, -0.12]),
+    T(2.19, V0),
+  );
+  r.events!.push(ev('boltRelease', slap));
+  const out = r;
+  r.bolt = [
+    { t: 0, v: 1 },
+    { t: slap - 0.01, v: 1 },
+    { t: slap + 0.02, v: 0 },
+  ];
+  r.gunW = [
+    { t: 1.5, v: 1 },
+    { t: 2.19, v: 1 },
+  ];
+  r.handL = [
+    { t: 1.42, at: 'boltCatch', off: [-0.08, -0.1, 0.1], w: 0 },
+    { t: 1.56, at: 'boltCatch', off: [-0.085, -0.095, 0.085], w: 1 },
+    { t: slap, at: 'boltCatch', off: [-0.06, -0.09, 0.08], w: 1 },
+    { t: 1.7, at: 'boltCatch', off: [-0.09, -0.1, 0.09], w: 1 },
+    { t: 1.86, at: 'boltCatch', off: [-0.09, -0.11, 0.1], w: 0 },
+  ];
+  return retime(out, 0.1, 0.05, AR_SLOW);
+}
+
+/** AK: the fresh mag knocks the old one out, rock in, clack; `empty` adds the overhand rack with a wrist roll. */
+function akSpeed(speed: number, empty: boolean): Recipe {
+  const cant: V3 = [0.1, 0, -0.32];
+  // Source reloadEmpty from 0.15 at composed 0.1: composed = source - 0.05.
+  const knock = 0.65;
+  const seat = 1.25;
+  const tilt = [
+    T(0, V0),
+    T(0.05, [-0.05, 0, -0.05]),
+    T(0.25, cant),
+    T(knock - 0.02, cant),
+    // The spine hits the paddle: the old mag pops out forward.
+    T(knock + 0.02, [0.14, 0, -0.36]),
+    T(seat - 0.05, [0.12, 0, -0.3]),
+    // Rocked back into the catch: hard clack.
+    T(seat, [0.24, 0, -0.26]),
+    T(seat + 0.08, [0.1, 0, -0.18]),
+  ];
+  const segs: Recipe['segs'] = [
     { clip: 'ak.idle', t0: 0, t1: 0 },
-  ],
-  speed,
-  magDrop: { t: 0.62 },
-  events: [ev('chargingHandle', 0.3), ev('magRelease', 0.62), ev('magOut', 0.72), ev('boltRelease', 2.33)],
-  bolt: [
+    { blend: LEAD },
+    { clip: 'ak.reloadEmpty', t0: 0.15, t1: empty ? undefined : 1.42 },
+  ];
+  const r: Recipe = {
+    segs,
+    speed,
+    // The old mag stays seated until the new one knocks it out.
+    magDrop: { t: knock, hold: true, kick: [0, -0.2, -0.9] },
+    drop: [0, -0.7, -1.3],
+    events: [ev('magRelease', knock - 0.03), ev('magOut', knock)],
+    magStyle: 'rock',
+    tilt,
+  };
+  if (!empty) {
+    segs.push({ blend: 0.22 }, { clip: 'ak.idle', t0: 0, t1: 0 });
+    tilt.push(T(1.59, V0));
+    return retime(r, 0.1, 0.15);
+  }
+  // Source rack: charging handle 2.17, release 2.53 → composed 2.12 / 2.48. A little wrist roll into the rack.
+  tilt.push(
+    T(1.6, [0.05, 0, -0.1]),
+    T(2.12, [0.05, 0, 0.14]),
+    T(2.46, [0.04, 0, 0.1]),
+    T(2.5, [0.18, 0, 0.04]),
+    T(2.62, [0.04, 0, 0]),
+    T(3.0, V0),
+  );
+  return retime(r, 0.1, 0.15);
+}
+
+/** HK: rip the old mag out and flick it away, fresh mag in; `empty` adds cock → lock → HK slap. */
+function hkSpeed(speed: number, empty: boolean): Recipe {
+  const cant: V3 = [0.1, 0, -0.35];
+  // reloadTactical 0.25–0.73 at composed 0.08 (grab, rip), flick blend, reloadEmpty from 0.38 at composed 0.76.
+  const flick = 0.64;
+  const seat = 1.68; // source 1.30
+  const tilt = [
+    T(0, V0),
+    T(0.05, [-0.05, 0, -0.05]),
+    T(0.3, cant),
+    T(0.56, [0.08, 0.04, -0.38]),
+    // The flick: a wrist snap that throws the empty aside.
+    T(flick, [0.04, 0.12, -0.44]),
+    T(0.9, cant),
+    T(seat - 0.04, [0.1, 0, -0.35]),
+    T(seat, [0.22, 0, -0.3]),
+    T(seat + 0.08, [0.08, 0, -0.2]),
+  ];
+  const segs: Recipe['segs'] = [
+    { clip: 'ak.idle', t0: 0, t1: 0 },
+    { blend: LEAD },
+    { clip: 'ak.reloadTactical', t0: 0.25, t1: 0.73 },
+    { blend: 0.2 },
+    { clip: 'ak.reloadEmpty', t0: 0.38, t1: empty ? 1.62 : 1.42 },
+  ];
+  const r: Recipe = {
+    segs,
+    speed,
+    keepEvents: false,
+    drop: [-1.5, -0.5, -0.5],
+    events: [ev('magRelease', 0.26), ev('magOut', flick), ev('magIn', 1.48), ev('magSeat', seat)],
+    magStyle: 'straight',
+    tilt,
+    bolt: [
+      { t: 0, v: 0 },
+      { t: 1.85, v: 0 },
+    ],
+  };
+  if (!empty) {
+    segs.push({ blend: 0.22 }, { clip: 'ak.idle', t0: 0, t1: 0 });
+    tilt.push(T(2.02, V0));
+    return retime(r, 0.08, 0.25);
+  }
+  // Cock the handle back, flip it into the notch, then slap it down hard.
+  const cock = 2.0;
+  const slap = 2.44;
+  segs.push({ hold: 0.7 }, { blend: 0.25 }, { clip: 'ak.idle', t0: 0, t1: 0 });
+  tilt.push(
+    T(1.86, [0.06, 0, -0.18]),
+    T(cock, [0.02, 0, -0.1]),
+    T(slap - 0.03, [0.02, 0, -0.06]),
+    T(slap + 0.02, [0.16, 0, -0.04]),
+    T(slap + 0.1, [0.03, 0, 0]),
+    T(2.95, V0),
+  );
+  r.events!.push(ev('chargingHandle', cock), ev('boltRelease', slap));
+  r.bolt = [
     { t: 0, v: 0 },
-    { t: 0.22, v: 0 },
-    { t: 0.32, v: 1 },
-    { t: 2.32, v: 1 },
-    { t: 2.36, v: 0 },
-  ],
-  handL: [
-    // Reach up to the cocking tube, pull back, flip into the notch, let go.
-    { t: 0.02, at: 'chargingHandle', off: [-0.05, -0.03, 0.06], w: 0 },
-    { t: 0.2, at: 'chargingHandle', off: [-0.05, -0.03, 0.07], w: 1 },
-    { t: 0.34, at: 'chargingHandle', off: [-0.05, -0.03, 0.14], w: 1 },
-    { t: 0.48, at: 'chargingHandle', off: [-0.07, -0.05, 0.14], w: 1 },
-    { t: 0.62, at: 'chargingHandle', off: [-0.08, -0.08, 0.14], w: 0 },
-    // Slap: palm comes down hard on the locked handle.
-    { t: 2.08, at: 'chargingHandle', off: [-0.1, 0.03, 0.17], w: 0, turn: [0, 0, 0] },
-    { t: 2.24, at: 'chargingHandle', off: [-0.1, 0.05, 0.16], w: 1, turn: [0, 0, -1.3] },
-    { t: 2.33, at: 'chargingHandle', off: [-0.09, 0.0, 0.15], w: 1, turn: [0, 0, -1.3] },
-    { t: 2.44, at: 'chargingHandle', off: [-0.1, -0.02, 0.15], w: 1, turn: [0, 0, -1.1] },
-    { t: 2.62, at: 'chargingHandle', off: [-0.1, -0.06, 0.12], w: 0, turn: [0, 0, 0] },
-  ],
-  gunW: [
-    { t: 1.9, v: 1 },
-    { t: 2.9, v: 1 },
-  ],
-  magStyle: 'straight',
-});
+    { t: cock - 0.08, v: 0 },
+    { t: cock, v: 1 },
+    { t: slap - 0.01, v: 1 },
+    { t: slap + 0.02, v: 0 },
+  ];
+  r.handL = [
+    // Reach up to the cocking tube, pull back, flip into the notch, let go (the MP5 lock)…
+    { t: 1.74, at: 'chargingHandle', off: [-0.05, -0.03, 0.06], w: 0 },
+    { t: 1.88, at: 'chargingHandle', off: [-0.06, -0.03, 0.07], w: 1 },
+    { t: cock, at: 'chargingHandle', off: [-0.06, -0.03, 0.14], w: 1 },
+    { t: 2.1, at: 'chargingHandle', off: [-0.07, -0.05, 0.14], w: 1 },
+    { t: 2.2, at: 'chargingHandle', off: [-0.08, -0.08, 0.14], w: 0 },
+    // …then the slap: palm comes down hard on the locked handle.
+    { t: 2.22, at: 'chargingHandle', off: [-0.1, 0.03, 0.17], w: 0, turn: [0, 0, 0] },
+    { t: 2.36, at: 'chargingHandle', off: [-0.1, 0.05, 0.16], w: 1, turn: [0, 0, -1.3] },
+    { t: slap, at: 'chargingHandle', off: [-0.09, 0.0, 0.15], w: 1, turn: [0, 0, -1.3] },
+    { t: 2.54, at: 'chargingHandle', off: [-0.1, -0.02, 0.15], w: 1, turn: [0, 0, -1.1] },
+    { t: 2.72, at: 'chargingHandle', off: [-0.1, -0.06, 0.12], w: 0, turn: [0, 0, 0] },
+  ];
+  r.gunW = [
+    { t: 1.7, v: 1 },
+    { t: 2.95, v: 1 },
+  ];
+  return retime(r, 0.08, 0.25);
+}
+
+const SPEED = { ar: arSpeed, ak: akSpeed, hk: hkSpeed };
+/** Speed-reload pace over the weapon's base clip speed: the whole reload lands at ≈ 1 s. */
+const SPEED_PACE = { ar: 2.05, ak: 1.85, hk: 2.1 };
+/** Empty-reload pace (these end in the finisher, so they run longer). */
+const EMPTY_PACE = { ar: 1.45, ak: 1.3, hk: 1.35 };
 
 // ------------------------------------------------------------------------------------ pistol
 
@@ -372,6 +553,8 @@ function pistol(): Record<ArmsAction, Recipe> {
     shoot: { segs: [{ clip: 'beretta.shoot' }], additive: true },
     shootLast: { segs: [{ clip: 'beretta.shootLast' }], additive: true },
     reloadTactical: { segs: [{ clip: 'beretta.reloadTactical' }], speed: 1.1, magStyle: 'straight' },
+    // The double-tap: the same dump-and-index Beretta-pack reload, faster.
+    reloadSpeed: { segs: [{ clip: 'beretta.reloadTactical' }], speed: 1.1 * 1.18, magStyle: 'straight' },
     reloadEmpty: { segs: [{ clip: 'beretta.reloadEmpty' }], speed: 1.1, magStyle: 'straight' },
     magCheck: pistolCheck(),
     inspect: { segs: [{ clip: 'beretta.inspect' }] },
@@ -394,7 +577,7 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       speed: 1,
       swapSpeed: 1,
       swing: 0.55,
-      emptyReload: akEmpty(1),
+      reload: 'ak',
       magStyle: 'rock',
       locksBack: false,
       check: {
@@ -419,7 +602,7 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       speed: 1.05,
       swapSpeed: 1.15,
       swing: 0,
-      emptyReload: arEmpty(1.05),
+      reload: 'ar',
       magStyle: 'straight',
       locksBack: true,
       check: {
@@ -442,7 +625,7 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       speed: 1.15,
       swapSpeed: 1.3,
       swing: 0,
-      emptyReload: arEmpty(1.15),
+      reload: 'ar',
       magStyle: 'straight',
       locksBack: true,
       check: {
@@ -465,7 +648,7 @@ export const WEAPON_ANIMS: Record<string, WeaponAnims> = {
       speed: 1.08,
       swapSpeed: 1.2,
       swing: 0.15,
-      emptyReload: hkEmpty(1.08),
+      reload: 'hk',
       magStyle: 'straight',
       locksBack: false,
       check: {

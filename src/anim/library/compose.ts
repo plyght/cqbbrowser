@@ -75,7 +75,15 @@ export interface Recipe {
   /** Firing-hand-holds-the-grip override keys (1 = parented to the hand). */
   gunW?: Key[];
   /** Synthesise the old mag falling out of the well (mag slot 1) starting at `t`. */
-  magDrop?: { t: number };
+  magDrop?: {
+    t: number;
+    /** Show the old mag seated in the well until `t` (AK: it stays in until the fresh mag knocks it out). */
+    hold?: boolean;
+    /** Extra launch velocity (model frame, m/s): knocked forward, flicked aside. */
+    kick?: V3;
+  };
+  /** Launch velocity (model frame, m/s) the controller gives the physical floor mag at `magOut`. */
+  drop?: V3;
   /** Offset of the seated mag (slot 0) in the model frame, weighted: partial drop for a mag check. */
   magOffset?: { t: number; p: V3; r?: V3 }[];
   hold?: [number, number];
@@ -263,14 +271,23 @@ export function compose(id: string, action: string, recipe: Recipe, clips: Recor
     for (let f = 0; f < frames; f++) {
       const dt = at(f) - recipe.magDrop.t;
       const o = f * S;
+      if (dt < 0 && recipe.magDrop.hold) {
+        // Still seated.
+        for (let k = 0; k < 6; k++) data[o + m.gun + k] = 0;
+        data[o + m.gun + 6] = 1;
+        data[o + m.w] = 0;
+        data[o + m.vis] = 1;
+        continue;
+      }
       if (dt < 0 || dt > 0.45) {
         data[o + m.vis] = 0;
         continue;
       }
       // Free fall (scaled for the viewmodel), a little forward kick and a tumble.
-      data[o + m.gun] = 0;
-      data[o + m.gun + 1] = -0.5 * 7.5 * dt * dt - 0.05 * dt;
-      data[o + m.gun + 2] = -0.04 * dt;
+      const kk = recipe.magDrop.kick ?? [0, 0, 0];
+      data[o + m.gun] = kk[0] * dt;
+      data[o + m.gun + 1] = -0.5 * 7.5 * dt * dt - 0.05 * dt + kk[1] * dt;
+      data[o + m.gun + 2] = -0.04 * dt + kk[2] * dt;
       q.setFromEuler(e.set(-1.4 * dt * dt * 4, 0, 0.3 * dt));
       data[o + m.gun + 3] = q.x;
       data[o + m.gun + 4] = q.y;
@@ -349,6 +366,8 @@ export function compose(id: string, action: string, recipe: Recipe, clips: Recor
     additive: recipe.additive,
     holdLast: recipe.holdLast,
     present,
+    drop: recipe.drop,
+    tilt: recipe.tilt?.map((k) => ({ t: k.t / speed, r: k.r })),
   };
   // Piece joins can step; the sources' retarget flips are already removed at decode.
   despike(clip);

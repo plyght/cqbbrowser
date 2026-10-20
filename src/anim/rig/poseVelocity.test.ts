@@ -41,7 +41,7 @@ describe('rig pose continuity (no pops)', () => {
         );
     }
     console.log(formatSpikes(rows, 'POSE CONTINUITY (contact as shipped)'));
-    expect(rows.length).toBe(AUDIT_WEAPONS.length * 13);
+    expect(rows.length).toBe(AUDIT_WEAPONS.length * 16);
   }, 300_000);
 
   test(`swaps: pop ≤ ${SWAP.deg}°/frame and ≤ ${SWAP.mm} mm/frame`, () => {
@@ -127,6 +127,19 @@ describe('clip data', () => {
         if (!c.layout.quats.some((q) => i >= q && i < q + 4))
           m = Math.max(m, Math.abs(c.data[f0 + i] - c.data[f1 + i]));
       expect(m).toBeLessThan(0.02);
+    }
+  });
+});
+
+describe('reload pace', () => {
+  test('rifle speed reloads seat in < 0.9 s and finish in ≈ 1 s; tacticals stay deliberate', () => {
+    for (const w of ['k47s', 'sb16', 'hb300', 'kp9']) {
+      const c = rig.clipsFor(w);
+      const seat = c.reloadSpeed.events.find((e) => e.name === 'magSeat')!.t;
+      expect(seat).toBeLessThan(0.9);
+      expect(c.reloadSpeed.duration).toBeLessThanOrEqual(1.0);
+      expect(c.reloadTactical.duration).toBeGreaterThan(1.8);
+      expect(c.reloadEmpty.duration).toBeLessThan(c.reloadTactical.duration + 0.6);
     }
   });
 });

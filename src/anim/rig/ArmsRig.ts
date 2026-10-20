@@ -477,6 +477,11 @@ export class ArmsRig {
     return !!this.shot && !this.shot.done;
   }
 
+  /** Launch velocity (model frame, m/s) the playing clip gives the dumped mag, if it says. */
+  get dropFling(): readonly [number, number, number] | undefined {
+    return this.layer?.clip.drop;
+  }
+
   /** Current action time / duration (0..1). */
   get progress(): number {
     const l = this.layer;
@@ -696,6 +701,7 @@ export class ArmsRig {
       this.seatDelta.premultiply(this.gunWorld);
     }
     this.gunQ.copy(qB);
+    this.tiltDelta(this.layer.clip, this.layer.t);
     _m.copy(this.root.matrixWorld).invert().multiply(this.gunWorld);
     _m.decompose(model.root.position, model.root.quaternion, _s);
     model.root.updateMatrixWorld(true);
@@ -842,6 +848,28 @@ export class ArmsRig {
     st.on = true;
   }
 
+  /** World rotation (about the grip) the clip's authored tilt adds to the gun this frame. */
+  private tilted = { on: false, m: new Matrix4(), q: new Quaternion(), e: new Euler() };
+  private tiltDelta(clip: Clip, t: number) {
+    const k = clip.tilt;
+    const st = this.tilted;
+    st.on = false;
+    if (!k?.length) return;
+    st.e.set(
+      keyAt(k, t, (x) => x.r[0]),
+      keyAt(k, t, (x) => x.r[1]),
+      keyAt(k, t, (x) => x.r[2]),
+    );
+    st.q.setFromEuler(st.e);
+    if (1 - Math.abs(st.q.w) < 1e-7) return;
+    // D = G · Q · G⁻¹: the tilt about the grip, in world space.
+    st.m
+      .copy(this.gunWorld)
+      .multiply(_m2.makeRotationFromQuaternion(st.q))
+      .multiply(_m.copy(this.gunWorld).invert());
+    st.on = true;
+  }
+
   private anchorDelta(socket: string, out: Vector3): boolean {
     const mine = this.sockets.get(socket);
     const ref = this.refSockets.get(socket);
@@ -876,6 +904,19 @@ export class ArmsRig {
       seatTurn = new Quaternion().slerp(_q2, sw);
     }
     target.add(delta.applyQuaternion(this.gunQ));
+    // The authored tilt turns the gun about the grip: a support hand on it (or inserting a mag) turns with it, so the
+    // mag meets the well instead of sliding out of the hand.
+    if (side === 'L' && this.tilted.on) {
+      const m0 = this.layout.mag[0];
+      const near = Math.max(0, 1 - Math.hypot(P[m0.gun], P[m0.gun + 1], P[m0.gun + 2]) / 0.15);
+      const tw = Math.min(1, Math.max(wsum, P[m0.w] * near));
+      if (tw > 0.001) {
+        target.lerp(_v.copy(target).applyMatrix4(this.tilted.m), tw);
+        this.tilted.m.decompose(_v2, _q2, _s);
+        const tq = new Quaternion().slerp(_q2, tw);
+        seatTurn = seatTurn ? tq.multiply(seatTurn) : tq;
+      }
+    }
     // Authored overrides.
     let turn: Quaternion | undefined;
     if (keys?.length) {

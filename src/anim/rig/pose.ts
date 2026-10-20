@@ -108,6 +108,10 @@ export interface Clip {
   holdLast?: boolean;
   /** Mag check: the mag out of the well and presented (procedural, on top of the sampled pose). */
   present?: ClipPresent;
+  /** Launch velocity (model frame, m/s) for the physical floor mag at `magOut`. */
+  drop?: V3;
+  /** Authored gun tilt keys (clip seconds, model-frame XYZ euler), already baked into the gun frames. */
+  tilt?: { t: number; r: V3 }[];
 }
 
 export function decodeClip(j: ClipJson, layout: Layout): Clip {
