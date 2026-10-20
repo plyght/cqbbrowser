@@ -1,4 +1,4 @@
-import { Matrix4, Quaternion, Vector3, type Bone } from 'three';
+import { Euler, Matrix4, Quaternion, Vector3, type Bone } from 'three';
 import type { WeaponModel } from '../../weapons/models';
 import type { ArmsRig } from '../rig/ArmsRig';
 import { HandProxy, PALM, WRIST, type Side } from './handProxy';
@@ -30,6 +30,24 @@ export interface Baked {
   dL: Float32Array;
 }
 const BAKED = new Map<string, Baked | null>();
+
+/**
+ * Hand-tuned two-hand pistol hold (support hand), applied on top of the clip while the support hand is on the
+ * gun (`grip` anchor weight): a weapon-frame wrist offset, a weapon-frame turn (XYZ euler, rad) and per-joint
+ * finger angles (5 × MCP/PIP/DIP, + opens). Tuned visually from the sheets (anim.html `loff`, `lturn`, `lfing`).
+ */
+export interface SupportPose {
+  offset: [number, number, number];
+  turn: [number, number, number];
+  fingers: number[];
+}
+export const PISTOL_SUPPORT: Record<string, SupportPose> = {
+  p17: {
+    offset: [-0.022, 0.012, 0.006],
+    turn: [0, 0, 0.2],
+    fingers: [0, 0, 0, 0.1, 0.1, 0.05, 0.1, 0.1, 0.05, 0.1, 0.1, 0.05, 0.1, 0.1, 0.05],
+  },
+};
 
 export const CONTACT = {
   /** Clearance the solver aims for (sampling margin), m. */
@@ -87,6 +105,7 @@ const _d = new Vector3();
 const _ax = new Vector3();
 const _t = new Vector3();
 const _q = new Quaternion();
+const _e = new Euler();
 const _m = new Matrix4();
 const _qw = new Quaternion();
 const _qb = new Quaternion();
@@ -180,6 +199,7 @@ export class HandContact {
     this.hands = { R: mk('R'), L: mk('L') };
     rig.seatProvider = (_r, model, id) => {
       this.bake = null;
+      this.weaponId = id;
       if (!this.enabled || !this.seats || this.mode === 'safe' || !this.ensure()) return null;
       const key = id + JSON.stringify(model.build);
       const hit = BAKED.get(key);
@@ -307,6 +327,14 @@ export class HandContact {
     return true;
   }
 
+  /** The tuned two-hand pistol hold for the current weapon, if any. */
+  supportPose(): SupportPose | undefined {
+    return this.weaponId ? PISTOL_SUPPORT[this.weaponId] : undefined;
+  }
+
+  /** Weapon id of the attached model (set on attach). */
+  weaponId = '';
+
   /** Resolve this frame. Call after `rig.update(dt)` (and any arm layers), before rendering. */
   apply(dt: number) {
     if (!this.enabled) return;
@@ -344,7 +372,8 @@ export class HandContact {
     // Firing-hand fingers first: the support hand then yields to the final firing hand (hand↔hand).
     this.hands.L.proxy.update(this.toWeapon);
     this.hands.R.proxy.update(this.toWeapon);
-    this.fingers('R', dt);
+    // Safe mode: the firing hand stays exactly as the clip while it holds the gun.
+    if (!(safe && onHand)) this.fingers('R', dt);
     // Firing-hand residual (e.g. the thumb against a stock during an inspect): the gun gives way (on the hand)
     // or the hand backs off by IK (off the grip), then the fingers re-solve.
     for (let it = 0; it < (safe && onHand ? 0 : 1); it++) {
@@ -372,6 +401,21 @@ export class HandContact {
     // residual push of both free hands.
     const bake = this.bake;
     const wl = Math.min(1, Math.max(0, rig.anchorWeight('L', 'grip')));
+    const sp = this.supportPose();
+    if (sp && wl > 0.001) {
+      // Two-hand pistol hold: tuned wrist offset + turn (weapon frame) through the arm IK, weighted.
+      this.model!.root.matrixWorld.decompose(_s, _qw, _s);
+      _e.set(sp.turn[0] * wl, sp.turn[1] * wl, sp.turn[2] * wl);
+      _qb.setFromEuler(_e);
+      _q.copy(_qw).multiply(_qb).multiply(_qp.copy(_qw).invert());
+      _d.set(sp.offset[0] * wl, sp.offset[1] * wl, sp.offset[2] * wl).transformDirection(
+        this.model!.root.matrixWorld,
+      );
+      _d.multiplyScalar(Math.hypot(...sp.offset) * wl);
+      rig.bones.handL.getWorldPosition(_p2).add(_d);
+      rig.reachHand('L', _p2, _q);
+      this.hands.L.proxy.update(this.toWeapon);
+    }
     if (bake && wl > 0.001 && bake.lOff.lengthSq() > 1e-10) {
       _d.copy(bake.lOff)
         .transformDirection(this.model!.root.matrixWorld)
@@ -981,10 +1025,12 @@ export class HandContact {
     for (let fi = 0; fi < 5; fi++) {
       const cs = hs.chains[fi];
       // Baked grip pose blended in by the hold weight; the solve below is the residual on top of it.
-      const D = bake ? (side === 'R' ? bake.dR : bake.dL) : null;
+      const spF = side === 'L' ? this.supportPose()?.fingers : undefined;
+      const D = spF ?? (bake ? (side === 'R' ? bake.dR : bake.dL) : null);
       for (let j = 0; j < 3; j++) this.baseD[j] = D ? D[fi * 3 + j] * w : 0;
       // The thumb's synergy axis only approximates its flexion: keep its corrections small.
-      const maxO = fi === 0 ? 0.9 : CONTACT.maxOpen;
+      // Safe mode: a finger opens by at most 15° at its knuckle (the synergy is knuckle-led) to clear.
+      const maxO = this.mode === 'safe' ? 0.26 : fi === 0 ? 0.9 : CONTACT.maxOpen;
       // Wrap intent (from the authored pose; not the trigger finger, not the thumb).
       cs.wrap = this.mode === 'full' && fi !== 0 && !(firing && fi === 1) && cs.intent;
       // Steady state (one evaluation): last frame's correction still clears and, when wrapping, still touches —

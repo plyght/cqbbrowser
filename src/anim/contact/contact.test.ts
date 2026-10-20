@@ -51,7 +51,8 @@ describe('hand-weapon contact (safe mode)', () => {
       'safe',
       (sum(safe) * 1000).toFixed(0),
     );
-    expect(sum(safe)).toBeLessThan(sum(raw) * 0.9);
+    // The firing hand is left as the clip in safe mode, so only the support hand and fingers contribute.
+    expect(sum(safe)).toBeLessThan(sum(raw));
   });
 
   test('no intended contact lifts off at idle (palm, fingers, palm ≤ raw + 3 mm; a finger opened or a hand backed off to clear its deepest point ≤ raw + 5 mm)', () => {
