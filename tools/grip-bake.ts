@@ -45,10 +45,8 @@ for (const w of weapons) {
   rig.detachWeapon();
   // Foregrip styles: the support hold on a build carrying that foregrip.
   if (!model.parts.slide)
-    for (const [style, part] of [
-      ['vertical', 'fg_vertical'],
-      ['angled', 'fg_angled'],
-    ] as const) {
+    for (const part of ['fg_stubby', 'fg_wedge', 'fg_vertical', 'fg_angled']) {
+      const style = part;
       let fm;
       try {
         fm = buildModel({ v: 1, weapon: w as never, parts: { foregrip: part } }, { detailParts: true });

@@ -39,7 +39,7 @@ type View =
   | 'front'
   | `gsec:${string}`
   | `bsec:${string}`;
-const VIEWS: Record<string, { at: 'grip' | 'support'; az: number; el: number; dist: number }> = {
+const VIEWS: Record<string, { at: 'grip' | 'support' | 'fg'; az: number; el: number; dist: number }> = {
   right: { at: 'grip', az: -90, el: 5, dist: 0.32 },
   left: { at: 'grip', az: 90, el: 5, dist: 0.28 },
   leftfront: { at: 'grip', az: 40, el: -5, dist: 0.28 },
@@ -47,6 +47,9 @@ const VIEWS: Record<string, { at: 'grip' | 'support'; az: number; el: number; di
   support: { at: 'support', az: 20, el: -55, dist: 0.3 },
   top: { at: 'support', az: 0, el: 80, dist: 0.32 },
   front: { at: 'support', az: 10, el: -20, dist: 0.3 },
+  sleft: { at: 'fg', az: 95, el: -10, dist: 0.3 },
+  sright: { at: 'fg', az: -95, el: -10, dist: 0.3 },
+  sbelow: { at: 'fg', az: -30, el: -60, dist: 0.3 },
 };
 
 async function main() {
@@ -111,6 +114,10 @@ async function main() {
     }
     const tgt = new Vector3();
     if (s.at === 'support') rig.bones.handL.getWorldPosition(tgt);
+    else if (s.at === 'fg')
+      rig.bones.handL
+        .getWorldPosition(tgt)
+        .add(new Vector3(0, -0.02, -0.07).applyQuaternion(m.root.getWorldQuaternion(new Quaternion())));
     else rig.socketWorld('gripRight', tgt);
     const az = (s.az * Math.PI) / 180,
       el = (s.el * Math.PI) / 180;

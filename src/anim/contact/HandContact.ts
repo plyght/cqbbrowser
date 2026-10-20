@@ -9,6 +9,7 @@ import {
   applySupport,
   gripFor,
   supportGripFor,
+  supportHold,
   type GripBake,
   type SupportGrip,
 } from './grip';
@@ -314,7 +315,7 @@ export class HandContact {
       this.trig = Math.max(0, Math.min(1, this.trig + step));
       if (this.trig > 0.001) applyJoints(rig, g.trigger, wr * this.trig);
     }
-    const L = g.L[this.style] ?? g.L.handguard;
+    const L = supportHold(g, this.model, this.style);
     const wl = Math.min(1, Math.max(0, rig.anchorWeight('L', 'grip')));
     if (L && wl > 0.001) {
       const k = wl * wl * (3 - 2 * wl);
