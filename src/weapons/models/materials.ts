@@ -12,6 +12,7 @@ import {
   type Material,
   type Texture,
 } from 'three';
+import { RETICLE_RED, reticleMaterial } from '../../render/reticle';
 import type { Finish } from '../attachments/types';
 
 /**
@@ -418,7 +419,8 @@ export function weaponMaterials(): WeaponMaterials {
       side: DoubleSide,
       envMapIntensity: 1.8,
     }),
-    reticle: new MeshBasicMaterial({ color: new Color(4, 0.25, 0.15), toneMapped: false }),
+    // Exposure-locked (src/render/reticle.ts): a fixed HDR value bloomed into a blob in the dark and under NVG.
+    reticle: reticleMaterial(RETICLE_RED.clone()),
     lightLens: std({
       color: 0xdfe6ea,
       emissive: 0x99a2a6,

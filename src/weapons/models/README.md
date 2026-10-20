@@ -60,6 +60,15 @@ _pivot-only_ (their geometry is merged into the static mesh) to keep each weapon
 Pass `{ detailParts: true }` to get them as separate meshes (+1 draw call each) when you animate them.
 `mag`, `chargingHandle`/`bolt`, `slide`, AK `stock` and `magnifier` are always separate.
 
+## Rounds in the mag (`magRounds.ts`, `magGeom.ts`)
+
+`new MagRounds(model, def.caliber, def.magCapacity)` (the controller does this per equipped weapon) adds one
+`InstancedMesh` named `magRounds` under `parts.mag` (one extra draw call): a lathed brass case + projectile per
+calibre (9 mm, 5.56, 5.45, .300 BLK, 7.62x39), laid from the feed lips down the mag's measured cavity (centre line
+of its triangle cross-sections), double-stack stagger, turning with the curve. `set(n)` draws the top `n` rounds.
+The mag's materials are cloned with real openings cut in the shader: open top between the lips, numbered-count
+witness holes (Glock / Beretta back, HK side), the PMAG window, none on the AK; the inside renders as a dark cavity.
+
 ## Sockets
 
 | socket           | where                                                                                                                                                                                                    |

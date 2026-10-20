@@ -35,19 +35,33 @@ export const KEYS = {
 
 // --- Weapons: report profile per weapon / caliber + barrel length ----------------------------------------
 
+/** What the muzzle does to the blast: open (bare), flash hider / AK booster, comp, brake, can, integral can. */
+export type MuzzleClass = 'open' | 'flash' | 'comp' | 'brake' | 'can' | 'integral';
+
+/** Calibre family of the procedural blast core (crack + muzzle blast + low-mid body). */
+export type CoreCal = '556' | 'ak' | '300' | '9';
+
 export interface WeaponSound {
   /** Report profile key (manifest `report.<profile>`). */
   report: string;
   /** Fallback profiles tried in order if the set lacks `report`. */
   fallbacks: string[];
   mech: MechKind;
-  family: 'rifle' | 'pistol';
+  /** pistol = handgun stack (tuned against the 9 mm reference pack); smg = pistol calibre, long-gun action. */
+  family: 'rifle' | 'pistol' | 'smg';
   barrelIn: number;
   suppressed: boolean;
   /** Playback-rate bias by caliber (bigger case → lower). */
   pitch: number;
   /** Relative blast energy (muzzle energy-ish), 1 = 5.56 carbine. */
   energy: number;
+  /** Blast core calibre (rifles/SMGs). */
+  core: CoreCal;
+  muzzle: MuzzleClass;
+  /** Low-pass on the recorded report (darker calibres). */
+  reportLp?: number;
+  /** What a suppressed shot is when no build says otherwise (the HB-300's stock can is integral). */
+  canAs?: 'can' | 'integral';
 }
 
 export const WEAPON_SOUNDS: Record<string, WeaponSound> = {
@@ -60,16 +74,25 @@ export const WEAPON_SOUNDS: Record<string, WeaponSound> = {
     suppressed: false,
     pitch: 1,
     energy: 1,
+    core: '556',
+    muzzle: 'flash',
   },
+  // Default build: 6" barrel + integral can (the event says it's suppressed). With a 5.5"/9" barrel and a
+  // muzzle device it is an unsuppressed .300 BLK SBR: deeper, more low-mid body than 5.56.
   hb300: {
-    report: 'suppressed',
-    fallbacks: [],
+    // The darker AK range recordings, pitched down, carry .300's low-mid boom better than the bright 5.56 ones.
+    report: 'rifle762.short',
+    fallbacks: ['rifle556.short', 'rifle556.long'],
+    reportLp: 5500,
     mech: 'ar',
     family: 'rifle',
     barrelIn: 9,
-    suppressed: true,
-    pitch: 0.92,
-    energy: 0.9,
+    suppressed: false,
+    pitch: 0.9,
+    energy: 1.05,
+    core: '300',
+    muzzle: 'flash',
+    canAs: 'integral',
   },
   k47s: {
     report: 'rifle762.short',
@@ -80,6 +103,21 @@ export const WEAPON_SOUNDS: Record<string, WeaponSound> = {
     suppressed: false,
     pitch: 0.97,
     energy: 1.15,
+    core: 'ak',
+    muzzle: 'flash',
+  },
+  kp9: {
+    report: 'pistol9',
+    fallbacks: [],
+    reportLp: 5000,
+    mech: 'mp5',
+    family: 'smg',
+    barrelIn: 8.9,
+    suppressed: false,
+    pitch: 1,
+    energy: 0.62,
+    core: '9',
+    muzzle: 'open',
   },
   p17: {
     report: 'pistol9',
@@ -90,14 +128,58 @@ export const WEAPON_SOUNDS: Record<string, WeaponSound> = {
     suppressed: false,
     pitch: 1,
     energy: 0.55,
+    core: '9',
+    muzzle: 'open',
   },
 };
 
-/** Profile for an arbitrary weapon: table entry, else derived from caliber. */
-export function weaponSound(weaponId: string, caliber: string, suppressed: boolean): WeaponSound {
-  const base = WEAPON_SOUNDS[weaponId] ?? byCaliber(caliber);
-  if (suppressed && !base.suppressed)
-    return { ...base, report: 'suppressed', fallbacks: [], suppressed: true, energy: base.energy * 0.8 };
+/** The parts of a built weapon def the audio cares about (WeaponDef satisfies it). */
+export interface ShotBuild {
+  muzzleDevice?: string;
+  barrelLength?: number;
+}
+
+const MUZZLE_CLASS: Record<string, MuzzleClass> = {
+  bare: 'open',
+  flashHider: 'flash',
+  booster: 'flash',
+  comp: 'comp',
+  brake: 'brake',
+  suppressor: 'can',
+  integral: 'integral',
+};
+
+/**
+ * Profile for the weapon actually fired: table entry (else derived from caliber), then the build. The event's
+ * `suppressed` flag is authoritative (an HB-300 with its shroud swapped for a comp is NOT suppressed), the muzzle
+ * device picks the blast character and the barrel length the short-barrel harshness.
+ */
+export function weaponSound(
+  weaponId: string,
+  caliber: string,
+  suppressed: boolean,
+  build?: ShotBuild,
+): WeaponSound {
+  let base = WEAPON_SOUNDS[weaponId] ?? byCaliber(caliber);
+  if (build) {
+    const muzzle = MUZZLE_CLASS[build.muzzleDevice ?? ''] ?? base.muzzle;
+    const barrelIn = build.barrelLength ? build.barrelLength / 0.0254 : base.barrelIn;
+    base = { ...base, muzzle, barrelIn };
+  }
+  if (suppressed) {
+    const muzzle = base.muzzle === 'integral' || (!build && base.canAs === 'integral') ? 'integral' : 'can';
+    if (base.suppressed) return { ...base, muzzle };
+    return {
+      ...base,
+      report: 'suppressed',
+      fallbacks: [],
+      suppressed: true,
+      energy: base.energy * 0.8,
+      muzzle,
+    };
+  }
+  // An unsuppressed shot never keeps a can class (e.g. a stale def).
+  if (base.muzzle === 'can' || base.muzzle === 'integral') base = { ...base, muzzle: 'open' };
   return base;
 }
 
@@ -105,7 +187,8 @@ function byCaliber(caliber: string): WeaponSound {
   const c = caliber.toLowerCase();
   if (c.includes('9mm') || c.includes('45') || c.includes('40'))
     return { ...WEAPON_SOUNDS.p17, pitch: c.includes('45') ? 0.92 : 1 };
-  if (c.includes('7.62') || c.includes('308')) return WEAPON_SOUNDS.k47s;
+  if (c.includes('300')) return WEAPON_SOUNDS.hb300;
+  if (c.includes('7.62') || c.includes('308') || c.includes('5.45')) return WEAPON_SOUNDS.k47s;
   if (c.includes('12')) return { ...WEAPON_SOUNDS.k47s, pitch: 0.85, energy: 1.4, barrelIn: 14 };
   return WEAPON_SOUNDS.sb16;
 }

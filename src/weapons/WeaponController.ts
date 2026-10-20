@@ -57,6 +57,7 @@ import { recoilFor, type RecoilFeel, type RecoilProfile } from '../anim/handling
 import { FOV_SPRING } from '../anim/handling/characterise';
 import { WeaponRigidBody, gainsFor } from '../anim/handling/sim';
 import { ArmsRig } from '../anim/rig/ArmsRig';
+import { MagRounds, roundsOn } from './models/magRounds';
 import { ContactOverlay } from '../anim/contact/ContactOverlay';
 import { HandContact } from '../anim/contact/HandContact';
 import { solveTwoBone } from '../anim/ik';
@@ -100,6 +101,8 @@ interface Equipped {
   cfg: ClassCfg;
   mags: Magazines;
   model: WeaponModel;
+  /** The rounds inside the mag (instanced; follows `mags.inGun.rounds`). */
+  rounds: MagRounds | null;
   mode: FireMode;
   /** Socket positions in the weapon frame. */
   sockets: Record<string, Vector3>;
@@ -136,8 +139,6 @@ const CAM_GRIP = new Vector3(-0.07, 0.015, 0.012);
 const ARM_CLEAR = 0.2;
 /** Rig camera fix: wrist target relative to the chest-cam mount (torso frame): just left of and below the lens. */
 const CAM_REACH = new Vector3(-0.05, -0.06, -0.09);
-/** Pistol mag check (rig): support wrist under and behind the dropped mag's base (weapon frame). */
-const MAG_CUP = new Vector3(-0.015, -0.16, 0.07);
 
 // Scratch (no per-frame allocation).
 const _v = new Vector3();
@@ -301,6 +302,7 @@ export class WeaponController implements System {
       cfg,
       mags: new Magazines(def.magCapacity, def.spareMags),
       model,
+      rounds: model.parts.mag ? new MagRounds(model, def.caliber, def.magCapacity) : null,
       mode: def.modes[0],
       sockets,
       mag,
@@ -446,7 +448,7 @@ export class WeaponController implements System {
       case 'magSeat': {
         if (this.planKind === 'reload' && e.mags.chambered) this.reloadLive = true;
         const k = lib.magSeat.calm[0].kick;
-        if (k) this.applyKick(k, 1);
+        if (k) this.applyKick(k, this.punch);
         break;
       }
       case 'boltRelease':
@@ -458,11 +460,17 @@ export class WeaponController implements System {
           this.reloadLive = true;
         }
         const k = (lib[beat] ?? lib.slideRelease ?? lib.boltRelease)?.calm[0].kick;
-        if (k) this.applyKick(k, 1);
+        if (k) this.applyKick(k, this.punch);
         break;
       }
     }
   };
+
+  /** Impulse gain of the seat / bolt beats: speed and empty reloads on the rig hit harder than a tactical. */
+  private get punch(): number {
+    const a = this.rig?.action;
+    return a === 'reloadSpeed' || a === 'reloadEmpty' ? 1.6 : 1;
+  }
 
   private onRigSwapMid() {
     const s = this.switching;
@@ -489,8 +497,6 @@ export class WeaponController implements System {
     w2: new Vector3(),
   };
 
-  /** 0..1 pistol mag-check lift (rig). */
-  private checkLift = 0;
   /** Rig camera-fix timeline (s) and whether the mount was straightened this time. */
   private camFixT = 0;
   private camFixed = false;
@@ -527,9 +533,7 @@ export class WeaponController implements System {
     const f = ease('out', this.flinch);
     const t = ease('io', this.throwDip) * 0.85;
     const c = this.camFixW;
-    // Pistol mag check: the support hand comes up under the dropped mag (the clip leaves it at the hip).
-    const m = this.equipped.cls === 'pistol' ? ease('io', this.checkLift) : 0;
-    const k = Math.max(f, t, c, m);
+    const k = Math.max(f, t, c);
     if (k < 1e-3) return;
     const { armL, foreArmL, handL } = rig.bones;
     const r = this.rs;
@@ -539,8 +543,7 @@ export class WeaponController implements System {
     const l1 = r.sh.distanceTo(r.el),
       l2 = r.el.distanceTo(r.wr);
     const tw = this.player.torso.matrixWorld;
-    if (m >= f && m >= t && m >= c) r.tg.copy(MAG_CUP).applyMatrix4(this.equipped.model.root.matrixWorld);
-    else if (c >= f && c >= t) r.tg.copy(this.player.camLocal).add(CAM_REACH).applyMatrix4(tw);
+    if (c >= f && c >= t) r.tg.copy(this.player.camLocal).add(CAM_REACH).applyMatrix4(tw);
     else if (f >= t) r.tg.set(-0.05, 0.2, -0.26).applyMatrix4(tw);
     else r.tg.set(-0.22, 0.2, -0.1).applyMatrix4(tw);
     r.tg.lerpVectors(r.wr, r.tg, k);
@@ -575,6 +578,13 @@ export class WeaponController implements System {
       }
     }
     rig.root.updateMatrixWorld(true);
+    // The mag check presents the mag to the chest cam: keep the camera's place in rig space current, frozen while the
+    // mag is out (it rides the hands then).
+    if (this.planKind !== 'check') {
+      const cam = this.ctx.camera;
+      cam.updateMatrixWorld();
+      rig.presentOffset.copy(rig.root.matrixWorld).invert().multiply(cam.matrixWorld);
+    }
     // Mag seated (and chambered): the gun works, so trigger or aim cuts the clip's return-to-ready tail short
     // (it held the gun ~0.65 s past the seat, unable to fire or aim).
     if (this.planKind === 'reload' && this.reloadLive) {
@@ -593,9 +603,13 @@ export class WeaponController implements System {
     rig.root.updateMatrixWorld(true);
     this.rigGunInv.copy(e.model.root.matrixWorld).invert().multiply(rig.root.matrixWorld);
     this.rigGunValid = rig.weaponModel === e.model;
-    // Empty reloads: the rig's falling clone of the old mag is replaced by our physical floor mag.
+    // The rig's clone of the old mag (slot 1): shown while the old mag is still in the gun (the AK knock-out keeps it
+    // seated until the fresh one hits it); once it leaves, our physical floor mag replaces the clip's fall.
     const spare = e.model.root.getObjectByName('spareMag');
-    if (spare && this.planKind === 'reload') spare.visible = false;
+    if (spare && this.planKind === 'reload' && this.swapped) spare.visible = false;
+    // Rounds on the gun's mag: while the old mag is still seated as the clone, the mag in hand is the fresh one.
+    const incoming = this.planKind === 'reload' && !this.swapped && !!spare?.visible;
+    e.rounds?.set(incoming ? (e.mags.spares()[0]?.rounds ?? 0) : (e.mags.inGun?.rounds ?? 0));
     // Plans finish when the rig goes back to idle.
     if ((this.planKind === 'reload' || this.planKind === 'check') && !rig.busy) {
       if (this.planKind === 'reload') {
@@ -819,6 +833,7 @@ export class WeaponController implements System {
     } else {
       this.updateParts(dt);
       this.updateHands(dt);
+      e.rounds?.set(e.mags.inGun?.rounds ?? 0);
     }
     this.updateAdsCamera();
     this.updateFire(dt, f.down.has('fire'));
@@ -879,15 +894,6 @@ export class WeaponController implements System {
       const w = ease('io', this.switchW);
       h.lerp(_v3.fromArray(e.cfg.away.p), w);
       r.lerp(_v3.fromArray(e.cfg.away.r), w);
-    }
-    // Pistol mag check on the rig: lift and tip the gun so the support hand working the mag is in frame.
-    const checkWant = this.rig && this.planKind === 'check' && e.cls === 'pistol' ? 1 : 0;
-    this.checkLift += (checkWant - this.checkLift) * damp(0.08, dt);
-    if (this.checkLift > 1e-3) {
-      const w = ease('io', this.checkLift);
-      h.y += 0.04 * w;
-      h.z += 0.02 * w;
-      r.x += 0.2 * w;
     }
     // Throw dip / flinch: the gun drops and cants away while the support hand is busy.
     const dip = Math.max(ease('io', this.throwDip), ease('out', this.flinch), this.camFixW * 0.35);
@@ -1121,6 +1127,9 @@ export class WeaponController implements System {
       dir: m.dir.clone(),
       suppressed: !!d.suppressed,
       caliber: d.caliber,
+      // The build fired: ballistics (ammo, velocity → subsonic), recoil and audio (muzzle device, barrel)
+      // follow the loadout instead of the weapon's default build.
+      def: d,
     });
     // Fast fire raises stress; long strings build hand fatigue.
     if (this.sinceShot < 0.35) this.player.addStress(0.02);
@@ -1210,7 +1219,7 @@ export class WeaponController implements System {
     }
   }
 
-  /** Rig path: tactical → reloadTactical, speed → reloadTactical faster + dump, empty → reloadEmpty, hold → magCheck. */
+  /** Rig path: tactical → reloadTactical, speed → reloadSpeed (dump), empty → reloadEmpty, hold → magCheck. */
   private onReloadIntentRig(intent: string) {
     const rig = this.rig!;
     const e = this.equipped;
@@ -1226,12 +1235,19 @@ export class WeaponController implements System {
       this.checking = false;
     } else if (intent === 'tactical' || intent === 'speedUpgrade') {
       if (intent === 'speedUpgrade' && this.planKind === 'reload') {
-        // Double tap before the old mag is out: it goes on the floor instead of the pouch, and the hand skips
-        // the stow, so the rest of the reload runs at the speed-reload pace (it used to take as long as a
-        // retention reload, so a double tap bought nothing).
+        // Double tap before the old mag is out: the retention reload that started on the first release turns into
+        // the speed reload (dump, rip a fresh mag, punch it home) — the hand hasn't reached the mag yet, so the
+        // clip crossfades straight into it. Later on (rare: the window is 0.3 s) the tactical just hurries.
         if (!this.swapped && this.reloadVariant !== 'speed') {
           this.reloadVariant = 'speed';
-          rig.hurry(1.18);
+          if (rig.action === 'reloadTactical' && rig.progress < 0.25) {
+            this.loadOldMag();
+            rig.play('reloadSpeed', {
+              onEvent: this.onRigEvent,
+              fade: 0.12,
+              speed: this.player.stress > 0.45 ? 1.12 : 1,
+            });
+          } else rig.hurry(1.18);
         }
         return;
       }
@@ -1244,12 +1260,22 @@ export class WeaponController implements System {
       this.reloadLive = false;
       this.idleTime = 0;
       const stressed = this.player.stress > 0.45;
-      rig.play(empty ? 'reloadEmpty' : 'reloadTactical', {
+      this.loadOldMag();
+      rig.play(empty ? 'reloadEmpty' : this.reloadVariant === 'speed' ? 'reloadSpeed' : 'reloadTactical', {
         onEvent: this.onRigEvent,
-        speed: (this.reloadVariant === 'speed' ? 1.18 : 1) * (stressed ? 1.12 : 1),
+        speed: stressed ? 1.12 : 1,
       });
       this.newDrift(1);
     }
+  }
+
+  /** The rig's slot-1 clone stands in for the old mag (it may stay seated until knocked out): give it its rounds. */
+  private loadOldMag() {
+    const e = this.equipped;
+    const old = roundsOn(e.model.root.getObjectByName('spareMag') ?? undefined);
+    if (!old) return;
+    old.count = Math.min(old.instanceMatrix.count, e.mags.inGun?.rounds ?? 0);
+    old.visible = old.count > 0;
   }
 
   private plan(names: readonly string[], stressed: boolean): PlannedBeat[] {
@@ -1474,9 +1500,13 @@ export class WeaponController implements System {
     const o = spare?.visible ? spare : e.mag.obj;
     o.updateMatrixWorld(true);
     const p = this.player;
-    // Falls out of the well: weapon-down plus the body's own motion, a little tumble.
-    _v.set(0, -1.2, 0.2).applyQuaternion(this.view.quaternion).add(p.velocity);
-    _v2.set((this.rand() - 0.5) * 6, (this.rand() - 0.5) * 4, (this.rand() - 0.5) * 6);
+    // Falls out of the well: weapon-down plus the body's own motion, a little tumble. The clip may launch it instead
+    // (AK knocked forward, HK flicked aside).
+    const fling = this.rig?.dropFling;
+    if (fling) _v.fromArray(fling).applyQuaternion(this.gunQuat).add(p.velocity);
+    else _v.set(0, -1.2, 0.2).applyQuaternion(this.view.quaternion).add(p.velocity);
+    const spin = fling ? 2 : 1;
+    _v2.set((this.rand() - 0.5) * 6 * spin, (this.rand() - 0.5) * 4 * spin, (this.rand() - 0.5) * 6 * spin);
     this.drops.spawn(o, o.matrixWorld, _v, _v2, true);
   }
 

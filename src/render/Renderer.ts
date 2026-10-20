@@ -11,6 +11,7 @@ import {
   type ShaderMaterial,
   SRGBColorSpace,
   Texture,
+  type Vector4,
   WebGLRenderer,
 } from 'three';
 import { DynamicResolution } from './DynamicResolution';
@@ -18,6 +19,7 @@ import { PerfOverlay } from './PerfOverlay';
 import { BodycamEffect } from './post/BodycamEffect';
 import type { LensParams } from './post/lens';
 import { NvgEffect } from './post/nvg/NvgEffect';
+import { updateReticleExposure } from './reticle';
 import { QUALITY, toTier, videoSettings, type QualityPreset, type QualityTier } from './quality';
 
 /**
@@ -263,6 +265,9 @@ export class Renderer {
     if (this.frameNo % this.quality.shadowEvery === 0) this.renderer.shadowMap.needsUpdate = true;
     this.renderer.info.reset();
     this.nvgPass.enabled = this.nvg.active;
+    // Reticles lock to last frame's exposure (AE / NVG tube gain) so they stay a crisp dot, not a bloom blob.
+    const ex = this.bodycam.uniforms.get('uExpo')!.value as Vector4;
+    updateReticleExposure(this.bodycam.exposure.texture, ex.x + ex.y, this.nvg.stateTexture, this.nvg.active);
     this.composer.render(dt);
     this.perf?.update(dt, this.renderer, this.effectiveScale, this.tier);
   }

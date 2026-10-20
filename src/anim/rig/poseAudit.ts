@@ -72,6 +72,7 @@ export function scenarios(rig: ArmsRig, weaponId: string, other: () => WeaponMod
     // Fast follow-ups: every shot cuts into the previous one's kick.
     { name: 'rapid string', frames: 20 * 4 + 40, steps: shots(20, 10, 4) },
     one('reloadTactical'),
+    one('reloadSpeed'),
     one('reloadEmpty'),
     {
       name: 'magCheck (hold)',
@@ -83,6 +84,20 @@ export function scenarios(rig: ArmsRig, weaponId: string, other: () => WeaponMod
     },
     one('inspect'),
     { name: 'inspect → fire', frames: 120, steps: [{ at: 10, act: play('inspect') }, ...shots(3, 50)] },
+    {
+      // Double tap: the tactical that started on the first release turns into the speed reload.
+      name: 'tactical → speed upgrade',
+      frames: f('reloadSpeed') + 60,
+      steps: [
+        { at: 10, act: play('reloadTactical') },
+        { at: 22, act: play('reloadSpeed', { fade: 0.12 }) },
+      ],
+    },
+    {
+      name: 'speed reload → fire',
+      frames: f('reloadSpeed') + 60,
+      steps: [{ at: 10, act: play('reloadSpeed') }, ...shots(3, f('reloadSpeed') + 4)],
+    },
     {
       name: 'reload → fire',
       frames: f('reloadTactical') + 60,

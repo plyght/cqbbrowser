@@ -88,6 +88,10 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
     'sup-hb300-indoor',
     'sup-sb16-outdoor',
     'sup-first-round',
+    'hb300-comp-outdoor',
+    'hb300-comp-room',
+    'kp9-outdoor',
+    'k47s-outdoor',
     'auto-room',
     'rifle-room-earpro',
     'rifle-room-noprotect',
@@ -153,7 +157,9 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
     // Hit feedback is subtle: clearly there, well under the shots.
     if (name === 'paper-hits-solo') expect(r.peak).toBeLessThan(0.5);
     expect(r.debug.loaded.open).toBeGreaterThan(50);
-    expect(r.debug.peakVoices).toBeLessThanOrEqual(32);
+    expect(r.debug.peakVoices).toBeLessThanOrEqual(48);
+    // Strings overlap without cutting tails.
+    expect(r.debug.stolen).toBe(0);
   }
   // Tiny concrete box: dense, compressed early field; open air: weak early field but echoes off the berms
   // and the ambience breathing back late.
@@ -167,12 +173,17 @@ test('audio: offline renders (WAV + spectrograms)', async ({ page }) => {
     expect(m[n].rt60).toBeLessThan(0.75);
   }
   expect(m['rifle-hall'].rt60).toBeGreaterThan(m['rifle-box'].rt60);
-  // Suppressed fire: clearly quieter than an unsuppressed shot at the mic, but not a whisper (owner: ~12–18 dB).
+  // Suppressed fire: clearly quieter than an unsuppressed shot at the mic (50 ms RMS ~9–16 dB under), but a real
+  // report with a loud action, not a whisper; peaks stay under the rifle's (a supersonic load still cracks).
   for (const n of ['sup-hb300-outdoor', 'sup-sb16-outdoor', 'sup-hb300-indoor']) {
-    const drop = shots['rifle-outdoor'].peakDb - shots[n].peakDb;
+    const drop = shots['rifle-outdoor'].rmsDb - shots[n].rmsDb;
     expect(drop).toBeGreaterThan(7);
     expect(drop).toBeLessThan(20);
+    expect(shots[n].peakDb).toBeLessThan(shots['rifle-outdoor'].peakDb - 2);
   }
+  // HB-300 with a comp instead of its can is an unsuppressed rifle blast, nowhere near the suppressed stack.
+  expect(shots['hb300-comp-outdoor'].peakDb).toBeGreaterThan(-3);
+  expect(shots['hb300-comp-outdoor'].rmsDb - shots['sup-hb300-outdoor'].rmsDb).toBeGreaterThan(8);
   // First-round pop: the cold can is louder than the follow-ups.
   const fr = (m['sup-first-round'] as unknown as { shotPeaksDb: number[] }).shotPeaksDb;
   expect(fr[0]).toBeGreaterThan(Math.max(fr[1], fr[2]) + 2);
@@ -202,6 +213,6 @@ test('audio: live probe + voices on the range', async ({ page }) => {
     await steps(page, 6);
   }
   const d1 = await page.evaluate(() => (window as any).__sb.audio.debug);
-  expect(d1.voices).toBeLessThanOrEqual(32);
+  expect(d1.voices).toBeLessThanOrEqual(48);
   expect(errors).toEqual([]);
 });

@@ -14,8 +14,10 @@ import {
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { WeaponModel } from '../../weapons/models';
+import { magInfo, type MagInfo } from '../../weapons/models/magGeom';
+import { roundsOn } from '../../weapons/models/magRounds';
 import { solveTwoBone } from '../ik';
-import { compose, keyAt } from '../library/compose';
+import { compose, keyAt, smoothKeyAt } from '../library/compose';
 import { weaponAnims, type ArmsAction, type WeaponAnims } from '../library/library';
 import { ANCHORS, type ClipsFile } from './clipData';
 import { armsMaterials } from './materials';
@@ -26,6 +28,7 @@ import {
   makeLayout,
   samplePose,
   type Clip,
+  type ClipPresent,
   type HandKey,
   type Layout,
 } from './pose';
@@ -93,7 +96,13 @@ export class ArmsRig {
   /** Crossfade from the swap-out's held last pose into the next weapon's draw (s). */
   static SWAP_XFADE = 0.2;
   /** Dev toggles (anim.html?noik=1&nomerge=1). */
-  static debug = { noIK: false, noMerge: false };
+  static debug: {
+    noIK: boolean;
+    noMerge: boolean;
+    /** Tuning: override the mag-check presentation pose ({ p, r } in the camera frame). */
+    present?: { p: [number, number, number]; r: [number, number, number] };
+    grip?: { turn: number; shift: [number, number, number] };
+  } = { noIK: false, noMerge: false };
   /** Rig space (eye). Add to the scene / camera; the handling layer moves this. */
   readonly root = new Group();
   /** Canonical bones by name (Mixamo names without prefix): RightHand, LeftForeArm, RightHandIndex1, … */
@@ -149,6 +158,22 @@ export class ArmsRig {
   private pendingSwap?: { model: WeaponModel; id: string; opts: PlayOptions };
   private gunWorld = new Matrix4();
   private gunQ = new Quaternion();
+  private magGeo: MagInfo | null = null;
+  /**
+   * Mag check: where the chest cam sits in rig space (root → camera). The presented mag is placed relative to it.
+   * The controller keeps it current outside the check (it is frozen while the mag is out, so the mag rides the
+   * hands, not a camera that may update a frame late). Default: measured idle rifle cam.
+   */
+  readonly presentOffset = new Matrix4().makeTranslation(0.025, 0, -0.17);
+  /** This frame's mag-check layer: mag transform (model frame), hand weight, active. */
+  private present = {
+    on: false,
+    hand: 0,
+    m: new Matrix4(),
+    travel: 0,
+    turn: new Quaternion(),
+    turnValid: false,
+  };
 
   static async load(url = 'assets/anims/clips.json'): Promise<ArmsRig> {
     const [file, gltf] = await Promise.all([
@@ -308,12 +333,21 @@ export class ArmsRig {
     for (const [k, o] of Object.entries(model.parts))
       if (o) this.partRest.set(k, { p: o.position.clone(), q: o.quaternion.clone() });
     const mag = model.parts.mag;
+    this.magGeo = null;
     if (mag) {
+      this.magGeo = magInfo(model);
       this.spareMag = mag.clone(true);
       this.spareMag.name = 'spareMag';
       this.spareMag.visible = false;
+      // The clone is the old mag falling out of an empty reload: no rounds in it.
+      const r = roundsOn(this.spareMag);
+      if (r) {
+        r.count = 0;
+        r.visible = false;
+      }
       mag.parent!.add(this.spareMag);
     }
+    this.present.on = false;
     this.seat.identity();
     this.seatIdentity = true;
     if (this.seatProvider) {
@@ -441,6 +475,11 @@ export class ArmsRig {
   /** True while an additive shot layer is still kicking. */
   get shooting(): boolean {
     return !!this.shot && !this.shot.done;
+  }
+
+  /** Launch velocity (model frame, m/s) the playing clip gives the dumped mag, if it says. */
+  get dropFling(): readonly [number, number, number] | undefined {
+    return this.layer?.clip.drop;
   }
 
   /** Current action time / duration (0..1). */
@@ -662,6 +701,7 @@ export class ArmsRig {
       this.seatDelta.premultiply(this.gunWorld);
     }
     this.gunQ.copy(qB);
+    this.tiltDelta(this.layer.clip, this.layer.t);
     _m.copy(this.root.matrixWorld).invert().multiply(this.gunWorld);
     _m.decompose(model.root.position, model.root.quaternion, _s);
     model.root.updateMatrixWorld(true);
@@ -670,7 +710,164 @@ export class ArmsRig {
     if (ArmsRig.debug.noIK) return this.driveParts();
     this.handIK('L', L.wL, this.layer.clip.handL);
     if (w < 0.99 || this.layer.clip.handR) this.handIK('R', L.wR, this.layer.clip.handR);
+    this.presentLayer(this.layer.clip.present);
     this.driveParts();
+  }
+
+  // ------------------------------------------------------------------------------------------ mag check layer
+
+  private pv = {
+    pA: new Vector3(),
+    pB: new Vector3(),
+    qA: new Quaternion(),
+    qB: new Quaternion(),
+    m: new Matrix4(),
+    m2: new Matrix4(),
+    grip: new Matrix4(),
+    e: new Euler(),
+    v: new Vector3(),
+    x: new Vector3(1, 0, 0),
+    o1: new Matrix4(),
+    o2: new Matrix4(),
+    oq: new Quaternion(),
+    ov: new Vector3(),
+  };
+
+  /** Mag offset (mag frame → model frame) at path value v ∈ [0, 1]: out of the well along its axis (AK: rock first). */
+  private magOut(pr: ClipPresent, g: MagInfo, v: number, out: Matrix4): Matrix4 {
+    const r = this.pv;
+    const rock = pr.rock;
+    if (rock) {
+      const span = pr.rockSpan;
+      const th = rock * Math.min(1, v / span);
+      // Rotate about the front lug, then slide down the rocked axis.
+      r.oq.setFromAxisAngle(r.x, th);
+      out
+        .makeTranslation(g.lug.x, g.lug.y, g.lug.z)
+        .multiply(r.o1.makeRotationFromQuaternion(r.oq))
+        .multiply(r.o2.makeTranslation(-g.lug.x, -g.lug.y, -g.lug.z));
+      const d = Math.max(0, (v - span) / (1 - span)) * g.travel;
+      r.ov.copy(g.axis).applyQuaternion(r.oq).multiplyScalar(d);
+      return out.premultiply(r.o1.makeTranslation(r.ov.x, r.ov.y, r.ov.z));
+    }
+    r.ov.copy(g.axis).multiplyScalar(v * g.travel);
+    return out.makeTranslation(r.ov.x, r.ov.y, r.ov.z);
+  }
+
+  /**
+   * Mag check (after the hand IK, before the parts): the mag follows its path — out of the well with a clear gap,
+   * then up to the camera — and the support hand rides it (two-bone IK onto the clip's grip on the mag).
+   */
+  private presentLayer(pr?: ClipPresent) {
+    const st = this.present;
+    st.on = false;
+    const g = this.magGeo;
+    const t = this.layer!.t;
+    if (!pr || !g || !this.weapon?.parts.mag || t < pr.t0 || t > pr.t1) {
+      st.turnValid = false;
+      return;
+    }
+    const r = this.pv;
+    const v = Math.max(0, smoothKeyAt(pr.path, t));
+    const hw = Math.min(1, Math.max(0, smoothKeyAt(pr.hand, t)));
+    // World transform of the mag along its path.
+    const out = this.magOut(pr, g, Math.min(1, v), r.m2.identity());
+    const world = new Matrix4().multiplyMatrices(this.gunWorld, out);
+    if (v > 1) {
+      const u = Math.min(1, v - 1);
+      world.decompose(r.pA, r.qA, _s);
+      // Presented: mag centre at pose.p in the camera frame, turned by pose.r.
+      const pose = ArmsRig.debug.present ?? pr.pose;
+      r.m.copy(this.root.matrixWorld).multiply(this.presentOffset);
+      r.m.multiply(_m.makeTranslation(pose.p[0], pose.p[1], pose.p[2]));
+      r.m.multiply(_m.makeRotationFromEuler(r.e.set(pose.r[0], pose.r[1], pose.r[2])));
+      r.m.multiply(_m.makeTranslation(-g.centre.x, -g.centre.y, -g.centre.z));
+      r.m.decompose(r.pB, r.qB, _s);
+      const k = u * u * (3 - 2 * u);
+      r.pA.lerp(r.pB, k);
+      r.qA.slerp(r.qB, k);
+      // Swing out around the gun on the way (camera-frame offset, peaks mid-leg).
+      const arc = Math.sin(Math.PI * u);
+      if (arc > 1e-4) {
+        r.v.set(pr.arc[0], pr.arc[1], pr.arc[2]).multiplyScalar(arc);
+        r.m.copy(this.root.matrixWorld).multiply(this.presentOffset);
+        r.v.transformDirection(r.m).multiplyScalar(Math.hypot(...pr.arc) * arc);
+        r.pA.add(r.v);
+      }
+      world.compose(r.pA, r.qA, ONE);
+    }
+    // Support hand onto the mag (grip = the source clip's mag-in-hand transform).
+    const gp = pr.grip;
+    r.grip.compose(r.v.set(gp[0], gp[1], gp[2]), r.qB.set(gp[3], gp[4], gp[5], gp[6]).normalize(), ONE);
+    const gt = ArmsRig.debug.grip?.turn ?? pr.gripTurn;
+    const sh = ArmsRig.debug.grip?.shift ?? pr.gripShift;
+    if (gt || sh.some((x) => x)) {
+      // grip' = grip · A⁻¹ with A = T(shift) · T(c) · Ry(turn) · T(-c) acting on the hand in the mag frame.
+      const c = g.centre;
+      r.o1
+        .makeTranslation(sh[0] + c.x, sh[1] + c.y, sh[2] + c.z)
+        .multiply(r.o2.makeRotationY(gt))
+        .multiply(_m.makeTranslation(-c.x, -c.y, -c.z));
+      r.grip.multiply(r.o1.invert());
+    }
+    if (hw <= 0.001) st.turnValid = false;
+    if (hw > 0.001) {
+      const hand = this.bones.handL;
+      r.m.copy(world).multiply(_m.copy(r.grip).invert());
+      r.m.decompose(r.pB, r.qB, _s);
+      hand.getWorldPosition(r.pA);
+      hand.getWorldQuaternion(r.qA);
+      r.pA.lerp(r.pB, hw);
+      // Turn (world) taking the animated hand to the grip orientation, weighted. Kept on last frame's hemisphere
+      // and scaled by angle (not shortest-arc slerp), so a turn passing 180° while the clip hand swings doesn't flip.
+      const full = r.qB.multiply(r.qA.invert()).normalize();
+      if (st.turnValid && full.dot(st.turn) < 0) full.set(-full.x, -full.y, -full.z, -full.w);
+      st.turn.copy(full);
+      st.turnValid = true;
+      const ang = 2 * Math.acos(Math.max(-1, Math.min(1, full.w)));
+      const sn = Math.sin(ang / 2);
+      if (sn > 1e-6) r.v.set(full.x / sn, full.y / sn, full.z / sn);
+      else r.v.set(1, 0, 0);
+      const turn = _q.setFromAxisAngle(r.v, ang * hw);
+      this.reachHand('L', r.pA, turn);
+      // The mag sits in the hand where the hand actually got to (IK reach limits).
+      hand.updateMatrixWorld(true);
+      hand.matrixWorld.decompose(r.pA, r.qA, _s);
+      r.m.compose(r.pA, r.qA, ONE).multiply(r.grip);
+      r.m.decompose(r.pB, r.qB, _s);
+      world.decompose(r.pA, r.qA, _s);
+      // Only once the hand has it (mid-reach the hand is still on its way: the mag stays on its path).
+      const k = hw ** 8;
+      r.pA.lerp(r.pB, k);
+      r.qA.slerp(r.qB, k);
+      world.compose(r.pA, r.qA, ONE);
+    }
+    st.m.copy(this.gunWorld).invert().multiply(world);
+    st.hand = hw;
+    st.travel = r.v.setFromMatrixPosition(st.m).length();
+    st.on = true;
+  }
+
+  /** World rotation (about the grip) the clip's authored tilt adds to the gun this frame. */
+  private tilted = { on: false, m: new Matrix4(), q: new Quaternion(), e: new Euler() };
+  private tiltDelta(clip: Clip, t: number) {
+    const k = clip.tilt;
+    const st = this.tilted;
+    st.on = false;
+    if (!k?.length) return;
+    st.e.set(
+      keyAt(k, t, (x) => x.r[0]),
+      keyAt(k, t, (x) => x.r[1]),
+      keyAt(k, t, (x) => x.r[2]),
+    );
+    st.q.setFromEuler(st.e);
+    if (1 - Math.abs(st.q.w) < 1e-7) return;
+    // D = G · Q · G⁻¹: the tilt about the grip, in world space.
+    st.m
+      .copy(this.gunWorld)
+      .multiply(_m2.makeRotationFromQuaternion(st.q))
+      .multiply(_m.copy(this.gunWorld).invert());
+    st.on = true;
   }
 
   private anchorDelta(socket: string, out: Vector3): boolean {
@@ -707,6 +904,19 @@ export class ArmsRig {
       seatTurn = new Quaternion().slerp(_q2, sw);
     }
     target.add(delta.applyQuaternion(this.gunQ));
+    // The authored tilt turns the gun about the grip: a support hand on it (or inserting a mag) turns with it, so the
+    // mag meets the well instead of sliding out of the hand.
+    if (side === 'L' && this.tilted.on) {
+      const m0 = this.layout.mag[0];
+      const near = Math.max(0, 1 - Math.hypot(P[m0.gun], P[m0.gun + 1], P[m0.gun + 2]) / 0.15);
+      const tw = Math.min(1, Math.max(wsum, P[m0.w] * near));
+      if (tw > 0.001) {
+        target.lerp(_v.copy(target).applyMatrix4(this.tilted.m), tw);
+        this.tilted.m.decompose(_v2, _q2, _s);
+        const tq = new Quaternion().slerp(_q2, tw);
+        seatTurn = seatTurn ? tq.multiply(seatTurn) : tq;
+      }
+    }
     // Authored overrides.
     let turn: Quaternion | undefined;
     if (keys?.length) {
@@ -803,6 +1013,13 @@ export class ArmsRig {
       const o = parts[k];
       const r = rest('mag');
       if (!o || !r) return;
+      if (k === 0 && this.present.on) {
+        o.visible = true;
+        this.present.m.decompose(o.position, o.quaternion, _s);
+        o.position.add(r.p);
+        o.quaternion.multiply(r.q);
+        return;
+      }
       const vis = P[m.vis] > 0.5;
       o.visible = k === 0 ? vis : vis;
       if (!vis) return;
@@ -851,6 +1068,8 @@ export class ArmsRig {
 
   /** Mag slot `k` (0 = the model's mag): support-hand weight, visibility and distance from its seat (m). */
   magState(k = 0): { held: number; visible: boolean; travel: number } {
+    if (k === 0 && this.present.on)
+      return { held: this.present.hand, visible: true, travel: this.present.travel };
     const m = this.layout.mag[k];
     const P = this.pose;
     const o = m.gun;

@@ -14,7 +14,12 @@ import { BANK, convolverMix, bankPosition, wetLevel, type Acoustics } from './ac
 import { clamp, dbToGain } from './rng';
 import type { ListeningMode } from './settings';
 
-export const MAX_VOICES = 32;
+/**
+ * One-shot voice budget. A long-gun shot is ~7 voices (action, report ×2, blast core, roll, thump, pressure)
+ * whose tails run 0.2–0.7 s, so an 850 rpm string holds ~32 at once; 48 lets strings overlap without stealing
+ * tails (brass and foley included).
+ */
+export const MAX_VOICES = 48;
 const TAPS = 6;
 
 export interface PlayOpts {
@@ -61,6 +66,23 @@ export function ceilingCurve(n = 4096) {
   for (let i = 0; i < n; i++) {
     const x = ((i / (n - 1)) * 2 - 1) * HEADROOM;
     c[i] = CEILING * Math.tanh(x / CEILING);
+  }
+  return c;
+}
+
+export const SAFE_KNEE = 0.8;
+export const SAFE_MAX = 0.98;
+/**
+ * Output safety curve over the shaper's ±1 input range (inputs beyond ±1 hold the end value): identity up to
+ * SAFE_KNEE, then a tanh knee towards ±SAFE_MAX.
+ */
+export function safetyCurve(n = 8193) {
+  const c = new Float32Array(n);
+  const room = SAFE_MAX - SAFE_KNEE;
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    const a = Math.abs(x);
+    c[i] = Math.sign(x) * (a <= SAFE_KNEE ? a : SAFE_KNEE + room * Math.tanh((a - SAFE_KNEE) / room));
   }
   return c;
 }
@@ -218,7 +240,12 @@ export class Mixer {
 
     // --- Output chain (built from the end backwards) ---------------------------------------------------
     this.master = g(0.8);
-    this.master.connect(c.destination);
+    // Output safety: the soft ceiling's 4× resampling filters can overshoot it by a few dB on dense, bright
+    // clipped blasts (rifle full auto), and the master slider sits after it. Identity below SAFE_KNEE, so normal
+    // material (every pistol shot) passes untouched; overs bend smoothly into ±SAFE_MAX instead of hard clipping.
+    const safety = c.createWaveShaper();
+    safety.curve = safetyCurve();
+    this.master.connect(safety).connect(c.destination);
     this.ui = g(1);
     this.ui.connect(this.master);
     const ceiling = c.createWaveShaper();
