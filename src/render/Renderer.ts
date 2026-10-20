@@ -1,11 +1,14 @@
 import { EffectComposer, EffectPass, RenderPass } from 'postprocessing';
 import {
   HalfFloatType,
+  type Material,
   PCFShadowMap,
   PerspectiveCamera,
   Quaternion,
   Scene,
+  type ShaderMaterial,
   SRGBColorSpace,
+  Texture,
   WebGLRenderer,
 } from 'three';
 import { DynamicResolution } from './DynamicResolution';
@@ -197,7 +200,25 @@ export class Renderer {
     } finally {
       r.setRenderTarget(prev);
     }
-    return p.then(() => undefined).catch(() => undefined);
+    // Upload textures too: pooled FX draw nothing until first use, so their atlases (512² canvases + mips)
+    // were uploaded inside the first shot's frame (~100 ms on the first pistol shot).
+    this.scene.traverse((o) => {
+      const mats = (o as { material?: Material | Material[] }).material;
+      if (!mats) return;
+      for (const m of Array.isArray(mats) ? mats : [mats]) {
+        for (const v of Object.values(m)) if (v instanceof Texture) r.initTexture(v);
+        const u = (m as ShaderMaterial).uniforms;
+        if (u) for (const k in u) if (u[k].value instanceof Texture) r.initTexture(u[k].value);
+      }
+    });
+    return p
+      .then(() => {
+        // Finish linking now. Three checks a program's link status (getProgramInfoLog) on its first draw, and
+        // without KHR_parallel_shader_compile that call blocks until the driver has actually built it: a pooled
+        // FX program drawn first on the first trigger pull cost ~110 ms there.
+        for (const prog of r.info.programs ?? []) (prog as { getUniforms?: () => unknown }).getUniforms?.();
+      })
+      .catch(() => undefined);
   }
 
   /**

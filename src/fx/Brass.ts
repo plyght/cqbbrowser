@@ -126,6 +126,9 @@ export class BrassPool {
     this.mesh.count = 0;
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = false;
+    // Allocate per-instance colour now: the first setColorAt() would otherwise switch the material to its
+    // instance-colour program mid-game (a ~100 ms shader compile on the first shot, after boot prewarm).
+    for (let i = 0; i < capacity; i++) this.mesh.setColorAt(i, this.col.setHex(0xffffff));
     scene.add(this.mesh);
     for (let i = 0; i < capacity; i++)
       this.casings.push({
