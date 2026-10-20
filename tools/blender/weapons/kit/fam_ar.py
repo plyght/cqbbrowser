@@ -67,6 +67,43 @@ def seat_outline(w, top=-0.012):
     return [(r[1], r[0]) for r in rows] + [(r[2], r[0]) for r in reversed(rows)], d["angle"]
 
 
+def seat_rings(gp, ang, w, n_se=2.5, swell=0.0, nub=0.0, half_d=GRIP_HALF_D, steps=18):
+    """Loft rings for a grip on a side outline gp [(z, y)]: sections normal to the grip axis (ang deg rake),
+    depth clamped to 2·half_d around each section's centre, superellipse cross-section w wide (+ swell mid-way),
+    optional finger nub on the front strap."""
+    gz0, gz1, gy0, gy1 = bbox(gp)
+    a = math.radians(ang)
+    d = (math.sin(a), -math.cos(a))
+    nrm = (math.cos(a), math.sin(a))
+    top_y = gy1 + 0.004
+    hits = line_hits(gp, (0.0, gy1 - 0.003), (1.0, 0.0))
+    c0 = ((hits[0] + hits[-1]) / 2 if hits else (gz0 + gz1) / 2, top_y)
+    rings = []
+    L = (top_y - gy0) / math.cos(a) + 0.01
+    last = None
+    for i in range(steps + 1):
+        t = L * i / steps
+        c = (c0[0] + d[0] * t, c0[1] + d[1] * t)
+        hs = line_hits(gp, c, nrm)
+        if len(hs) < 2:
+            if last is None:
+                continue
+            break
+        s0, s1 = hs[0], hs[-1]
+        if i == 0:
+            s0, s1 = s0 - 0.002, s1 + 0.002
+        last = (s0, s1)
+        mid, half = (s0 + s1) / 2, min((s1 - s0) / 2, half_d)
+        f = i / steps
+        if nub:  # finger nub between the middle and ring finger (front strap = -nrm side)
+            bump = nub * math.exp(-(((f - 0.47) / 0.07) ** 2))
+            mid, half = mid - bump / 2, half + bump / 2
+        ww = w / 2 + swell * math.sin(math.pi * f)
+        loop = lib.superellipse(ww, half, n_se, 28)
+        rings.append([(u, c[1] + nrm[1] * (mid + v), c[0] + nrm[0] * (mid + v)) for u, v in loop])
+    return rings
+
+
 def thin(o, poly, w):
     for sx in (-1, 1):
         cut(o, prism("thin", poly, 0.03, x=sx * (w / 2 + 0.015), mat=None, bevel=0))
@@ -191,39 +228,9 @@ def build():
     # authored hand clips hold the grip; centreline and angle kept), thinned to the hand envelope (≤ 43 mm deep,
     # 25-28 mm wide), A2 finger nub on the front strap, superellipse cross-section (the ergo grip is fuller).
     gp, seat_ang = seat_outline("sb16")
-    gz0, gz1, gy0, gy1 = bbox(gp)
     for gid, w, n_se, ang, swell, nub in (("ar_grip_a2", 0.0258, 2.5, seat_ang, 0.0, 0.0028),
                                           ("ar_grip_ergo", 0.0275, 2.2, seat_ang, 0.0012, 0.0)):
-        a = math.radians(ang)
-        d = (math.sin(a), -math.cos(a))
-        nrm = (math.cos(a), math.sin(a))
-        top_y = gy1 + 0.004
-        hits = line_hits(gp, (0.0, gy1 - 0.003), (1.0, 0.0))
-        c0 = ((hits[0] + hits[-1]) / 2 if hits else (gz0 + gz1) / 2, top_y)
-        rings = []
-        L = (top_y - gy0) / math.cos(a) + 0.01
-        steps = 18
-        last = None
-        for i in range(steps + 1):
-            t = L * i / steps
-            c = (c0[0] + d[0] * t, c0[1] + d[1] * t)
-            hs = line_hits(gp, c, nrm)
-            if len(hs) < 2:
-                if last is None:
-                    continue
-                break
-            s0, s1 = hs[0], hs[-1]
-            if i == 0:
-                s0, s1 = s0 - 0.002, s1 + 0.002
-            last = (s0, s1)
-            mid, half = (s0 + s1) / 2, min((s1 - s0) / 2, GRIP_HALF_D)
-            u = i / steps
-            if nub:  # finger nub between the middle and ring finger (front strap = -nrm side)
-                bump = nub * math.exp(-(((u - 0.47) / 0.07) ** 2))
-                mid, half = mid - bump / 2, half + bump / 2
-            ww = w / 2 + swell * math.sin(math.pi * u)
-            loop = lib.superellipse(ww, half, n_se, 28)
-            rings.append([(u, c[1] + nrm[1] * (mid + v), c[0] + nrm[0] * (mid + v)) for u, v in loop])
+        rings = seat_rings(gp, ang, w, n_se, swell, nub)
         g = lib.loft(gid, rings, mat="polyGrip")
         node = join(gid, [g])
         fit = lib.fit_grip(node, 0.028, 0.045, ang, -0.06)

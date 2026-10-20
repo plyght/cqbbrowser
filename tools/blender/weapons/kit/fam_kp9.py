@@ -14,6 +14,12 @@ from .photo import Profile, bbox, span_at_y
 
 FAM = "kp9"
 GRIP_ANGLE = math.radians(17)
+# The traced MP5 is authored muzzle-forward of the procedural KP-9. In game the whole asset moves rearward (base
+# `offset`) so the trigger group sits over the procedural grip seat the hand clips were authored on
+# (profiles/kp9_gripseat.json); the grip itself is lofted on that seat (centreline + angle kept, thinned to the
+# hand envelope). Everything below is authored in the asset frame (game z = asset z + OFFSET_Z).
+OFFSET_Z = 0.070
+OLD_GRIP_RIGHT = (0.0, -0.055, 0.052)  # procedural gripRight socket (game frame)
 
 
 def build():
@@ -42,6 +48,12 @@ def build():
         a = k * math.pi / 2
         cut(drum, cyl_x("ap", 0.0016, -0.02, 0.02, ry + math.cos(a) * 0.0068, rz + math.sin(a) * 0.0068, 10, None, 0))
     drum_base = box("db", 0.022, 0.012, rz + 0.017, rz - 0.017, 0, 0.0745 + 0.004, mat="blued", bevel=0.0015)
+    # the aperture in use: through the drum along the bore on the line of sight (drum centre), countersunk at the
+    # eye side; ghost-ring sized (the ADS eye sits close to the drum) so the front post reads through it; the base under it is relieved too
+    for o in (drum, drum_base):
+        cut(o, cyl("ap0", 0.0052, rz + 0.03, rz - 0.03, ry, 0, 28, None, 0))
+        cut(o, lathe("cs", [(0, rz + 0.03), (0.0092, rz + 0.03), (0.0092, rz + 0.0112), (0.0052, rz + 0.005),
+                            (0, rz + 0.005)], 28, ry, 0, None, 0))
     ears = [box("e", 0.003, 0.018, rz + 0.012, rz - 0.012, x, ry - 0.004, mat="blued", bevel=0.0008) for x in (-0.0125, 0.0125)]
     fz, fy = mk("frontSight")
     hood = lathe("hood", [(0.0085, fz + 0.006), (0.0108, fz + 0.006), (0.0108, fz - 0.006), (0.0085, fz - 0.006)], 28,
@@ -55,17 +67,27 @@ def build():
     lo = prism("lower", P.outer("lower"), 0.03, mat="poly", bevel=0.0012)
     for h in P.holes("lower", min_area=1.5e-4):
         cut(lo, prism("h", h, 0.06, mat=None, bevel=0))
+    # the traced grip goes: everything below the housing behind the trigger guard (asset frame)
+    GZ = -0.034  # guard rear / new grip front strap at the housing
+    cut(lo, box("gc", 0.1, 0.2, 0.3, GZ, 0, -0.054 - 0.1, mat=None, bevel=0))
     sround(lo, 0.0055, 4, lambda m: m[1] < -0.03 and m[2] > -0.045)
     sround(lo, 0.002, 2, lambda m: m[1] >= -0.03 or m[2] <= -0.045)
     done(lo)
+    from .fam_ar import seat_outline, seat_rings
+
+    gp, seat_ang = seat_outline("kp9", top=-0.03)
+    gp = [(z - OFFSET_Z, y) for z, y in gp]
+    grip = lib.loft("grip", seat_rings(gp, seat_ang, 0.027, 2.3, 0.0008, 0.0), mat="poly")
+    done(grip)
     pins = [cyl_x("pp", 0.003, -0.0165, 0.0165, mk(k)[1], mk(k)[0], 14, "steel", 0.0003) for k in ("pushPinRear", "pushPinFront")]
-    lower = join("kp9_lower", [lo, *pins])
-    print("[kp9] lower half-width at the finger rest %.1f mm → 12.5" % (lib.thin_x(lower, 0.035, 0.068, 0.0, 0.011, 0.0125) * 1000))
-    in_grip = lambda p: p[1] < -0.055 and p[2] > -0.07  # noqa: E731
-    feather = lambda p: max(0.0, min(1.0, (-0.04 - p[1]) / 0.015)) if p[2] > -0.07 else 0.0  # noqa: E731
-    fit = lib.fit_grip(lower, 0.027, 0.043, 17, -0.08, in_grip, feather)
-    print("[kp9] grip w×d %.1f×%.1f → %.1f×%.1f mm" % tuple(x * 1000 for x in fit))
-    prox = lib.obb_proxies(lower, 3, in_grip, 17) + kit.auto_proxies_where(lower, lambda p: not in_grip(p), 2)
+    lower = join("kp9_lower", [lo, grip, *pins])
+    # trigger-finger rest (game z +35…+68 mm) ≤ 12.5 mm half-width
+    hw = lib.thin_x(lower, 0.035 - OFFSET_Z, 0.068 - OFFSET_Z, 0.0, 0.011, 0.0125)
+    print("[kp9] lower half-width at the finger rest %.1f mm → 12.5" % (hw * 1000))
+    in_grip = lambda p: p[1] < -0.054 and p[2] > GZ  # noqa: E731
+    fit = lib.fit_grip(lower, 0.028, 0.045, seat_ang, -0.075, in_grip)
+    print("[kp9] grip w×d %.1f×%.1f → %.1f×%.1f mm (seat %.1f°)" % (tuple(x * 1000 for x in fit) + (seat_ang,)))
+    prox = lib.obb_proxies(lower, 3, in_grip, seat_ang) + kit.auto_proxies_where(lower, lambda p: not in_grip(p), 2)
     kit.node(lower, FAM, proxies=prox)
 
     hgp = P.outer("handguard")
@@ -126,19 +148,18 @@ def build():
     receiver_slot = slot
     lib.delete(receiver_slot)
 
-    gx = math.sin(GRIP_ANGLE), -math.cos(GRIP_ANGLE)
-    grip_pt = (0, gx[1] * 0.035 - 0.004, gx[0] * 0.035 - 0.02)
     kit.base("kp9", [kit.entry("kp9_receiver"), kit.entry("kp9_lower"), kit.entry("kp9_trigger", part="trigger"),
                      kit.entry("kp9_safety", part="safety"), kit.entry("kp9_magrelease", part="magRelease"),
                      kit.entry("kp9_ch", part="chargingHandle")],
              sockets={
                  "muzzle": (0, B, fz0),
                  "magwell": (0, lip - 0.04, (mz0 + mz1) / 2 + 0.01),
-                 "gripRight": grip_pt,
+                 "gripRight": (OLD_GRIP_RIGHT[0], OLD_GRIP_RIGHT[1], OLD_GRIP_RIGHT[2] - OFFSET_Z),
                  "gripLeft": (-0.008, B - 0.022, (hz0 + hz1) / 2),
                  "ejectionPort": (0.016, 0.03, -0.085),
              },
-             anchors={"muzzle": (0, 0, fz0 + 0.002), "hgRear": (0, 0, hz1), "hgFront": (0, 0, hz0)})
+             anchors={"muzzle": (0, 0, fz0 + 0.002), "hgRear": (0, 0, hz1), "hgFront": (0, 0, hz0)},
+             offset=(0.0, 0.0, OFFSET_Z), frameShift=["ironRear"])
     from .devices import device
 
     device(FAM, "kp_fh", 0.045, 0.0115, "prong", "blued")
