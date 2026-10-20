@@ -20,6 +20,12 @@ DY = 0.03 - 0.0435  # Krinkov bore (muzzle centre) → BORE_Y
 AK = "assets/models/ak74u/"
 
 
+# Grip centreline onto the procedural grip seat the hand clips were authored on (same 21 deg rake; the Krinkov grip
+# is 42 mm deep against the procedural 52, so centres are matched): the whole asset moves 7.2 mm forward. The
+# procedural layout frame stays (frameShift=[]) except the rear sight, taken from the asset (frameFromAsset).
+OFFSET_Z = -0.0072
+OLD_GRIP_RIGHT = (0.0, -0.051, 0.06)  # procedural gripRight (game frame)
+
 def build():
     lib.set_collection(FAM)
     objs = src.import_src("ak", DY)
@@ -96,12 +102,13 @@ def build():
                  "muzzle": muzzle,
                  "magwell": (0, recv_bottom - 0.04, (mmn[2] + mmx[2]) / 2 + 0.012),
                  "ejectionPort": (0.016, 0.055 + DY, -0.07),
-                 "gripRight": (0, gmn[1] + 0.045, (gmn[2] + gmx[2]) / 2 - 0.004),
+                 "gripRight": (OLD_GRIP_RIGHT[0], OLD_GRIP_RIGHT[1], OLD_GRIP_RIGHT[2] - OFFSET_Z),
                  "gripLeft": (-0.008, lib.B - 0.022, (hmn[2] + hmx[2]) / 2),
              },
              anchors={"muzzle": (0, 0, -0.262), "hgRear": (0, 0, hmx[2]), "hgFront": (0, 0, hmn[2])},
              fold=dict(pivot=kit.r5(hinge), angle=3.0944, shift=[-0.019, 0, 0]),
-             frame=dict(ironRear=dict(z=-0.047, y=0.0870 + DY)))
+             frame=dict(ironRear=dict(z=-0.047, y=0.0870 + DY)),
+             offset=(0.0, 0.0, OFFSET_Z), frameShift=[], frameFromAsset=["ironRear"])
     kit.part("ak_b85")
     kit.part("ak_booster", kit.entry("k47_booster"))
     kit.part("ak_hg_wood", kit.entry("k47_handguard"))

@@ -121,10 +121,9 @@ let ready = false;
 
 /**
  * Weapons that use the kit when it is loaded (the others keep their procedural meshes). Families are switched on
- * as they pass review: P-17, the new P-92, the SB-16, the KP-9 and the HB-300 by default; `?kit=all` turns everything on, `?kit=0` off, or a list
- * (`?kit=p17,k47s`).
+ * as they pass review (now all of them); `?kit=all` turns everything on, `?kit=0` off, or a list (`?kit=p17,k47s`).
  */
-const DEFAULT_KIT_WEAPONS = ['p17', 'p92', 'sb16', 'kp9', 'hb300'];
+const DEFAULT_KIT_WEAPONS = ['p17', 'p92', 'sb16', 'kp9', 'hb300', 'k47s'];
 let kitWeapons: Set<string> | 'all' = new Set(DEFAULT_KIT_WEAPONS);
 {
   const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('kit') : null;
