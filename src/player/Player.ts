@@ -57,17 +57,41 @@ export const cameraSettings = settings.ns('camera', {
   autoFixCam: true,
   /** 0..1.5 "Movement sway": gait bob, weight shift, bumps and the gun's swing (1 = tuned). */
   movementSway: 1,
+  /** Faint centre dot while aiming down sights on the helmet cam (the camera looks past the optic, not through it). */
+  helmetAimDot: true,
 });
 
 /** Chest cam: on the plate carrier, left of centre, just in front of the plate bag (torso-local). */
 export const CHEST_MOUNT = new Vector3(-0.04, 0, -0.16);
 /** Helmet side-rail mount, relative to the head pivot, in the look frame. */
 const HELMET_MOUNT = new Vector3(0.075, 0.09, -0.06);
+const X_AXIS = new Vector3(1, 0, 0);
+/** Head pivot relative to the chest mount, torso frame (m): the spine point the helmet rides over, 0.24 up. */
+const HEAD_FROM_CHEST = new Vector3(0.04, 0.24, 0.14);
+
 /**
- * Helmet cams are angled down on their rail (rad): level with the eyes the rifle at high ready sat below the image
- * circle and only its front sight showed.
+ * Helmet cam tuning. The helmet cam never looks through the optic: it stays on the helmet and the GUN rises to the
+ * eye line (a real action cam sees the optic and the back of the gun from above and beside the eye).
  */
-const HELMET_TILT = 0.16;
+export const HELMET = {
+  /**
+   * Helmet cams are angled down on their rail (rad): level with the eyes the rifle at high ready sat below the image
+   * circle and only its front sight showed.
+   */
+  tilt: 0.12,
+  /** Ready hold raised and pushed out in the frame (torso frame, m, added to the hold): muzzle and optic ~15-30% up. */
+  hold: new Vector3(0, 0.06, -0.1),
+  /**
+   * At full ADS, the sight's eye point relative to the camera (lens frame, m): a few cm below and beside the lens
+   * and level with it front to back, so the optic and the back of the gun sit in the lower part of the picture.
+   * The sight axis meets the lens axis at the aim point, so the lens's own centre is where the bore converges.
+   */
+  eye: new Vector3(-0.02, -0.06, -0.16),
+  /** Head tuck toward the sight at full ADS (m, sideways). */
+  tuck: 0.03,
+  /** The helmet lens narrows by at most this much at ADS (deg of vertical FOV): never a scope-like zoom. */
+  fovNarrow: 4,
+};
 
 /**
  * Body-first player. Input rotates the body (yaw) and torso (pitch) immediately; the chest camera rides the
@@ -258,6 +282,22 @@ export class Player implements System {
   /** The hand straightens the mount (called on the `camFix` beat). */
   fixMount() {
     this.knockFix = 1;
+  }
+
+  /** Helmet tuning (tests and tooling adjust it live). */
+  readonly helmet = HELMET;
+  /**
+   * Helmet cam: where the sight's eye point goes at full ADS (torso frame, m): up at the eye line, below, beside and
+   * behind the lens. The weapon controller shifts the ADS hold to put the sight's eye point there.
+   */
+  helmetEyeTarget(out: Vector3): Vector3 {
+    // The eye offset is in the lens frame, which is the torso frame nodded down by the rail tilt.
+    out.copy(HELMET.eye).applyAxisAngle(X_AXIS, -HELMET.tilt);
+    return out.set(
+      CHEST_MOUNT.x + HEAD_FROM_CHEST.x + HELMET_MOUNT.x - HELMET.tuck + out.x,
+      CHEST_MOUNT.y + HEAD_FROM_CHEST.y + HELMET_MOUNT.y + out.y,
+      CHEST_MOUNT.z + HEAD_FROM_CHEST.z + HELMET_MOUNT.z + out.z,
+    );
   }
 
   /** Look is applied per render frame for zero-latency aim. */
@@ -697,7 +737,9 @@ export class Player implements System {
 
     if (helmet) {
       // Helmet: side-rail mount at the head, follows the look; bigger bob.
-      this.tmpV.copy(HELMET_MOUNT).applyQuaternion(this.torso.quaternion);
+      this.tmpV.copy(HELMET_MOUNT);
+      this.tmpV.x -= HELMET.tuck * this.adsBlend;
+      this.tmpV.applyQuaternion(this.torso.quaternion);
       this.tmpV2
         .set(g.x * 0.6, 0.24 + g.y * 0.5 * hPos, -0.02)
         .applyMatrix4(this.spine.matrixWorld)
@@ -721,7 +763,7 @@ export class Player implements System {
         this.carrier.value * 0.04 +
         this.knockPitchS +
         g.pitch * hAtt -
-        (helmet ? HELMET_TILT : 0),
+        (helmet ? HELMET.tilt : 0),
       this.yaw + this.camYawLag.value + g.yaw * hAtt,
       roll,
     );

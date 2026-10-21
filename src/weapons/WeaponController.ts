@@ -2,7 +2,7 @@ import { Euler, Group, Matrix4, type Mesh, Object3D, Quaternion, Vector3 } from 
 import type { Context, System } from '../core/Context';
 import { Spring, clamp, damp, noise1, rng } from '../core/math';
 import { ReloadGesture } from '../input/ReloadGesture';
-import { cameraSettings, CHEST_MOUNT, type Player } from '../player/Player';
+import { cameraSettings, CHEST_MOUNT, HELMET, type Player } from '../player/Player';
 import { ScopeOverlay } from '../player/ScopeOverlay';
 import { ADS_BUMP } from '../player/gait';
 import { settings } from '../settings/Settings';
@@ -898,6 +898,30 @@ export class WeaponController implements System {
     this.holdR.lerp(_v3.fromArray(o.r), k);
   }
 
+  /**
+   * Helmet cam: how far the ADS hold moves (torso frame) so the sight's eye point, which the chest cam's ADS hold
+   * puts at the chest mount, lands at the helmet's eye target instead. Analytic from the ADS hold and the gun's
+   * sight node (no feedback from the simulated pose, so recoil never pushes the gun around through it).
+   */
+  private helmetAdsShift(out: Vector3): Vector3 {
+    const e = this.equipped;
+    const sl = this.sightLine;
+    const A = e.cfg.holds.ads;
+    if (!sl) return out.set(0, 0, 0);
+    const i = Math.min(this.aimIndex, e.sightLocal.length - 1);
+    let eye = this.eyeDistance(sl);
+    if (sl.mode.trueOneX) eye -= (1 - ease('io', this.zoomK)) * (sl.mode.oneXForward ?? 0);
+    // Eye point in the gun frame, turned by the ADS hold's rotation and the lens tilt (the bore follows the lens).
+    _e.set(A.r[0] - HELMET.tilt, A.r[1], A.r[2]);
+    out.copy(e.sightLocal[i]);
+    out.z += eye;
+    out.applyQuaternion(_qA.setFromEuler(_e));
+    out.x += A.p[0];
+    out.y += A.p[1];
+    out.z += A.p[2] + e.grip.holdDz;
+    return out.multiplyScalar(-1).add(this.player.helmetEyeTarget(_posA));
+  }
+
   private composeHold(dt: number) {
     const e = this.equipped;
     const H = e.cfg.holds;
@@ -908,6 +932,14 @@ export class WeaponController implements System {
     this.mixHold(this.wLow, H.low);
     this.mixHold(this.wSprint, H.sprint);
     this.mixHold(this.adsBlend, H.ads);
+    // Helmet cam: the gun frames higher, and at ADS comes up to the eye line (the lens stays on the helmet).
+    if (p.mount === 'helmet') {
+      const k = this.adsBlend;
+      this.helmetAdsShift(_v3);
+      h.x += HELMET.hold.x + (_v3.x - HELMET.hold.x) * k;
+      h.y += HELMET.hold.y + (_v3.y - HELMET.hold.y) * k;
+      h.z += HELMET.hold.z + (_v3.z - HELMET.hold.z) * k;
+    }
     // Stock indexed to the shoulder pocket: longer length of pull → the gun sits further out.
     h.z += e.grip.holdDz;
     // Crouched: slightly lower and tighter; drifting hold (never exactly the same place).
@@ -1108,7 +1140,11 @@ export class WeaponController implements System {
       this.eyeWorld.copy(this.equipped.sightLocal[i]);
       this.eyeWorld.z += eye;
       this.eyeWorld.applyMatrix4(this.gunMatrix);
-      if (k > 1e-4) {
+      if (k > 1e-4 && this.player.mount === 'helmet') {
+        // Helmet cam: no sight picture. The lens stays put (the player tucks the head a few cm), keeps the wide
+        // image (a few degrees at most) and sees the optic from above and behind; no scope, nothing clipped.
+        fov = this.baseFov - HELMET.fovNarrow * k;
+      } else if (k > 1e-4) {
         cam.position.lerp(this.eyeWorld, k);
         // The camera rides the weapon's sight line (recoil moves sight + view together), but takes its roll from
         // the handling pose (lean, offset-dot cant) rather than the clip: an animated idle cant (the P-17 idle
@@ -1145,15 +1181,22 @@ export class WeaponController implements System {
     // Hide a both-eyes-open optic at ADS (the eye looks past it); a tube optic is clipped by the near plane.
     const optic = this.equipped.model.parts.optic;
     if (optic) optic.visible = !(open1x && k > 0.6);
+    const helmet = this.player.mount === 'helmet';
     const lpvo = sl?.mode.optic === 'lpvo';
     const zk = ease('io', this.zoomK);
     // Exit pupil: a true-1x LPVO opens past the screen edges at 1x (red-dot view), closes to the ocular at
     // the top end. Off-axis eye (ADS in / out) pulls the scope shadow across; a generous eye box less so.
     const pupil = lpvo && sl.mode.trueOneX ? 2.4 + (0.82 - 2.4) * zk : 0.8;
-    this.scope.update(cam, tube || open1x ? k : 0, pupil, lpvo ? (sl.mode.reticle ?? 'duplex') : null, {
-      eyeBox: sl?.mode.eyeBox ?? 0.006,
-      offset: this.eyeOffset(cam),
-    });
+    this.scope.update(
+      cam,
+      !helmet && (tube || open1x) ? k : 0,
+      pupil,
+      lpvo ? (sl.mode.reticle ?? 'duplex') : null,
+      {
+        eyeBox: sl?.mode.eyeBox ?? 0.006,
+        offset: this.eyeOffset(cam),
+      },
+    );
   }
 
   /**
