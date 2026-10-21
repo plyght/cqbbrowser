@@ -203,6 +203,22 @@ body {
 .dot.show {
   opacity: 0.75;
 }
+/* Helmet cam aim dot (ADS only): the camera looks past the optic, so mark where the bore converges. */
+.aimdot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px;
+  border-radius: 50%;
+  background: #ff3b30;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 0 4px rgba(255, 40, 30, 0.8);
+  opacity: 0;
+  pointer-events: none;
+}
 /* Hit marker: four short ticks around centre, ~140 ms. */
 .hitmark {
   position: absolute;

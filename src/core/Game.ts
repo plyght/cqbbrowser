@@ -338,7 +338,8 @@ export class Game {
       this.reportedPresentationError = true;
     }
     this.hud.update(this.weapons);
-    this.renderer.setAds(this.weapons.adsBlend);
+    // The helmet lens stays wide in ADS (the gun comes up, the lens doesn't zoom): the distortion eases only a little.
+    this.renderer.setAds(this.weapons.adsBlend * (this.player.mount === 'helmet' ? 0.3 : 1));
     // Input turn rate drives CAM04 bitrate starvation alongside the measured camera rotation.
     this.renderer.setMotion(Math.hypot(f.look.yaw, f.look.pitch) / Math.max(dt, 1e-3));
     // Skipped frames still advance the camera's temporal state (AE, codec, boot) on the next draw.

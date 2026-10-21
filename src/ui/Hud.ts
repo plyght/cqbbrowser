@@ -3,6 +3,7 @@ import { Box3, Object3D, Vector3, type PerspectiveCamera } from 'three';
 import type { DeviceKind } from '../input/actions';
 import { glyphFor, type KeyAction, type PadType } from '../input/bindings';
 import { settings } from '../settings/Settings';
+import { cameraSettings } from '../player/Player';
 import type { WeaponController } from '../weapons/WeaponController';
 import { pips, postureKey, postureLabel, weaponLabel, type Posture } from './hudText';
 import { lensFrom, unbarrel, type LensUniforms } from './lens';
@@ -46,6 +47,8 @@ export class Hud {
   private magPlus = document.createElement('span');
   private magPips = document.createElement('span');
   private dot = document.createElement('div');
+  /** Helmet cam ADS: faint dot where the camera's centre ray (the aim point) is. */
+  private aimDot = document.createElement('div');
   private toastW = document.createElement('div');
   private toastP = document.createElement('div');
   /** Gear toast (NVG / IR / flashbang count), stacked above the weapon toast. */
@@ -90,6 +93,7 @@ export class Hud {
     line.append(this.magCount, this.magPlus);
     this.mag.append(line, this.magPips);
     this.dot.className = 'dot';
+    this.aimDot.className = 'aimdot';
     this.toastW.className = 'toast toast-r';
     this.toastP.className = 'toast toast-l';
     this.toastG.className = 'toast toast-r';
@@ -102,6 +106,7 @@ export class Hud {
       this.camR,
       this.mag,
       this.dot,
+      this.aimDot,
       this.hit,
       this.toastW,
       this.toastP,
@@ -280,6 +285,9 @@ export class Hud {
       }
     }
     this.dot.classList.toggle('show', this.mode === 'arcade');
+    const cs = cameraSettings.get();
+    const dotOn = !hard && cs.mount === 'helmet' && cs.helmetAimDot;
+    this.aimDot.style.opacity = dotOn ? (0.8 * Math.max(0, (w.adsBlend - 0.5) * 2)).toFixed(3) : '0';
 
     // Contextual corner toasts.
     const wl = weaponLabel(e.def.name, e.mode);

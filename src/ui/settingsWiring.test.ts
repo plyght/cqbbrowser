@@ -9,7 +9,13 @@ import { settingsFor, TABS } from './settingsSchema';
  */
 test('camera settings rows drive the player camera settings', () => {
   const all = TABS.flatMap((t) => settingsFor(t.id));
-  for (const label of ['Camera mount', 'Camera shake', 'Stable horizon', 'Auto-fix camera']) {
+  for (const label of [
+    'Camera mount',
+    'Camera shake',
+    'Stable horizon',
+    'Auto-fix camera',
+    'Helmet cam aim dot',
+  ]) {
     const def = all.find((d) => d.label === label);
     expect(def?.ns).toBe('camera');
     const defaults = cameraSettings.defaults as Record<string, unknown>;
